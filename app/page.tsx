@@ -29,38 +29,68 @@ export default function Dashboard() {
         })
         .reduce((acc, t) => acc + t.amount, 0);
 
-    // Weekly Sales Chart Data
-    const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const chartData = weekDays.map((day, index) => ({
-        name: day,
-        sales: Math.floor(Math.random() * 50000) + 20000 // Mock data for demo
-    }));
+    // Weekly Sales Chart Data - Real data from last 7 days
+    const getWeeklySalesData = () => {
+        const today = new Date();
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const result = [];
 
-    // Agent Collection Analysis Data - Calculate from transactions
+        for (let i = 6; i >= 0; i--) {
+            const date = new Date(today);
+            date.setDate(today.getDate() - i);
+            const dayStart = new Date(date.setHours(0, 0, 0, 0));
+            const dayEnd = new Date(date.setHours(23, 59, 59, 999));
+
+            const daySales = transactions
+                .filter(t => {
+                    const txnDate = new Date(t.date);
+                    return t.type === 'INVOICE' && txnDate >= dayStart && txnDate <= dayEnd;
+                })
+                .reduce((acc, t) => acc + t.amount, 0);
+
+            result.push({
+                name: dayNames[new Date(dayStart).getDay()],
+                sales: daySales,
+                date: dayStart.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+            });
+        }
+        return result;
+    };
+
+    const chartData = getWeeklySalesData();
+    const weeklySalesTotal = chartData.reduce((acc, d) => acc + d.sales, 0);
+
+    // Agent Collection Analysis Data - Real data from database
     const agentCollectionData = agents.map(agent => {
         const collected = transactions
-            .filter(t => t.type === 'PAYMENT' && t.agentName === agent.name)
+            .filter(t => {
+                const txnDate = new Date(t.date);
+                return t.type === 'PAYMENT' &&
+                    t.agentName === agent.name &&
+                    txnDate.getMonth() === currentMonth &&
+                    txnDate.getFullYear() === currentYear;
+            })
             .reduce((acc, t) => acc + t.amount, 0);
 
-        // Mock target based on agent (in real app, this would come from database)
-        const targetMultiplier = { 'Vikram S.': 1.5, 'Rajesh K.': 1.2, 'Amit P.': 1.3, 'Suresh R.': 1.0 };
-        const target = Math.max(collected * 1.2, 100000); // At least 100k target
+        // Use actual target from agent data
+        const target = agent.collectionTarget || 100000;
 
         return {
             name: agent.name,
-            collected: collected || Math.floor(Math.random() * 150000) + 50000, // Mock if no data
-            target: target || 150000
+            collected: collected,
+            target: target,
+            percentage: target > 0 ? Math.round((collected / target) * 100) : 0
         };
     });
 
     // Collection Performance for Pie Chart
     const totalCollected = agentCollectionData.reduce((acc, a) => acc + a.collected, 0);
     const totalTarget = agentCollectionData.reduce((acc, a) => acc + a.target, 0);
-    const collectionPercentage = Math.round((totalCollected / totalTarget) * 100);
+    const collectionPercentage = totalTarget > 0 ? Math.min(Math.round((totalCollected / totalTarget) * 100), 100) : 0;
 
     const pieData = [
         { name: 'Collected', value: totalCollected },
-        { name: 'Pending', value: totalTarget - totalCollected },
+        { name: 'Pending', value: Math.max(totalTarget - totalCollected, 0) },
     ];
     const COLORS = ['#10b981', '#e2e8f0'];
 
@@ -104,10 +134,10 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <StatCard
                     title="Weekly Sales"
-                    value={`₹${chartData.reduce((a, b) => a + b.sales, 0).toLocaleString()}`}
+                    value={`₹${weeklySalesTotal.toLocaleString()}`}
                     icon={TrendingUp}
                     color="bg-emerald-500"
-                    subtitle="This week's total"
+                    subtitle="Last 7 days"
                 />
                 <StatCard
                     title="Total Outstanding"
@@ -190,31 +220,35 @@ export default function Dashboard() {
 
                         {/* Agent List */}
                         <div className="flex-1 space-y-3">
-                            {agentCollectionData.map((agent, idx) => {
-                                const percent = Math.round((agent.collected / agent.target) * 100);
-                                const isOverTarget = percent >= 100;
-                                return (
-                                    <div key={idx} className="flex items-center gap-3">
-                                        <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-xs font-bold text-slate-600">
-                                            {agent.name.split(' ').map(n => n[0]).join('')}
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="flex justify-between text-xs mb-1">
-                                                <span className="font-medium text-slate-700">{agent.name}</span>
-                                                <span className={isOverTarget ? 'text-emerald-600 font-bold' : 'text-slate-500'}>
-                                                    {percent}%
-                                                </span>
+                            {agentCollectionData.length === 0 ? (
+                                <p className="text-sm text-slate-400 text-center py-4">No agents yet. Add agents to track collections.</p>
+                            ) : (
+                                agentCollectionData.map((agent, idx) => {
+                                    const isOverTarget = agent.percentage >= 100;
+                                    const displayPercent = Math.min(agent.percentage, 100);
+                                    return (
+                                        <div key={idx} className="flex items-center gap-3" title={`₹${agent.collected.toLocaleString()} / ₹${agent.target.toLocaleString()}`}>
+                                            <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-xs font-bold text-slate-600">
+                                                {agent.name.split(' ').map(n => n[0]).join('')}
                                             </div>
-                                            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                                <div
-                                                    className={`h-full rounded-full transition-all ${isOverTarget ? 'bg-emerald-500' : 'bg-blue-500'}`}
-                                                    style={{ width: `${Math.min(percent, 100)}%` }}
-                                                />
+                                            <div className="flex-1">
+                                                <div className="flex justify-between text-xs mb-1">
+                                                    <span className="font-medium text-slate-700">{agent.name}</span>
+                                                    <span className={isOverTarget ? 'text-emerald-600 font-bold' : 'text-slate-500'}>
+                                                        {agent.percentage}%
+                                                    </span>
+                                                </div>
+                                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all ${isOverTarget ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                                                        style={{ width: `${displayPercent}%` }}
+                                                    />
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })
+                            )}
                         </div>
                     </div>
                 </div>

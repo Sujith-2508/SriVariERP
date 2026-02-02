@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { LayoutDashboard, ShoppingCart, Users, FileText, Wallet, LogOut, Settings } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Users, FileText, Wallet, LogOut, Settings, UserCheck } from 'lucide-react';
 import { ViewState } from '@/types';
 
 interface SidebarProps {
@@ -16,6 +16,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
     { id: 'INVENTORY', label: 'Stock & Products', icon: ShoppingCart, href: '/inventory' },
     { id: 'DEALERS', label: 'Ledger & Dealers', icon: Users, href: '/customers' },
     { id: 'COLLECTIONS', label: 'Collections', icon: Wallet, href: '/collections' },
+    { id: 'AGENTS', label: 'Agents', icon: UserCheck, href: '/agents' },
     { id: 'SETTINGS', label: 'Settings', icon: Settings, href: '/settings' },
   ];
 

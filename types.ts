@@ -90,7 +90,9 @@ export interface Agent {
   name: string;
   phone: string;
   area?: string;
+  division?: string;           // Collection division/zone
+  collectionTarget?: number;   // Monthly collection target amount
   isActive: boolean;
 }
 
-export type ViewState = 'DASHBOARD' | 'BILLING' | 'INVENTORY' | 'DEALERS' | 'COLLECTIONS' | 'REPORTS' | 'SETTINGS';
+export type ViewState = 'DASHBOARD' | 'BILLING' | 'INVENTORY' | 'DEALERS' | 'COLLECTIONS' | 'AGENTS' | 'REPORTS' | 'SETTINGS';

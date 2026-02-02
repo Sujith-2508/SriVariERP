@@ -1,0 +1,198 @@
+{
+    "products": [
+        {
+            "id": "p1",
+            "product_id": "PDI-001",
+            "name": "Non-Stick Tawa 28cm",
+            "category": "Cookware",
+            "price": 850,
+            "stock": 150,
+            "gst_rate": 0.18
+        },
+        {
+            "id": "p2",
+            "product_id": "PDI-002",
+            "name": "Deep Kadai 3L",
+            "category": "Cookware",
+            "price": 1200,
+            "stock": 80,
+            "gst_rate": 0.18
+        },
+        {
+            "id": "p3",
+            "product_id": "PDI-003",
+            "name": "Fry Pan 24cm",
+            "category": "Cookware",
+            "price": 950,
+            "stock": 200,
+            "gst_rate": 0.18
+        },
+        {
+            "id": "p4",
+            "product_id": "PDI-004",
+            "name": "Pressure Cooker 5L",
+            "category": "Appliances",
+            "price": 2400,
+            "stock": 45,
+            "gst_rate": 0.12
+        },
+        {
+            "id": "p5",
+            "product_id": "PDI-005",
+            "name": "Glass Lid Universal",
+            "category": "Accessories",
+            "price": 350,
+            "stock": 500,
+            "gst_rate": 0.12
+        }
+    ],
+    "dealers": [
+        {
+            "id": "c1",
+            "business_name": "Royal Kitchen World",
+            "contact_person": "Rajesh Gupta",
+            "phone": "9876543210",
+            "district": "North District",
+            "city": "Chennai",
+            "pin_code": "600001",
+            "address": "123, Anna Nagar Main Road",
+            "gst_number": "33AABCU9603R1ZM",
+            "balance": 45000
+        },
+        {
+            "id": "c2",
+            "business_name": "City Home Needs",
+            "contact_person": "Amit Kumar",
+            "phone": "9876543211",
+            "district": "Central Market",
+            "city": "Coimbatore",
+            "pin_code": "641001",
+            "address": "45, RS Puram",
+            "gst_number": null,
+            "balance": 12500
+        },
+        {
+            "id": "c3",
+            "business_name": "Lakshmi Traders",
+            "contact_person": "Suresh Reddy",
+            "phone": "9876543212",
+            "district": "South Extension",
+            "city": "Madurai",
+            "pin_code": "625001",
+            "address": null,
+            "gst_number": null,
+            "balance": 0
+        },
+        {
+            "id": "c4",
+            "business_name": "Modern Appliances",
+            "contact_person": "Vikram Singh",
+            "phone": "9876543213",
+            "district": "West Hub",
+            "city": "Trichy",
+            "pin_code": "620001",
+            "address": "78, Cantonment Area",
+            "gst_number": "33AABCU9603R2ZN",
+            "balance": 82000
+        }
+    ],
+    "transactions": [
+        {
+            "id": "txn1",
+            "customer_id": "c1",
+            "type": "INVOICE",
+            "amount": 25000,
+            "date": "2025-06-15T00:00:00Z",
+            "reference_id": "INV001",
+            "credit_days": 90
+        },
+        {
+            "id": "txn2",
+            "customer_id": "c1",
+            "type": "INVOICE",
+            "amount": 15000,
+            "date": "2025-07-10T00:00:00Z",
+            "reference_id": "INV002",
+            "credit_days": 60
+        },
+        {
+            "id": "txn3",
+            "customer_id": "c1",
+            "type": "INVOICE",
+            "amount": 10000,
+            "date": "2025-08-01T00:00:00Z",
+            "reference_id": "INV003",
+            "credit_days": 30
+        },
+        {
+            "id": "txn4",
+            "customer_id": "c1",
+            "type": "PAYMENT",
+            "amount": 5000,
+            "date": "2025-06-20T00:00:00Z",
+            "reference_id": "R001",
+            "notes": "Part payment via Cash",
+            "agent_name": "Vikram S."
+        },
+        {
+            "id": "txn5",
+            "customer_id": "c4",
+            "type": "INVOICE",
+            "amount": 50000,
+            "date": "2024-10-01T00:00:00Z",
+            "reference_id": "INV004",
+            "credit_days": 45
+        },
+        {
+            "id": "txn6",
+            "customer_id": "c4",
+            "type": "INVOICE",
+            "amount": 32000,
+            "date": "2024-11-15T00:00:00Z",
+            "reference_id": "INV005",
+            "credit_days": 60
+        }
+    ],
+    "payment_allocations": [
+        {
+            "id": "pa1",
+            "invoice_id": "txn1",
+            "invoice_ref": "INV001",
+            "receipt_id": "txn4",
+            "receipt_ref": "R001",
+            "amount": 5000,
+            "date": "2025-06-20T00:00:00Z",
+            "agent_name": "Vikram S."
+        }
+    ],
+    "agents": [
+        {
+            "id": "a1",
+            "name": "Vikram S.",
+            "phone": "9876543220",
+            "area": "North Zone",
+            "is_active": true
+        },
+        {
+            "id": "a2",
+            "name": "Rajesh K.",
+            "phone": "9876543221",
+            "area": "South Zone",
+            "is_active": true
+        },
+        {
+            "id": "a3",
+            "name": "Amit P.",
+            "phone": "9876543222",
+            "area": "East Zone",
+            "is_active": true
+        },
+        {
+            "id": "a4",
+            "name": "Suresh R.",
+            "phone": "9876543223",
+            "area": "West Zone",
+            "is_active": true
+        }
+    ]
+}
