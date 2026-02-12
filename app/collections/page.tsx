@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Search, MapPin, Phone, Check, CheckCircle, Share2, Wallet, ArrowRight, FileText, User } from 'lucide-react';
 import { Dealer } from '@/types';
+import { calculateDealerStatement } from '@/lib/utils';
 
 export default function Collections() {
     const { dealers, transactions, agents, recordPayment } = useData();
@@ -31,6 +32,16 @@ export default function Collections() {
             d.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             d.district.toLowerCase().includes(searchTerm.toLowerCase())
         );
+
+    // FIFO Logic for selected dealer (Statement Preview)
+    // Moved to top level to avoid conditional hook call error
+    const sortedInvoices = React.useMemo(() => {
+        if (!activeDealer) return [];
+
+        const dealerTransactions = transactions.filter(t => t.customerId === activeDealer.id);
+        const { invoices } = calculateDealerStatement(dealerTransactions);
+        return invoices;
+    }, [activeDealer, transactions]);
 
     const handleSubmitPayment = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -153,50 +164,12 @@ export default function Collections() {
             isOverdue: boolean;
         }[] = [];
 
-        const payments: { date: Date; amount: number; remaining: number }[] = [];
+        // FIFO Logic for selected dealer (Statement Preview)
 
-        // First pass: collect all invoices and payments
-        txns.forEach(txn => {
-            if (txn.type === 'INVOICE') {
-                const due = txn.dueDate ? new Date(txn.dueDate) : null;
-                const isOverdue = due ? new Date() > due : false;
-                invoices.push({
-                    id: txn.id,
-                    date: new Date(txn.date),
-                    referenceId: txn.referenceId || 'N/A',
-                    amount: txn.amount,
-                    paid: 0,
-                    balance: txn.amount,
-                    daysPending: Math.ceil((new Date().getTime() - new Date(txn.date).getTime()) / (1000 * 60 * 60 * 24)),
-                    creditDays: txn.creditDays || 30,
-                    dueDate: due,
-                    isOverdue: isOverdue
-                });
-            } else {
-                payments.push({
-                    date: new Date(txn.date),
-                    amount: txn.amount,
-                    remaining: txn.amount
-                });
-            }
-        });
 
-        // Second pass: Apply FIFO logic
-        payments.forEach(payment => {
-            let remainingPayment = payment.remaining;
-            for (const invoice of invoices) {
-                if (remainingPayment <= 0) break;
-                if (invoice.balance <= 0) continue;
+        const pendingInvoices = sortedInvoices.filter(inv => inv.balance > 0);
 
-                const paymentForThisInvoice = Math.min(remainingPayment, invoice.balance);
-                invoice.paid += paymentForThisInvoice;
-                invoice.balance -= paymentForThisInvoice;
-                remainingPayment -= paymentForThisInvoice;
-            }
-        });
 
-        // Filter to show only unpaid/partially paid invoices
-        const pendingInvoices = invoices.filter(inv => inv.balance > 0);
 
         return (
             <div className="h-full overflow-y-auto p-6">

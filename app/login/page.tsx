@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, User, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -17,20 +18,44 @@ export default function LoginPage() {
         setError('');
         setIsLoading(true);
 
-        // Simulate authentication delay
-        await new Promise(resolve => setTimeout(resolve, 800));
+        try {
+            // Query Supabase for user with matching username
+            const { data: users, error: queryError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('username', email)
+                .eq('is_active', true)
+                .single();
 
-        // Get stored credentials or use defaults
-        const storedUsername = localStorage.getItem('adminUsername') || 'SVadmin';
-        const storedPassword = localStorage.getItem('adminPassword') || 'Srivari@123';
+            if (queryError || !users) {
+                setError('Invalid username or password. Please try again.');
+                setIsLoading(false);
+                return;
+            }
 
-        // Check credentials
-        if (email === storedUsername && password === storedPassword) {
-            // Store auth state in sessionStorage (cleared on browser close)
+            // Verify password
+            if (users.password !== password) {
+                setError('Invalid username or password. Please try again.');
+                setIsLoading(false);
+                return;
+            }
+
+            // Update last login timestamp
+            await supabase
+                .from('users')
+                .update({ last_login: new Date().toISOString() })
+                .eq('id', users.id);
+
+            // Store auth state in sessionStorage
             sessionStorage.setItem('isAuthenticated', 'true');
+            sessionStorage.setItem('userId', users.id);
+            sessionStorage.setItem('username', users.username);
+            sessionStorage.setItem('fullName', users.full_name || users.username);
+
             router.push('/');
-        } else {
-            setError('Invalid username or password. Please try again.');
+        } catch (err) {
+            console.error('Login error:', err);
+            setError('An error occurred during login. Please try again.');
             setIsLoading(false);
         }
     };
@@ -48,8 +73,12 @@ export default function LoginPage() {
             <div className="relative z-10 w-full max-w-md">
                 {/* Logo / Brand */}
                 <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-500 rounded-2xl shadow-lg shadow-emerald-500/30 mb-4">
-                        <span className="text-2xl font-bold text-white">SV</span>
+                    <div className="flex justify-center mb-6">
+                        <img
+                            src="/icon.png"
+                            alt="Sri Vari Enterprises"
+                            className="w-24 h-24 object-contain drop-shadow-2xl"
+                        />
                     </div>
                     <h1 className="text-2xl font-bold text-white">Sri Vari Enterprises</h1>
                     <p className="text-slate-400 text-sm mt-1">Admin Dashboard Portal</p>
@@ -135,7 +164,7 @@ export default function LoginPage() {
 
                 {/* Footer */}
                 <p className="text-center text-slate-500 text-xs mt-6">
-                    ©Sri Vari Enterprises. Since 2020
+                    ©Sri Vari Enterprises. Since 2019
                 </p>
             </div>
         </div>

@@ -1,8 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, PaymentAllocation } from '@/types';
+import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, PaymentAllocation, AgentTrackingData } from '@/types';
 import { supabase } from '@/lib/supabase';
+import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates } from '@/lib/agentTrackingService';
 
 interface InvoiceData {
     vehicleName?: string;
@@ -12,6 +13,8 @@ interface InvoiceData {
     paymentTerms?: string;
     discountPercent?: number;
     creditDays?: number;
+    notes?: string;
+    invoiceDate?: Date;
 }
 
 interface DataContextType {
@@ -24,8 +27,12 @@ interface DataContextType {
     productCount: number;
     isLoading: boolean;
     error: string | null;
+    // Tracking
+    trackingData: AgentTrackingData[];
+    loadingTracking: boolean;
     // Methods
     createInvoice: (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<string>;
+    updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<void>;
     recordPayment: (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => Promise<string>;
     updateStock: (productId: string, quantity: number) => void;
     addProduct: (product: Omit<Product, 'id' | 'productId'>) => Promise<void>;
@@ -59,7 +66,8 @@ const transformProduct = (row: any): Product => ({
     price: Number(row.price),
     stock: Number(row.stock),
     gstRate: Number(row.gst_rate),
-    sku: row.sku,
+    hsnCode: row.hsn_code,
+    unit: row.unit || 'nos',
 });
 
 const transformDealer = (row: any): Dealer => ({
@@ -103,6 +111,7 @@ const transformAgent = (row: any): Agent => ({
     area: row.area,
     division: row.division,
     collectionTarget: row.collection_target ? Number(row.collection_target) : undefined,
+    monthlySalary: row.monthly_salary ? Number(row.monthly_salary) : undefined,
     isActive: row.is_active,
 });
 
@@ -113,27 +122,40 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [agents, setAgents] = useState<Agent[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [trackingData, setTrackingData] = useState<AgentTrackingData[]>([]);
+    const [loadingTracking, setLoadingTracking] = useState(false);
 
     // Sequential counters
     const [invoiceCount, setInvoiceCount] = useState(1);
     const [receiptCount, setReceiptCount] = useState(1);
     const [productCount, setProductCount] = useState(1);
 
-    // Fetch all data from Supabase
+    // LocalStorage key for products
+    const PRODUCTS_KEY = 'sve_products';
+
+    // Helper functions for localStorage
+    const getLocalProducts = (): Product[] => {
+        if (typeof window === 'undefined') return [];
+        const data = localStorage.getItem(PRODUCTS_KEY);
+        return data ? JSON.parse(data) : [];
+    };
+
+    const saveLocalProducts = (data: Product[]) => {
+        localStorage.setItem(PRODUCTS_KEY, JSON.stringify(data));
+    };
+
+    // Fetch all data - Products from localStorage, others from Supabase
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
 
         try {
-            // Fetch products
-            const { data: productsData, error: productsError } = await supabase
-                .from('products')
-                .select('*')
-                .order('created_at', { ascending: false });
+            // Fetch products from localStorage
+            const localProducts = getLocalProducts();
+            setProducts(localProducts);
+            setProductCount(localProducts.length + 1);
 
-            if (productsError) throw productsError;
-
-            // Fetch dealers
+            // Fetch dealers from Supabase
             const { data: dealersData, error: dealersError } = await supabase
                 .from('dealers')
                 .select('*')
@@ -141,7 +163,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (dealersError) throw dealersError;
 
-            // Fetch transactions
+            // Fetch transactions from Supabase
             const { data: transactionsData, error: transactionsError } = await supabase
                 .from('transactions')
                 .select('*')
@@ -149,7 +171,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (transactionsError) throw transactionsError;
 
-            // Fetch agents
+            // Fetch agents from Supabase
             const { data: agentsData, error: agentsError } = await supabase
                 .from('agents')
                 .select('*')
@@ -158,7 +180,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (agentsError) throw agentsError;
 
             // Transform and set data
-            setProducts(productsData?.map(transformProduct) || []);
             setDealers(dealersData?.map(transformDealer) || []);
             setTransactions(transactionsData?.map(transformTransaction) || []);
             setAgents(agentsData?.map(transformAgent) || []);
@@ -168,106 +189,102 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const payments = transactionsData?.filter(t => t.type === 'PAYMENT') || [];
             setInvoiceCount(invoices.length + 1);
             setReceiptCount(payments.length + 1);
-            setProductCount((productsData?.length || 0) + 1);
 
         } catch (err: any) {
-            console.error('Error fetching data from Supabase:', err);
+            console.error('Error fetching data:', err);
             setError(err.message || 'Failed to fetch data');
         } finally {
             setIsLoading(false);
         }
     }, []);
 
-    // Initial data fetch
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
-
     const refreshData = async () => {
         await fetchData();
+        await loadTrackingData();
     };
 
-    const updateStock = async (productId: string, quantity: number) => {
-        const product = products.find(p => p.id === productId);
-        if (!product) return;
-
-        const newStock = product.stock - quantity;
-
-        const { error } = await supabase
-            .from('products')
-            .update({ stock: newStock })
-            .eq('id', productId);
-
-        if (error) {
-            console.error('Error updating stock:', error);
-            return;
+    const loadTrackingData = useCallback(async () => {
+        setLoadingTracking(true);
+        try {
+            const data = await getAllAgentTrackingData();
+            setTrackingData(data);
+        } catch (err) {
+            console.error('Error loading tracking data:', err);
+        } finally {
+            setLoadingTracking(false);
         }
+    }, []);
 
-        setProducts(prev => prev.map(p =>
-            p.id === productId ? { ...p, stock: newStock } : p
-        ));
+    // Initial data fetch and Subscriptions
+    useEffect(() => {
+        fetchData();
+        loadTrackingData();
+
+        // Subscribe to real-time tracking updates
+        const statusSub = subscribeToStatusUpdates((status) => {
+            setTrackingData(prev => prev.map(data =>
+                data.agent.id === status.agentId
+                    ? { ...data, status }
+                    : data
+            ));
+        });
+
+        const locationSub = subscribeToLocationUpdates((location) => {
+            setTrackingData(prev => prev.map(data =>
+                data.agent.id === location.agentId
+                    ? { ...data, latestLocation: location }
+                    : data
+            ));
+        });
+
+        return () => {
+            statusSub.unsubscribe();
+            locationSub.unsubscribe();
+        };
+    }, [fetchData, loadTrackingData]);
+
+    const updateStock = (productId: string, quantity: number) => {
+        const currentProducts = getLocalProducts();
+        const updatedProducts = currentProducts.map(p => {
+            if (p.id === productId || p.productId === productId) {
+                return { ...p, stock: p.stock - quantity };
+            }
+            return p;
+        });
+        saveLocalProducts(updatedProducts);
+        setProducts(updatedProducts);
     };
 
     const addProduct = async (productData: Omit<Product, 'id' | 'productId'>) => {
-        const newProductId = `PDI-${String(productCount).padStart(3, '0')}`;
+        const currentProducts = getLocalProducts();
+        const newProductId = `PDI-${String(currentProducts.length + 1).padStart(3, '0')}`;
 
-        const { data, error } = await supabase
-            .from('products')
-            .insert({
-                product_id: newProductId,
-                name: productData.name,
-                category: productData.category,
-                price: productData.price,
-                stock: productData.stock,
-                gst_rate: productData.gstRate,
-                sku: productData.sku,
-            })
-            .select()
-            .single();
+        const newProduct: Product = {
+            id: crypto.randomUUID(),
+            productId: newProductId,
+            ...productData
+        };
 
-        if (error) {
-            console.error('Error adding product:', error);
-            throw error;
-        }
-
-        setProducts(prev => [transformProduct(data), ...prev]);
-        setProductCount(prev => prev + 1);
+        const updatedProducts = [newProduct, ...currentProducts];
+        saveLocalProducts(updatedProducts);
+        setProducts(updatedProducts);
+        setProductCount(updatedProducts.length + 1);
     };
 
     const updateProduct = async (updatedProduct: Product) => {
-        const { error } = await supabase
-            .from('products')
-            .update({
-                product_id: updatedProduct.productId,
-                name: updatedProduct.name,
-                category: updatedProduct.category,
-                price: updatedProduct.price,
-                stock: updatedProduct.stock,
-                gst_rate: updatedProduct.gstRate,
-                sku: updatedProduct.sku,
-            })
-            .eq('id', updatedProduct.id);
-
-        if (error) {
-            console.error('Error updating product:', error);
-            throw error;
-        }
-
-        setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+        const currentProducts = getLocalProducts();
+        const updatedProducts = currentProducts.map(p =>
+            p.id === updatedProduct.id ? updatedProduct : p
+        );
+        saveLocalProducts(updatedProducts);
+        setProducts(updatedProducts);
     };
 
     const deleteProduct = async (id: string) => {
-        const { error } = await supabase
-            .from('products')
-            .delete()
-            .eq('id', id);
-
-        if (error) {
-            console.error('Error deleting product:', error);
-            throw error;
-        }
-
-        setProducts(prev => prev.filter(p => p.id !== id));
+        const currentProducts = getLocalProducts();
+        const updatedProducts = currentProducts.filter(p => p.id !== id);
+        saveLocalProducts(updatedProducts);
+        setProducts(updatedProducts);
     };
 
     const addDealer = async (dealerData: Omit<Dealer, 'id'>): Promise<string> => {
@@ -364,7 +381,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const createInvoice = async (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {
         const invoiceNumber = `INV${String(invoiceCount).padStart(3, '0')}`;
-        const invoiceDate = new Date();
+        const invoiceDate = invoiceData?.invoiceDate || new Date();
 
         const creditDays = invoiceData?.creditDays || 30;
         const dueDate = new Date(invoiceDate);
@@ -387,6 +404,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 transport_charges: invoiceData?.transportCharges,
                 payment_terms: invoiceData?.paymentTerms,
                 discount_percent: invoiceData?.discountPercent,
+                notes: invoiceData?.notes,
             })
             .select()
             .single();
@@ -413,12 +431,34 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             discount_amount: item.discountAmount,
             total: item.total,
             gst_amount: item.gstAmount,
+            hsn_code: item.hsnCode,
+            unit: item.unit,
         }));
 
         await supabase.from('invoice_items').insert(itemsToInsert);
 
-        // Update dealer balance
+        // Calculate tax totals
+        const totalCGST = items.reduce((sum, item) => sum + item.cgstAmount, 0);
+        const totalSGST = items.reduce((sum, item) => sum + item.sgstAmount, 0);
+        const totalIGST = items.reduce((sum, item) => sum + item.igstAmount, 0);
+        const totalTax = totalCGST + totalSGST + totalIGST;
+        const subtotal = items.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
+        const discountAmount = (subtotal * (invoiceData?.discountPercent || 0)) / 100;
+
+        // Get dealer info
         const dealer = dealers.find(d => d.id === dealerId);
+
+        // Insert into bill_payments table for mobile app to display invoice metadata
+        // receipt_number is NULL until payment is made
+        await supabase.from('bill_payments').insert({
+            receipt_number: null,
+            bill_number: invoiceNumber,
+            amount_applied: 0, // No payment applied yet
+            payment_date: invoiceDate.toISOString().split('T')[0], // Use invoice date as placeholder
+            payment_mode: null, // No payment mode until payment is made
+        });
+
+        // Update dealer balance
         if (dealer) {
             const newBalance = dealer.balance + totalAmount;
             await supabase
@@ -446,6 +486,121 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setInvoiceCount(prev => prev + 1);
 
         return invoiceNumber;
+    };
+
+    const updateInvoice = async (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {
+        // 1. Get existing transaction to calculate balance diff and restore stock
+        const existingTxn = transactions.find(t => t.id === invoiceId);
+        if (!existingTxn) throw new Error("Invoice not found");
+
+        const itemsResponse = await supabase
+            .from('invoice_items')
+            .select('*')
+            .eq('transaction_id', invoiceId);
+
+        const oldItems = itemsResponse.data || [];
+
+        // 2. Restore Stock for OLD items
+        for (const item of oldItems) {
+            // updateStock subtracts, so passing negative quantity adds stock back
+            await updateStock(item.product_id, -item.quantity);
+        }
+
+        // 3. Update Transaction Details
+        const creditDays = invoiceData?.creditDays || existingTxn.creditDays || 30;
+        // Keep original date if needed, or update? usually invoice date stays same, but details change.
+        // Let's keep original date unless explicitly asked to change logic.
+        const dueDate = new Date(existingTxn.date);
+        dueDate.setDate(dueDate.getDate() + creditDays);
+
+        const { error: updateError } = await supabase
+            .from('transactions')
+            .update({
+                amount: totalAmount,
+                credit_days: creditDays,
+                due_date: dueDate.toISOString(),
+                vehicle_name: invoiceData?.vehicleName,
+                vehicle_number: invoiceData?.vehicleNumber,
+                destination: invoiceData?.destination,
+                transport_charges: invoiceData?.transportCharges,
+                payment_terms: invoiceData?.paymentTerms,
+                discount_percent: invoiceData?.discountPercent,
+                notes: invoiceData?.notes,
+            })
+            .eq('id', invoiceId);
+
+        if (updateError) throw updateError;
+
+        // 4. Delete OLD invoice items
+        await supabase
+            .from('invoice_items')
+            .delete()
+            .eq('transaction_id', invoiceId);
+
+        // 5. Insert NEW invoice items
+        const itemsToInsert = items.map(item => ({
+            transaction_id: invoiceId,
+            product_id: item.productId,
+            product_name: item.productName,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+            cgst: item.cgst,
+            sgst: item.sgst,
+            igst: item.igst,
+            cgst_amount: item.cgstAmount,
+            sgst_amount: item.sgstAmount,
+            igst_amount: item.igstAmount,
+            discount: item.discount,
+            discount_amount: item.discountAmount,
+            total: item.total,
+            gst_amount: item.gstAmount,
+            hsn_code: item.hsnCode,
+            unit: item.unit,
+        }));
+
+        await supabase.from('invoice_items').insert(itemsToInsert);
+
+        // 6. Deduct Stock for NEW items
+        for (const item of items) {
+            await updateStock(item.productId, item.quantity);
+        }
+
+        // 7. Update Dealer Balance
+        const dealer = dealers.find(d => d.id === existingTxn.customerId);
+        if (dealer) {
+            // Balance = OldBalance - OldInvoiceAmount + NewInvoiceAmount
+            const balanceDiff = totalAmount - existingTxn.amount;
+            const newBalance = dealer.balance + balanceDiff;
+
+            await supabase
+                .from('dealers')
+                .update({ balance: newBalance })
+                .eq('id', dealer.id);
+
+            setDealers(prev => prev.map(d =>
+                d.id === dealer.id ? { ...d, balance: newBalance } : d
+            ));
+        }
+
+        // 8. Update local state
+        setTransactions(prev => prev.map(t => {
+            if (t.id === invoiceId) {
+                return {
+                    ...t,
+                    amount: totalAmount,
+                    creditDays: creditDays,
+                    dueDate: dueDate,
+                    vehicleName: invoiceData?.vehicleName,
+                    vehicleNumber: invoiceData?.vehicleNumber,
+                    destination: invoiceData?.destination,
+                    transportCharges: invoiceData?.transportCharges,
+                    paymentTerms: invoiceData?.paymentTerms,
+                    discountPercent: invoiceData?.discountPercent,
+                    items: items
+                };
+            }
+            return t;
+        }));
     };
 
     const recordPayment = async (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => {
@@ -560,6 +715,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return receiptNumber;
     };
 
+    const transformAgent = (row: any): Agent => ({
+        id: row.id,
+        name: row.name,
+        phone: row.phone,
+        area: row.area,
+        division: row.division,
+        collectionTarget: row.collection_target ? Number(row.collection_target) : undefined,
+        monthlySalary: row.monthly_salary ? Number(row.monthly_salary) : undefined,
+        isActive: row.is_active,
+        agentId: row.agent_id,
+    });
+
     // Agent CRUD methods
     const addAgent = async (agentData: Omit<Agent, 'id'>): Promise<string> => {
         const { data, error } = await supabase
@@ -570,13 +737,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 area: agentData.area,
                 division: agentData.division,
                 collection_target: agentData.collectionTarget || 100000,
+                monthly_salary: agentData.monthlySalary || 0,
                 is_active: agentData.isActive ?? true,
+                agent_id: agentData.agentId,
+                password: agentData.password,
             })
             .select()
             .single();
 
         if (error) {
             console.error('Error adding agent:', error);
+            console.error('Error details:', JSON.stringify(error, null, 2)); // improved logging
             throw error;
         }
 
@@ -586,16 +757,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const updateAgent = async (updatedAgent: Agent) => {
+        const updateData: any = {
+            name: updatedAgent.name,
+            phone: updatedAgent.phone,
+            area: updatedAgent.area,
+            division: updatedAgent.division,
+            collection_target: updatedAgent.collectionTarget,
+            monthly_salary: updatedAgent.monthlySalary || 0,
+            is_active: updatedAgent.isActive,
+            agent_id: updatedAgent.agentId,
+        };
+
+        // Only include password if it's being changed (non-empty string)
+        if (updatedAgent.password) {
+            updateData.password = updatedAgent.password;
+        }
+
         const { error } = await supabase
             .from('agents')
-            .update({
-                name: updatedAgent.name,
-                phone: updatedAgent.phone,
-                area: updatedAgent.area,
-                division: updatedAgent.division,
-                collection_target: updatedAgent.collectionTarget,
-                is_active: updatedAgent.isActive,
-            })
+            .update(updateData)
             .eq('id', updatedAgent.id);
 
         if (error) {
@@ -639,6 +819,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             isLoading,
             error,
             createInvoice,
+            updateInvoice,
             recordPayment,
             updateStock,
             addProduct,
@@ -655,7 +836,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             deleteAgent,
             addCustomer,
             deleteCustomer,
-            getCustomerTransactions
+            getCustomerTransactions,
+            trackingData,
+            loadingTracking
         }}>
             {children}
         </DataContext.Provider>

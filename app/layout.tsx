@@ -14,6 +14,19 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en">
+            <head>
+                {/* CSP specifically for Electron + Supabase + Next.js */}
+                {/* - default-src 'self': Only allow resources from the app itself */}
+                {/* - script-src 'self' 'unsafe-inline' 'unsafe-eval': Required for Next.js dev mode (HMR) */}
+                {/* - connect-src 'self' ...: Allow connections to Supabase API and WebSocket */}
+                {/* - style-src 'self' 'unsafe-inline': Required for Tailwind/Next.js styles */}
+                {/* - img-src 'self' blob: data:: Allow images */}
+                <meta
+                    httpEquiv="Content-Security-Policy"
+                    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://qimbzfensppfzgokrkuz.supabase.co wss://qimbzfensppfzgokrkuz.supabase.co https://*.tile.openstreetmap.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data: https://*.tile.openstreetmap.org https://unpkg.com https://raw.githubusercontent.com https://cdnjs.cloudflare.com;"
+                />
+                <title>Sri Vari Enterprises - Billing ERP</title>
+            </head>
             <body className="bg-slate-50 text-slate-900 antialiased">
                 <ClientLayout>{children}</ClientLayout>
             </body>

@@ -169,3 +169,20 @@ export const generateReceiptNumber = (currentCount: number): string => {
 export const generateProductId = (currentCount: number): string => {
   return `PDI-${String(currentCount).padStart(3, '0')}`;
 };
+
+export const DEFAULT_COMPANY_SETTINGS = {
+  id: 'default',
+  companyName: 'SRI VARI ENTERPRISES',
+  addressLine1: 'BLOCK NO.9 T.S. NO 609',
+  addressLine2: 'PALANIYAPPAN STREET',
+  city: 'POLLACHI',
+  state: 'Tamil Nadu',
+  pinCode: '642001',
+  gstNumber: '33DIGPM0162N1Z6',
+  panNumber: 'DIGPM0162N',
+  bankName: 'Tamilnad Mercantile Bank (TMB)',
+  bankBranch: 'Pollachi',
+  accountNumber: '090700050900285',
+  ifscCode: 'TMBL0000079',
+  accountHolderName: 'SRI VARI ENTERPRISES'
+};

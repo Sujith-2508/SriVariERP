@@ -6,6 +6,7 @@ export interface Dealer {
   phone: string;
   district: string;
   city: string;
+  state?: string;
   pinCode: string;
   address?: string;
   gstNumber?: string;
@@ -22,9 +23,11 @@ export interface Product {
   name: string;
   category: string;
   price: number;
+  costPrice?: number;          // Cost price for COGS calculation
   stock: number;
   gstRate: number;
-  sku?: string;
+  hsnCode?: string;
+  unit?: string;
 }
 
 export enum TransactionType {
@@ -65,6 +68,7 @@ export interface Transaction {
   transportCharges?: number;
   paymentTerms?: string;
   discountPercent?: number;
+
 }
 
 export interface InvoiceItem {
@@ -82,6 +86,9 @@ export interface InvoiceItem {
   discountAmount: number;
   total: number;
   gstAmount?: number;
+  hsnCode?: string;
+  unit?: string;
+  gstRate?: number;
 }
 
 // Agent for collections
@@ -92,7 +99,200 @@ export interface Agent {
   area?: string;
   division?: string;           // Collection division/zone
   collectionTarget?: number;   // Monthly collection target amount
+  monthlySalary?: number;      // Monthly salary for the agent
+  isActive: boolean;
+  agentId?: string;            // Login ID
+  password?: string;           // Login password (only used for creating/updating)
+}
+
+// Company settings for invoices
+export interface CompanySettings {
+  id: string;
+  companyName: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  pinCode?: string;
+  gstNumber?: string;
+  panNumber?: string;
+  phone?: string;
+  email?: string;
+  // Bank Details
+  bankName?: string;
+  bankBranch?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+  accountHolderName?: string;
+}
+
+// Supplier - production companies you purchase from
+export interface Supplier {
+  id: string;
+  supplierName: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  city?: string;
+  address?: string;
+  gstNumber?: string;
   isActive: boolean;
 }
 
-export type ViewState = 'DASHBOARD' | 'BILLING' | 'INVENTORY' | 'DEALERS' | 'COLLECTIONS' | 'AGENTS' | 'REPORTS' | 'SETTINGS';
+// Purchase bill from supplier
+export interface Purchase {
+  id: string;
+  purchaseBillNo: string;
+  supplierId?: string;
+  supplierName: string;
+  purchaseDate: Date;
+  totalAmount: number;
+  gstAmount: number;
+  discountAmount: number;
+  freightCharges: number;  // Transport/freight expenses
+  otherExpenses: number;   // Other miscellaneous expenses
+  netAmount: number;
+  paymentStatus: 'PENDING' | 'PARTIAL' | 'PAID';
+  items?: PurchaseItem[];
+  notes?: string;
+}
+
+// Items in a purchase bill
+export interface PurchaseItem {
+  id?: string;
+  purchaseId?: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  sellingPrice?: number;
+  gstRate: number;
+  gstAmount: number;
+  total: number;
+  hsnCode?: string;
+  unit?: string;
+}
+
+// Agent tracking - Real-time status
+export interface AgentStatus {
+  id: string;
+  agentId: string;
+  isActive: boolean;
+  lastActiveAt: Date;
+  currentLatitude?: number;
+  currentLongitude?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Agent tracking - Daily attendance
+export interface Attendance {
+  id: string;
+  agentId: string;
+  date: Date;
+  checkInTime?: Date;
+  checkOutTime?: Date;
+  totalHours?: number;
+  status?: 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'LEAVE';
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Agent tracking - GPS location history
+export interface AgentLocation {
+  id: string;
+  agentId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  recordedAt: Date;
+  createdAt: Date;
+}
+
+// Combined agent tracking data for UI
+export interface AgentTrackingData {
+  agent: Agent;
+  status?: AgentStatus;
+  latestLocation?: AgentLocation;
+  todayAttendance?: Attendance;
+}
+
+// Purchase Management - Supplier
+export interface SupplierData {
+  id: string;
+  name: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  gstNumber?: string;
+  balance: number; // Credit owed TO supplier
+  lastTransactionDate?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Purchase Management - Purchase Bill
+export interface PurchaseBillData {
+  id: string;
+  supplierId: string;
+  billNumber: string;
+  billDate: Date;
+  amount: number;
+  paidAmount: number;
+  balance: number;
+  dueDate?: Date;
+  items?: any[]; // JSONB array of purchase items
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Purchase Management - Purchase Payment
+export interface PurchasePaymentData {
+  id: string;
+  supplierId: string;
+  paymentNumber: string;
+  paymentDate: Date;
+  amount: number;
+  paymentMode: 'CASH' | 'CHEQUE' | 'BANK_TRANSFER' | 'UPI' | 'OTHER';
+  referenceNumber?: string;
+  notes?: string;
+  createdAt: Date;
+}
+
+// Purchase Management - Purchase Allocation (FIFO)
+export interface PurchaseAllocationData {
+  id: string;
+  billId: string;
+  billNumber: string;
+  paymentId: string;
+  paymentNumber: string;
+  amount: number;
+  allocationDate: Date;
+  createdAt: Date;
+}
+
+// Agent Salary Management
+export interface AgentSalaryData {
+  id: string;
+  agentId: string;
+  month: number;
+  year: number;
+  baseSalary: number;
+  travelExpense: number;
+  stayExpense: number;
+  foodExpense: number;
+  otherExpense: number;
+  totalExpense: number;
+  netSalary: number;
+  paymentStatus: 'PENDING' | 'PAID';
+  paidDate?: Date;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type ViewState = 'DASHBOARD' | 'BILLING' | 'INVENTORY' | 'DEALERS' | 'COLLECTIONS' | 'AGENTS' | 'REPORTS' | 'SETTINGS' | 'PURCHASES';

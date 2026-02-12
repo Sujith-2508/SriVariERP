@@ -43,7 +43,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     price: row.price,
     stock: row.stock,
     gstRate: row.gst_rate,
-    sku: row.sku,
+    hsnCode: row.hsn_code,
+    unit: row.unit,
   });
 
   const transformDealer = (row: any): Customer => ({
@@ -206,7 +207,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         price: productData.price,
         stock: productData.stock,
         gst_rate: productData.gstRate,
-        sku: productData.sku,
+        hsn_code: productData.hsnCode,
+        unit: productData.unit,
       })
       .select()
       .single();
@@ -234,7 +236,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         price: updatedProduct.price,
         stock: updatedProduct.stock,
         gst_rate: updatedProduct.gstRate,
-        sku: updatedProduct.sku,
+        hsn_code: updatedProduct.hsnCode,
+        unit: updatedProduct.unit,
       })
       .eq('id', updatedProduct.id);
 

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useData } from '@/contexts/DataContext';
+import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { Search, Edit2, Trash2, Plus, X, Package, RefreshCw } from 'lucide-react';
 import { Product } from '@/types';
 
@@ -18,34 +19,77 @@ export default function Inventory() {
     const [stockUpdateType, setStockUpdateType] = useState<'add' | 'set'>('add');
 
     // Form State - Note: productId is auto-generated, not user input
-    const [formData, setFormData] = useState<Partial<Product>>({
+    const [formData, setFormData] = useState<{
+        name: string;
+        category: string;
+        price: number | string;
+        costPrice: number | string;
+        stock: number | string;
+        gstRate: number | string;
+        hsnCode: string;
+        unit: string;
+    }>({
         name: '',
         category: 'Cookware',
-        price: 0,
-        stock: 0,
-        gstRate: 0.18
+        price: '',
+        costPrice: '',
+        stock: '',
+        gstRate: '',
+        hsnCode: '',
+        unit: 'nos'
     });
 
-    const filteredProducts = products.filter(p =>
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.productId?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // Refs for Enter key navigation (mandatory fields only)
+    const productIdRef = useRef<HTMLInputElement>(null);
+    const nameRef = useRef<HTMLInputElement>(null);
+    const categoryRef = useRef<HTMLSelectElement>(null);
+    const priceRef = useRef<HTMLInputElement>(null);
+
+    const productFieldRefs = [categoryRef, nameRef, priceRef] as any;
+    const { handleKeyDown: handleProductKeyDown } = useEnterKeyNavigation(productFieldRefs);
+
+    const filteredProducts = products
+        .filter(p =>
+            p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            p.productId?.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+        .sort((a, b) => {
+            // Extract numeric part of PDI-XXX for proper sorting
+            const idA = parseInt(a.productId.replace(/[^\d]/g, '')) || 0;
+            const idB = parseInt(b.productId.replace(/[^\d]/g, '')) || 0;
+            if (idA !== idB) return idA - idB;
+
+            // Secondary sort by stock
+            if (a.stock !== b.stock) return a.stock - b.stock;
+
+            // Tertiary sort by price
+            return a.price - b.price;
+        });
 
     const handleOpenAdd = () => {
         setEditingProduct(null);
         setFormData({
             name: '',
             category: 'Cookware',
-            price: 0,
-            stock: 0,
-            gstRate: 0.18
+            price: '',
+            costPrice: '',
+            stock: '',
+            gstRate: '',
+            hsnCode: '',
+            unit: 'nos'
         });
         setIsModalOpen(true);
     };
 
     const handleOpenEdit = (product: Product) => {
         setEditingProduct(product);
-        setFormData({ ...product });
+        setFormData({
+            ...product,
+            costPrice: product.costPrice || '',
+            gstRate: product.gstRate * 100, // Convert decimal to percentage for display
+            hsnCode: product.hsnCode || '',
+            unit: product.unit || 'nos'
+        });
         setIsModalOpen(true);
     };
 
@@ -64,14 +108,23 @@ export default function Inventory() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Ensure price, costPrice and stock are numbers for saving
+        const finalData: Product = {
+            ...(editingProduct || {}), // Keep existing ID etc if editing
+            ...formData,
+            price: Number(formData.price) || 0,
+            costPrice: Number(formData.costPrice) || 0,
+            stock: Number(formData.stock) || 0,
+            gstRate: (Number(formData.gstRate) || 0) / 100, // Convert percentage back to decimal
+        } as Product;
+
         if (editingProduct) {
-            updateProduct({
-                ...editingProduct,
-                ...formData as Product
-            });
+            updateProduct(finalData);
         } else {
             // Product ID is auto-generated in context
-            addProduct(formData as Omit<Product, 'id' | 'productId'>);
+            const { id, productId, ...newProductConfig } = finalData;
+            addProduct(newProductConfig);
         }
         setIsModalOpen(false);
     };
@@ -190,8 +243,8 @@ export default function Inventory() {
 
             {/* Add/Edit Product Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsModalOpen(false)}>
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h2 className="text-xl font-bold text-slate-800">
                                 {editingProduct ? 'Edit Product' : 'Add New Product'}
@@ -222,9 +275,11 @@ export default function Inventory() {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
                                 <select
+                                    ref={categoryRef}
                                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
                                     value={formData.category}
                                     onChange={e => setFormData({ ...formData, category: e.target.value })}
+                                    onKeyDown={(e) => handleProductKeyDown(e, 0)}
                                 >
                                     <option>Cookware</option>
                                     <option>Appliances</option>
@@ -236,49 +291,93 @@ export default function Inventory() {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Product Name</label>
                                 <input
+                                    ref={nameRef}
                                     type="text"
                                     required
                                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                     value={formData.name}
                                     onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                    onKeyDown={(e) => handleProductKeyDown(e, 1)}
                                 />
                             </div>
 
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Price (₹)</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">HSN Code</label>
                                     <input
-                                        type="number"
-                                        required
-                                        min="0"
+                                        type="text"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={formData.price}
-                                        onChange={e => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })}
+                                        placeholder="e.g. 7323"
+                                        value={formData.hsnCode}
+                                        onChange={e => setFormData({ ...formData, hsnCode: e.target.value })}
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Stock Qty</label>
-                                    <input
-                                        type="number"
-                                        required
-                                        min="0"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={formData.stock}
-                                        onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">GST Rate</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Unit</label>
                                     <select
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                                        value={formData.gstRate}
-                                        onChange={e => setFormData({ ...formData, gstRate: parseFloat(e.target.value) })}
+                                        value={formData.unit}
+                                        onChange={e => setFormData({ ...formData, unit: e.target.value })}
                                     >
-                                        <option value="0.05">5%</option>
-                                        <option value="0.12">12%</option>
-                                        <option value="0.18">18%</option>
-                                        <option value="0.28">28%</option>
+                                        <option value="nos">Nos</option>
+                                        <option value="kg">Kg</option>
+                                        <option value="set">Set</option>
+                                        <option value="pcs">Pcs</option>
                                     </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Stock *</label>
+                                    <input
+                                        type="number"
+                                        required
+                                        min="0"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        placeholder="0"
+                                        value={formData.stock}
+                                        onChange={e => setFormData({ ...formData, stock: e.target.value === '' ? '' : e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Cost Price (₹)</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        placeholder="0"
+                                        value={formData.costPrice}
+                                        onChange={e => setFormData({ ...formData, costPrice: e.target.value === '' ? '' : e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Selling Price (₹) *</label>
+                                    <input
+                                        ref={priceRef}
+                                        type="number"
+                                        required
+                                        min="0"
+                                        step="0.01"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        placeholder="0"
+                                        value={formData.price}
+                                        onChange={e => setFormData({ ...formData, price: e.target.value === '' ? '' : e.target.value })}
+                                        onKeyDown={(e) => handleProductKeyDown(e, 2)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">GST Rate (%)</label>
+                                    <input
+                                        type="number"
+                                        required
+                                        min="0"
+                                        max="100"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        value={formData.gstRate}
+                                        onChange={e => setFormData({ ...formData, gstRate: e.target.value })}
+                                    />
                                 </div>
                             </div>
 
@@ -312,8 +411,8 @@ export default function Inventory() {
 
             {/* Update Stock Modal */}
             {isStockModalOpen && stockUpdateProduct && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsStockModalOpen(false)}>
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                                 <Package size={20} />
