@@ -29,7 +29,21 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
     const subtotal = items.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
     const totalTax = items.reduce((sum, item) => sum + item.cgstAmount + item.sgstAmount + item.igstAmount, 0);
     const transportCharges = invoice.transportCharges || 0;
-    const grandTotal = subtotal + totalTax + transportCharges;
+    const globalDiscountAmount = (subtotal * (invoice.discountPercent || 0)) / 100;
+    const roundOffAmount = parseFloat(notes.roundOff || '0');
+
+    // Global GST
+    const globalCGST = parseFloat(notes.globalCGST || '0');
+    const globalSGST = parseFloat(notes.globalSGST || '0');
+    const globalIGST = parseFloat(notes.globalIGST || '0');
+
+    const globalCGSTAmount = (subtotal * globalCGST) / 100;
+    const globalSGSTAmount = (subtotal * globalSGST) / 100;
+    const globalIGSTAmount = (subtotal * globalIGST) / 100;
+
+    const grandTotal = subtotal + totalTax - globalDiscountAmount +
+        globalCGSTAmount + globalSGSTAmount + globalIGSTAmount +
+        transportCharges + roundOffAmount;
 
     // Check if Kerala dealer (IGST) or not (CGST+SGST)
     const isIGST = items.some(item => item.igst > 0);
@@ -205,9 +219,9 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                             {items.map((item, idx) => (
                                 <React.Fragment key={idx}>
                                     <tr className="border-b border-black">
-                                        <td className="border-r border-black p-1 text-center align-top" rowSpan={isIGST ? 2 : 3}>{idx + 1}</td>
+                                        <td className="border-r border-black p-1 text-center align-top">{idx + 1}</td>
                                         <td className="border-r border-black p-1 align-top font-semibold">{item.productName}</td>
-                                        <td className="border-r border-black p-1 text-center align-top" rowSpan={isIGST ? 2 : 3}>{item.hsnCode}</td>
+                                        <td className="border-r border-black p-1 text-center align-top">{item.hsnCode}</td>
                                         <td className="border-r border-black p-1 text-center align-top">{(item.cgst + item.sgst + item.igst).toFixed(0)}%</td>
                                         <td className="border-r border-black p-1 text-center align-top font-semibold">{item.quantity} {item.unit}</td>
                                         <td className="border-r border-black p-1 text-right align-top">{item.unitPrice.toFixed(2)}</td>
@@ -215,33 +229,10 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                                         <td className="border-r border-black p-1 text-center align-top">&nbsp;</td>
                                         <td className="p-1 text-right align-top font-semibold">{(item.unitPrice * item.quantity).toFixed(2)}</td>
                                     </tr>
-                                    {isIGST ? (
-                                        <tr className="border-b border-black">
-                                            <td className="border-r border-black p-1 text-right text-[8px]">IGST</td>
-                                            <td className="border-r border-black p-1 text-center text-[8px]">{formatGSTRate(item.igst)} %</td>
-                                            <td className="border-r border-black p-1" colSpan={4}>&nbsp;</td>
-                                            <td className="p-1 text-right">{item.igstAmount.toFixed(2)}</td>
-                                        </tr>
-                                    ) : (
-                                        <>
-                                            <tr className="border-b border-black">
-                                                <td className="border-r border-black p-1 text-right text-[8px]">CGST</td>
-                                                <td className="border-r border-black p-1 text-center text-[8px]">{formatGSTRate(item.cgst)} %</td>
-                                                <td className="border-r border-black p-1" colSpan={4}>&nbsp;</td>
-                                                <td className="p-1 text-right">{item.cgstAmount.toFixed(2)}</td>
-                                            </tr>
-                                            <tr className="border-b border-black">
-                                                <td className="border-r border-black p-1 text-right text-[8px]">SGST</td>
-                                                <td className="border-r border-black p-1 text-center text-[8px]">{formatGSTRate(item.sgst)} %</td>
-                                                <td className="border-r border-black p-1" colSpan={4}>&nbsp;</td>
-                                                <td className="p-1 text-right">{item.sgstAmount.toFixed(2)}</td>
-                                            </tr>
-                                        </>
-                                    )}
                                 </React.Fragment>
                             ))}
                             {/* Spacer rows to fill table */}
-                            {Array.from({ length: Math.max(0, 5 - items.length * (isIGST ? 1 : 3)) }).map((_, i) => (
+                            {Array.from({ length: Math.max(0, 5 - items.length) }).map((_, i) => (
                                 <tr key={`space-${i}`} className="border-b border-black" style={{ height: '24px' }}>
                                     <td className="border-r border-black p-1">&nbsp;</td>
                                     <td className="border-r border-black p-1">&nbsp;</td>
@@ -254,11 +245,45 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                                     <td className="p-1">&nbsp;</td>
                                 </tr>
                             ))}
-                            {/* Transport Charges Row */}
                             {transportCharges > 0 && (
                                 <tr className="border-b border-black">
                                     <td colSpan={8} className="border-r border-black p-1 text-right font-semibold">Transport Charges ({invoice.vehicleName || 'Vehicle'})</td>
                                     <td className="p-1 text-right font-semibold">{transportCharges.toFixed(2)}</td>
+                                </tr>
+                            )}
+                            {/* Global Discount Row */}
+                            {globalDiscountAmount > 0 && (
+                                <tr className="border-b border-black">
+                                    <td colSpan={8} className="border-r border-black p-1 text-right font-semibold">Global Discount ({invoice.discountPercent}%)</td>
+                                    <td className="p-1 text-right font-semibold">-{globalDiscountAmount.toFixed(2)}</td>
+                                </tr>
+                            )}
+                            {/* Global GST Rows */}
+                            {/* Global GST Rows */}
+                            {globalCGSTAmount > 0 && (
+                                <tr className="border-b border-black">
+                                    <td colSpan={8} className="border-r border-black p-1 text-right font-semibold">CGST ({globalCGST}%)</td>
+                                    <td className="p-1 text-right font-semibold">+{globalCGSTAmount.toFixed(2)}</td>
+                                </tr>
+                            )}
+                            {globalSGSTAmount > 0 && (
+                                <tr className="border-b border-black">
+                                    <td colSpan={8} className="border-r border-black p-1 text-right font-semibold">SGST ({globalSGST}%)</td>
+                                    <td className="p-1 text-right font-semibold">+{globalSGSTAmount.toFixed(2)}</td>
+                                </tr>
+                            )}
+                            {globalIGSTAmount > 0 && (
+                                <tr className="border-b border-black">
+                                    <td colSpan={8} className="border-r border-black p-1 text-right font-semibold">IGST ({globalIGST}%)</td>
+                                    <td className="p-1 text-right font-semibold">+{globalIGSTAmount.toFixed(2)}</td>
+                                </tr>
+                            )}
+
+                            {/* Round Off Row */}
+                            {roundOffAmount !== 0 && (
+                                <tr className="border-b border-black">
+                                    <td colSpan={8} className="border-r border-black p-1 text-right font-semibold">Round Off</td>
+                                    <td className="p-1 text-right font-semibold">{roundOffAmount > 0 ? '+' : ''}{roundOffAmount.toFixed(2)}</td>
                                 </tr>
                             )}
                             {/* Total Row */}
@@ -288,70 +313,60 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                     </div>
                 </div>
 
-                {/* Tax Summary Table */}
-                <div className="border-b-2 border-black flex">
-                    {/* Left: HSN/SAC Summary */}
-                    <div className="w-1/2 border-r-2 border-black">
-                        <table className="w-full text-[9px]">
-                            <thead>
-                                <tr className="border-b border-black">
-                                    <th className="border-r border-black p-1 text-center w-1/2">HSN / SAC</th>
-                                    <th className="p-1 text-right w-1/2">Taxable Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {Object.values(items.reduce((acc: any, item) => {
-                                    const key = item.hsnCode || 'N/A';
-                                    if (!acc[key]) {
-                                        acc[key] = { hsn: key, taxable: 0 };
-                                    }
-                                    acc[key].taxable += (item.unitPrice * item.quantity);
-                                    return acc;
-                                }, {})).map((row: any, idx) => (
-                                    <tr key={idx} className="border-b border-black">
-                                        <td className="border-r border-black p-1 text-center">{row.hsn}</td>
-                                        <td className="p-1 text-right">{row.taxable.toFixed(2)}</td>
-                                    </tr>
-                                ))}
-                                <tr className="font-bold">
-                                    <td className="border-r border-black p-1 text-center">Total</td>
-                                    <td className="p-1 text-right">{subtotal.toFixed(2)}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                {/* Consolidated Tax Summary Table */}
+                <div className="border-b-2 border-black">
+                    <table className="w-full text-[9px]">
+                        <thead>
+                            <tr className="border-b border-black">
+                                <th className="border-r border-black p-1 text-center w-[15%]">HSN / SAC</th>
+                                <th className="border-r border-black p-1 text-right w-[20%]">Taxable Value</th>
+                                <th className="border-r border-black p-1 text-center w-[10%]">CGST %</th>
+                                <th className="border-r border-black p-1 text-center w-[10%]">SGST %</th>
+                                <th className="border-r border-black p-1 text-center w-[10%]">IGST %</th>
+                                <th className="border-r border-black p-1 text-center w-[15%]">Total GST %</th>
+                                <th className="p-1 text-right w-[20%]">Tax Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {Object.values(items.reduce((acc: any, item) => {
+                                const rate = item.cgst + item.sgst + item.igst;
+                                const key = `${item.hsnCode || 'N/A'}-${rate.toFixed(0)}`;
 
-                    {/* Right: Tax Rate Summary */}
-                    <div className="w-1/2">
-                        <table className="w-full text-[9px]">
-                            <thead>
-                                <tr className="border-b border-black">
-                                    <th className="border-r border-black p-1 text-center w-1/2">Rate</th>
-                                    <th className="p-1 text-center w-1/2">Amount</th>
+                                if (!acc[key]) {
+                                    acc[key] = {
+                                        hsn: item.hsnCode || 'N/A',
+                                        rate: rate,
+                                        taxable: 0,
+                                        tax: 0
+                                    };
+                                }
+
+                                acc[key].taxable += (item.unitPrice * item.quantity);
+                                acc[key].tax += (item.cgstAmount + item.sgstAmount + item.igstAmount);
+
+                                return acc;
+                            }, {})).map((row: any, idx) => (
+                                <tr key={idx} className="border-b border-black">
+                                    <td className="border-r border-black p-1 text-center">{row.hsn}</td>
+                                    <td className="border-r border-black p-1 text-right">{row.taxable.toFixed(2)}</td>
+                                    <td className="border-r border-black p-1 text-center">{(row.rate / 2).toFixed(2)}%</td>
+                                    <td className="border-r border-black p-1 text-center">{(!isIGST ? (row.rate / 2) : 0).toFixed(2)}%</td>
+                                    <td className="border-r border-black p-1 text-center">{(isIGST ? (row.rate / 2) : 0).toFixed(2)}%</td>
+                                    <td className="border-r border-black p-1 text-center">{row.rate.toFixed(2)}%</td>
+                                    <td className="p-1 text-right">{row.tax.toFixed(2)}</td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                {Object.values(items.reduce((acc: any, item) => {
-                                    const rate = item.cgst + item.sgst + item.igst;
-                                    const key = rate.toFixed(0);
-                                    if (!acc[key]) {
-                                        acc[key] = { rate: rate, tax: 0 };
-                                    }
-                                    acc[key].tax += (item.cgstAmount + item.sgstAmount + item.igstAmount);
-                                    return acc;
-                                }, {})).map((row: any, idx) => (
-                                    <tr key={idx} className="border-b border-black">
-                                        <td className="border-r border-black p-1 text-center">{row.rate.toFixed(0)} %</td>
-                                        <td className="p-1 text-center">{row.tax.toFixed(2)}</td>
-                                    </tr>
-                                ))}
-                                <tr className="font-bold">
-                                    <td className="border-r border-black p-1 text-center">Total</td>
-                                    <td className="p-1 text-center">{totalTax.toFixed(2)}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                            ))}
+                            <tr className="font-bold">
+                                <td className="border-r border-black p-1 text-center">Total</td>
+                                <td className="border-r border-black p-1 text-right">{subtotal.toFixed(2)}</td>
+                                <td className="border-r border-black p-1">&nbsp;</td>
+                                <td className="border-r border-black p-1">&nbsp;</td>
+                                <td className="border-r border-black p-1">&nbsp;</td>
+                                <td className="border-r border-black p-1">&nbsp;</td>
+                                <td className="p-1 text-right">{totalTax.toFixed(2)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
 
                 {/* Bank Details, Declaration & Signature */}

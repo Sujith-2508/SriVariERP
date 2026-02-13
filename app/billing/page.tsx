@@ -29,7 +29,13 @@ export default function Billing() {
     const [dealerSearch, setDealerSearch] = useState('');
     const [showDealerDropdown, setShowDealerDropdown] = useState(false);
     const [showAddDealerModal, setShowAddDealerModal] = useState(false);
+    const [selectedDealerIndex, setSelectedDealerIndex] = useState(0);
     const dealerSearchRef = useRef<HTMLDivElement>(null);
+    const dealerDropdownRef = useRef<HTMLDivElement>(null);
+    const dealerItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+    const productSelectRef = useRef<HTMLSelectElement>(null);
+    const itemQtyRef = useRef<HTMLInputElement>(null);
+    const addItemButtonRef = useRef<HTMLButtonElement>(null);
 
     // New Dealer Form with City and PinCode
     const [newDealer, setNewDealer] = useState({
@@ -50,12 +56,19 @@ export default function Billing() {
     const { handleKeyDown: handleDealerKeyDown } = useEnterKeyNavigation(dealerFieldRefs);
 
     // Refs for Enter key navigation in Invoice Form
+    const invoiceNoRef = useRef<HTMLInputElement>(null);
+    const invoiceDateRef = useRef<HTMLInputElement>(null);
+    const dealerSearchInputRef = useRef<HTMLInputElement>(null);
     const vehicleNameRef = useRef<HTMLInputElement>(null);
     const vehicleNumberRef = useRef<HTMLInputElement>(null);
     const destinationRef = useRef<HTMLInputElement>(null);
     const transportChargesRef = useRef<HTMLInputElement>(null);
     const creditDaysRef = useRef<HTMLInputElement>(null);
     const globalDiscountRef = useRef<HTMLInputElement>(null);
+    const globalCGSTRef = useRef<HTMLInputElement>(null);
+    const globalSGSTRef = useRef<HTMLInputElement>(null);
+    const globalIGSTRef = useRef<HTMLInputElement>(null);
+    const roundOffRef = useRef<HTMLInputElement>(null);
     const buyerOrderNoRef = useRef<HTMLInputElement>(null);
     const buyerOrderDateRef = useRef<HTMLInputElement>(null);
     const dispatchDocNoRef = useRef<HTMLInputElement>(null);
@@ -70,6 +83,10 @@ export default function Billing() {
         transportChargesRef,
         creditDaysRef,
         globalDiscountRef,
+        globalCGSTRef,
+        globalSGSTRef,
+        globalIGSTRef,
+        roundOffRef,
         buyerOrderNoRef,
         buyerOrderDateRef,
         dispatchDocNoRef,
@@ -78,6 +95,16 @@ export default function Billing() {
         termsOfDeliveryRef
     ] as any;
     const { handleKeyDown: handleInvoiceKeyDown } = useEnterKeyNavigation(invoiceFieldRefs);
+
+    // Auto-scroll selected dealer into view
+    useEffect(() => {
+        if (showDealerDropdown && selectedDealerIndex >= 0 && dealerItemRefs.current[selectedDealerIndex]) {
+            dealerItemRefs.current[selectedDealerIndex]?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'nearest'
+            });
+        }
+    }, [selectedDealerIndex, showDealerDropdown]);
 
     // Product Selection State
     const [itemProduct, setItemProduct] = useState<Product | null>(null);
@@ -90,6 +117,10 @@ export default function Billing() {
     const [transportCharges, setTransportCharges] = useState<string>('0');
     const [paymentTerms, setPaymentTerms] = useState('Immediate'); // Cash, Cheque, Credit
     const [globalDiscount, setGlobalDiscount] = useState<string>('0');
+    const [globalCGST, setGlobalCGST] = useState<string>('0');
+    const [globalSGST, setGlobalSGST] = useState<string>('0');
+    const [globalIGST, setGlobalIGST] = useState<string>('0');
+    const [roundOff, setRoundOff] = useState<string>('0');
     const [creditDays, setCreditDays] = useState<string>('30');
 
     // New Fields for Invoice
@@ -245,7 +276,16 @@ export default function Billing() {
     const totalTax = invoiceItems.reduce((acc, item) => acc + item.cgstAmount + item.sgstAmount + item.igstAmount, 0);
     const totalDiscount = invoiceItems.reduce((acc, item) => acc + item.discountAmount, 0);
     const globalDiscountAmount = (subTotal * parseFloat(globalDiscount || '0')) / 100;
-    const invoiceTotal = subTotal + totalTax - totalDiscount - globalDiscountAmount + parseFloat(transportCharges || '0');
+
+    // Global GST Calculations
+    const globalCGSTAmount = (subTotal * parseFloat(globalCGST || '0')) / 100;
+    const globalSGSTAmount = (subTotal * parseFloat(globalSGST || '0')) / 100;
+    const globalIGSTAmount = (subTotal * parseFloat(globalIGST || '0')) / 100;
+
+    const roundOffAmount = parseFloat(roundOff || '0');
+    const invoiceTotal = subTotal + totalTax - totalDiscount - globalDiscountAmount +
+        globalCGSTAmount + globalSGSTAmount + globalIGSTAmount +
+        parseFloat(transportCharges || '0') + roundOffAmount;
     const previousBalance = selectedDealer ? selectedDealer.balance : 0;
     const grandTotal = invoiceTotal + previousBalance;
 
@@ -515,9 +555,17 @@ export default function Billing() {
                                     <div className="flex items-center gap-1 bg-slate-100 rounded px-2 border border-slate-200">
                                         <span className="text-sm font-bold text-slate-500">INV</span>
                                         <input
+                                            ref={invoiceNoRef}
                                             type="text"
                                             value={manualInvoiceNo}
                                             onChange={(e) => setManualInvoiceNo(e.target.value)}
+                                            onFocus={(e) => e.target.select()}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    invoiceDateRef.current?.focus();
+                                                }
+                                            }}
                                             placeholder="Auto"
                                             className="w-24 p-1 bg-transparent font-bold text-slate-800 outline-none"
                                         />
@@ -525,9 +573,16 @@ export default function Billing() {
                                     <div className="flex items-center gap-2">
                                         <label className="text-xs font-medium text-slate-500">Date:</label>
                                         <input
+                                            ref={invoiceDateRef}
                                             type="date"
                                             value={invoiceDate}
                                             onChange={(e) => setInvoiceDate(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    dealerSearchInputRef.current?.focus();
+                                                }
+                                            }}
                                             className="p-1.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
                                         />
                                     </div>
@@ -539,6 +594,7 @@ export default function Billing() {
                                     <div className="relative flex-1">
                                         <Search className="absolute left-3 top-3 text-slate-400" size={18} />
                                         <input
+                                            ref={dealerSearchInputRef}
                                             type="text"
                                             className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             placeholder="Search dealer by name, phone, city..."
@@ -546,29 +602,58 @@ export default function Billing() {
                                             onChange={(e) => {
                                                 setDealerSearch(e.target.value);
                                                 setShowDealerDropdown(true);
+                                                setSelectedDealerIndex(0);
                                             }}
-                                            onFocus={() => setShowDealerDropdown(true)}
+                                            onFocus={() => {
+                                                setShowDealerDropdown(true);
+                                                setSelectedDealerIndex(0);
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'ArrowDown') {
+                                                    e.preventDefault();
+                                                    setSelectedDealerIndex(prev =>
+                                                        Math.min(prev + 1, filteredDealers.length - 1)
+                                                    );
+                                                } else if (e.key === 'ArrowUp') {
+                                                    e.preventDefault();
+                                                    setSelectedDealerIndex(prev => Math.max(prev - 1, 0));
+                                                } else if (e.key === 'Enter' && filteredDealers.length > 0) {
+                                                    e.preventDefault();
+                                                    setSelectedDealer(filteredDealers[selectedDealerIndex]);
+                                                    setShowDealerDropdown(false);
+                                                    setDealerSearch('');
+                                                    setTimeout(() => productSelectRef.current?.focus(), 100);
+                                                }
+                                            }}
                                         />
                                         {/* Dropdown */}
-                                        {showDealerDropdown && dealerSearch && (
-                                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                        {showDealerDropdown && (
+                                            <div ref={dealerDropdownRef} className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                                                 {filteredDealers.length === 0 ? (
                                                     <div className="p-4 text-center text-slate-500">
                                                         No dealers found
                                                     </div>
                                                 ) : (
-                                                    filteredDealers.map(d => (
+                                                    filteredDealers.map((d, index) => (
                                                         <button
                                                             key={d.id}
-                                                            className="w-full px-4 py-3 text-left hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                                                            ref={(el) => { dealerItemRefs.current[index] = el; }}
+                                                            className={`w-full px-4 py-3 text-left border-b border-slate-100 last:border-b-0 transition-colors ${index === selectedDealerIndex
+                                                                ? 'bg-emerald-600 text-white'
+                                                                : 'hover:bg-slate-50'
+                                                                }`}
                                                             onClick={() => {
                                                                 setSelectedDealer(d);
                                                                 setShowDealerDropdown(false);
                                                                 setDealerSearch('');
+                                                                setTimeout(() => productSelectRef.current?.focus(), 100);
                                                             }}
+                                                            onMouseEnter={() => setSelectedDealerIndex(index)}
                                                         >
-                                                            <p className="font-medium text-slate-800">{d.businessName}</p>
-                                                            <p className="text-xs text-slate-500">
+                                                            <p className={`font-medium ${index === selectedDealerIndex ? 'text-white' : 'text-slate-800'
+                                                                }`}>{d.businessName}</p>
+                                                            <p className={`text-xs ${index === selectedDealerIndex ? 'text-emerald-100' : 'text-slate-500'
+                                                                }`}>
                                                                 {d.contactPerson} • {d.phone} • {d.city && `${d.city}, `}{d.district}
                                                             </p>
                                                         </button>
@@ -620,9 +705,17 @@ export default function Billing() {
                             <div className="flex gap-4">
                                 <div className="flex-1">
                                     <select
+                                        ref={productSelectRef}
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={itemProduct?.id || ''}
                                         onChange={(e) => setItemProduct(products.find(p => p.id === e.target.value) || null)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && itemProduct) {
+                                                e.preventDefault();
+                                                itemQtyRef.current?.focus();
+                                                itemQtyRef.current?.select();
+                                            }
+                                        }}
                                     >
                                         <option value="" disabled>Select Product...</option>
                                         {products.map(p => (
@@ -634,6 +727,7 @@ export default function Billing() {
                                 </div>
                                 <div className="w-24">
                                     <input
+                                        ref={itemQtyRef}
                                         type="text"
                                         inputMode="numeric"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-center"
@@ -643,9 +737,18 @@ export default function Billing() {
                                             const val = e.target.value.replace(/[^0-9]/g, '');
                                             setItemQty(val);
                                         }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && itemQty && itemProduct) {
+                                                e.preventDefault();
+                                                addItemButtonRef.current?.click();
+                                                setTimeout(() => productSelectRef.current?.focus(), 100);
+                                            }
+                                        }}
+                                        onFocus={(e) => e.target.select()}
                                     />
                                 </div>
                                 <button
+                                    ref={addItemButtonRef}
                                     onClick={handleAddItem}
                                     disabled={!itemProduct}
                                     className="bg-emerald-600 text-white px-5 py-2.5 rounded-lg hover:bg-emerald-700 disabled:bg-slate-300 transition-colors"
@@ -666,9 +769,6 @@ export default function Billing() {
                                             <th className="p-3 text-center w-16">Unit</th>
                                             <th className="p-3 text-center w-20">Qty</th>
                                             <th className="p-3 text-right">Price</th>
-                                            <th className="p-3 text-center w-16">CGST%</th>
-                                            <th className="p-3 text-center w-16">SGST%</th>
-                                            <th className="p-3 text-center w-16">IGST%</th>
                                             <th className="p-3 text-center w-16">Disc%</th>
                                             <th className="p-3 text-right">Total</th>
                                             <th className="p-3 text-center w-12"></th>
@@ -677,7 +777,7 @@ export default function Billing() {
                                     <tbody className="divide-y divide-slate-100">
                                         {invoiceItems.length === 0 ? (
                                             <tr>
-                                                <td colSpan={11} className="p-8 text-center text-slate-400 italic">No items added yet</td>
+                                                <td colSpan={8} className="p-8 text-center text-slate-400 italic">No items added yet</td>
                                             </tr>
                                         ) : (
                                             invoiceItems.map((item, idx) => (
@@ -703,33 +803,6 @@ export default function Billing() {
                                                             type="text"
                                                             inputMode="decimal"
                                                             className="w-14 p-1.5 border border-slate-200 rounded text-center focus:ring-2 focus:ring-emerald-500 outline-none"
-                                                            value={item.cgst}
-                                                            onChange={(e) => handleUpdateItemTax(idx, 'cgst', e.target.value)}
-                                                        />
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <input
-                                                            type="text"
-                                                            inputMode="decimal"
-                                                            className="w-14 p-1.5 border border-slate-200 rounded text-center focus:ring-2 focus:ring-emerald-500 outline-none"
-                                                            value={item.sgst}
-                                                            onChange={(e) => handleUpdateItemTax(idx, 'sgst', e.target.value)}
-                                                        />
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <input
-                                                            type="text"
-                                                            inputMode="decimal"
-                                                            className="w-14 p-1.5 border border-slate-200 rounded text-center focus:ring-2 focus:ring-emerald-500 outline-none"
-                                                            value={item.igst}
-                                                            onChange={(e) => handleUpdateItemTax(idx, 'igst', e.target.value)}
-                                                        />
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <input
-                                                            type="text"
-                                                            inputMode="decimal"
-                                                            className="w-14 p-1.5 border border-slate-200 rounded text-center focus:ring-2 focus:ring-emerald-500 outline-none"
                                                             value={item.discount}
                                                             onChange={(e) => handleUpdateItemTax(idx, 'discount', e.target.value)}
                                                         />
@@ -747,6 +820,74 @@ export default function Billing() {
                                 </table>
                             </div>
                         </div>
+
+                        {/* Taxable GST Summary Table */}
+                        {invoiceItems.length > 0 && (
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div className="bg-slate-50 px-4 py-3 border-b border-slate-200">
+                                    <h3 className="font-semibold text-slate-700 text-sm">Taxable Summary</h3>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-slate-100 text-slate-600 font-medium border-b border-slate-200">
+                                            <tr>
+                                                <th className="p-3 text-center">HSN</th>
+                                                <th className="p-3 text-right">Taxable Value</th>
+                                                <th className="p-3 text-right">GST</th>
+                                                <th className="p-3 text-right">Total Tax</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {(() => {
+                                                // Group by HSN code
+                                                const hsnGroups = invoiceItems.reduce((acc: any, item) => {
+                                                    const hsn = item.hsnCode || 'N/A';
+                                                    if (!acc[hsn]) {
+                                                        acc[hsn] = {
+                                                            hsn,
+                                                            taxableValue: 0,
+                                                            cgstAmount: 0,
+                                                            sgstAmount: 0,
+                                                            igstAmount: 0,
+                                                        };
+                                                    }
+                                                    const taxableValue = item.unitPrice * item.quantity;
+                                                    acc[hsn].taxableValue += taxableValue;
+                                                    acc[hsn].cgstAmount += item.cgstAmount;
+                                                    acc[hsn].sgstAmount += item.sgstAmount;
+                                                    acc[hsn].igstAmount += item.igstAmount;
+                                                    return acc;
+                                                }, {});
+
+                                                return Object.values(hsnGroups).map((group: any, idx) => {
+                                                    const totalTax = group.cgstAmount + group.sgstAmount + group.igstAmount;
+                                                    const gstRate = group.taxableValue > 0 ? (totalTax / group.taxableValue) * 100 : 0;
+
+                                                    return (
+                                                        <tr key={idx} className="hover:bg-slate-50">
+                                                            <td className="p-3 text-center font-medium">{group.hsn}</td>
+                                                            <td className="p-3 text-right">₹{group.taxableValue.toFixed(2)}</td>
+                                                            <td className="p-3 text-right text-xs">
+                                                                {gstRate.toFixed(2)}%
+                                                                <div className="text-slate-500">(₹{totalTax.toFixed(2)})</div>
+                                                            </td>
+                                                            <td className="p-3 text-right font-medium">₹{totalTax.toFixed(2)}</td>
+                                                        </tr>
+                                                    );
+                                                });
+                                            })()}
+                                            {/* Summary Row */}
+                                            <tr className="bg-slate-50 font-bold">
+                                                <td className="p-3 text-right">Total:</td>
+                                                <td className="p-3 text-right">₹{invoiceItems.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0).toFixed(2)}</td>
+                                                <td className="p-3 text-right">₹{totalTax.toFixed(2)}</td>
+                                                <td className="p-3 text-right">₹{totalTax.toFixed(2)}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Transport & Additional Details */}
                         <div className={`bg-white p-5 rounded-xl shadow-sm border border-slate-200 ${invoiceItems.length === 0 ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -830,6 +971,77 @@ export default function Billing() {
                                         onChange={(e) => setGlobalDiscount(e.target.value.replace(/[^0-9.]/g, ''))}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 5)}
                                     />
+                                </div>
+
+                                {/* Global GST Fields */}
+                                <div className="col-span-2 md:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4 mt-2">
+                                    {/* CGST - Always visible */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-500 mb-1">Global CGST (%)</label>
+                                        <input
+                                            ref={globalCGSTRef}
+                                            type="text"
+                                            inputMode="decimal"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                            placeholder="0"
+                                            value={globalCGST}
+                                            onChange={(e) => setGlobalCGST(e.target.value.replace(/[^0-9.]/g, ''))}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 8)}
+                                        />
+                                    </div>
+
+                                    {/* SGST - Visible for Non-Kerala */}
+                                    {selectedDealer?.state?.toLowerCase() !== 'kerala' && (
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-500 mb-1">Global SGST (%)</label>
+                                            <input
+                                                ref={globalSGSTRef}
+                                                type="text"
+                                                inputMode="decimal"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                                placeholder="0"
+                                                value={globalSGST}
+                                                onChange={(e) => setGlobalSGST(e.target.value.replace(/[^0-9.]/g, ''))}
+                                                onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* IGST - Always Visible */}
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-500 mb-1">Global IGST (%)</label>
+                                        <input
+                                            ref={globalIGSTRef}
+                                            type="text"
+                                            inputMode="decimal"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                            placeholder="0"
+                                            value={globalIGST}
+                                            onChange={(e) => setGlobalIGST(e.target.value.replace(/[^0-9.]/g, ''))}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Round Off (₹)</label>
+                                    <input
+                                        ref={roundOffRef}
+                                        type="text"
+                                        inputMode="decimal"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder="0"
+                                        value={roundOff}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            // Allow negative sign, digits, and decimal point
+                                            if (value === '' || value === '-' || /^-?\d*\.?\d*$/.test(value)) {
+                                                setRoundOff(value);
+                                            }
+                                        }}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 6)}
+                                    />
+                                    <p className="text-xs text-slate-400 mt-1">Use + or - to adjust total</p>
                                 </div>
 
                                 {/* New Fields */}
@@ -983,7 +1195,6 @@ export default function Billing() {
                                     </span>
                                 ) : (
                                     <>
-                                        <FileText size={20} />
                                         <FileText size={20} />
                                         {editInvoiceId ? 'Update Bill' : 'Confirm & Generate Bill'}
                                     </>
@@ -1143,7 +1354,11 @@ export default function Billing() {
                                 dispatchDate,
                                 dispatchThrough,
                                 termsOfDelivery,
-                                manualInvoiceNo
+                                manualInvoiceNo,
+                                roundOff,
+                                globalCGST,
+                                globalSGST,
+                                globalIGST
                             })
                         }}
                         dealer={selectedDealer}

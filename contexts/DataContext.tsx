@@ -430,7 +430,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             discount: item.discount,
             discount_amount: item.discountAmount,
             total: item.total,
-            gst_amount: item.gstAmount,
             hsn_code: item.hsnCode,
             unit: item.unit,
         }));
@@ -553,7 +552,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             discount: item.discount,
             discount_amount: item.discountAmount,
             total: item.total,
-            gst_amount: item.gstAmount,
             hsn_code: item.hsnCode,
             unit: item.unit,
         }));

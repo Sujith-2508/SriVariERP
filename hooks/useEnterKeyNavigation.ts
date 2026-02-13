@@ -8,12 +8,18 @@ import { RefObject } from 'react';
 export function useEnterKeyNavigation(
     fieldRefs: RefObject<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>[]
 ) {
-    const handleKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
+    const handleKeyDown = (e: React.KeyboardEvent, passedIndex?: number) => {
         if (e.key === 'Enter') {
             e.preventDefault();
 
+            // Find current field index dynamically for robustness
+            const currentIndex = fieldRefs.findIndex(ref => ref.current === e.currentTarget);
+
+            // Fallback to passed index if dynamic find fails (shouldn't happen for valid refs)
+            const activeIndex = currentIndex !== -1 ? currentIndex : (passedIndex || 0);
+
             // Find next focusable field
-            let nextIndex = currentIndex + 1;
+            let nextIndex = activeIndex + 1;
             while (nextIndex < fieldRefs.length) {
                 const nextField = fieldRefs[nextIndex]?.current;
 
