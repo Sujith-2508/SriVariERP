@@ -39,11 +39,10 @@ import {
     RefreshCw,
     Download
 } from 'lucide-react';
-import SearchableSelect from '@/components/SearchableSelect';
 
 type TabType = 'bills' | 'payments' | 'suppliers';
 
-export default function PurchasesPage() {
+export default function PurchasesPageNew() {
     const { products } = useData(); // Get products from context
     const [activeTab, setActiveTab] = useState<TabType>('bills');
     const [searchTerm, setSearchTerm] = useState('');
@@ -161,6 +160,8 @@ export default function PurchasesPage() {
         billSupplierRef,
         billNumberRef,
         billDateRef,
+        // We will jump to product selection manually or via tab, or include it? 
+        // Let's include the Total -> Due -> Notes sequence
         billTotalRef,
         billDueDateRef,
         billNotesRef
@@ -176,10 +177,13 @@ export default function PurchasesPage() {
             } else if (field === 'qty') {
                 billCostRef.current?.focus();
             } else if (field === 'cost') {
+                // Trigger add item
                 if (currentBillItem.productId && currentBillItem.quantity) {
                     handleAddBillItem();
+                    // Focus back to product for next entry
                     setTimeout(() => billProductRef.current?.focus(), 0);
                 } else {
+                    // If invalid, maybe move to Add button to show interaction
                     billAddBtnRef.current?.focus();
                 }
             }
@@ -201,8 +205,9 @@ export default function PurchasesPage() {
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, []); // Only load on mount
 
+    // Supplier operations
     const handleSupplierSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (editingSupplier) {
@@ -246,25 +251,31 @@ export default function PurchasesPage() {
         });
     };
 
+    // Bill operations
     const handleBillSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Auto-add pending item if partially entered
         let finalItems = [...billItems];
         if (currentBillItem.productId && currentBillItem.quantity > 0) {
             const total = currentBillItem.quantity * currentBillItem.unitPrice;
             const newItem = { ...currentBillItem, total };
             finalItems.push(newItem);
         }
+
+        // Recalculate amount if items exist
         let finalAmount = billForm.amount;
         if (finalItems.length > 0) {
             finalAmount = finalItems.reduce((sum, item) => sum + item.total, 0);
         }
+
         await createPurchaseBill({
             supplierId: billForm.supplierId,
             billNumber: billForm.billNumber,
             billDate: new Date(billForm.billDate),
             amount: finalAmount,
             dueDate: billForm.dueDate ? new Date(billForm.dueDate) : undefined,
-            items: finalItems,
+            items: finalItems, // Pass the items here
             notes: billForm.notes
         });
         setIsBillModalOpen(false);
@@ -298,12 +309,18 @@ export default function PurchasesPage() {
 
     const handleAddBillItem = () => {
         if (!currentBillItem.productId || !currentBillItem.quantity) return;
+
         const total = currentBillItem.quantity * currentBillItem.unitPrice;
         const newItem = { ...currentBillItem, total };
+
         const newItems = [...billItems, newItem];
         setBillItems(newItems);
+
+        // Update total bill amount
         const newTotal = newItems.reduce((sum, item) => sum + item.total, 0);
         setBillForm(prev => ({ ...prev, amount: newTotal }));
+
+        // Reset current item input
         setCurrentBillItem({
             productId: '',
             productName: '',
@@ -312,6 +329,7 @@ export default function PurchasesPage() {
         });
     };
 
+    // Payment operations
     const handlePaymentSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         await createPurchasePayment({
@@ -340,15 +358,21 @@ export default function PurchasesPage() {
         });
     };
 
+    // Statement
     const viewStatement = async (supplier: SupplierData) => {
         const statement = await getSupplierStatement(supplier.id);
+        // Use the final running balance from the statement to ensure consistency
         const lastEntry = statement.length > 0 ? statement[statement.length - 1] : null;
         const finalBalance = lastEntry ? lastEntry.balance : 0;
+
         setSelectedSupplier({ ...supplier, balance: finalBalance });
         setStatementData(statement);
         setIsStatementModalOpen(true);
+
+        // Also update the master list if there's a discrepancy
         if (supplier.balance !== finalBalance) {
             setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, balance: finalBalance } : s));
+            // Recalculate and update database to ensure consistency
             try {
                 await recalculateSupplierBalance(supplier.id);
             } catch (err) {
@@ -375,23 +399,33 @@ export default function PurchasesPage() {
         try {
             const jsPDF = (await import('jspdf')).default;
             const autoTable = (await import('jspdf-autotable')).default;
+
             const doc = new jsPDF();
             const supplier = suppliers.find(s => s.id === bill.supplierId);
+
+            // Header
             doc.setFontSize(22);
             doc.setTextColor(40, 40, 40);
             doc.text('Purchase Bill', 14, 20);
+
             doc.setFontSize(10);
             doc.setTextColor(100, 100, 100);
             doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 26);
+
+            // Bill Details Box
             doc.setDrawColor(200, 200, 200);
             doc.setFillColor(250, 250, 250);
             doc.rect(14, 35, 182, 35, 'FD');
+
             doc.setTextColor(0, 0, 0);
             doc.setFontSize(12);
             doc.text(`Bill #${bill.billNumber}`, 20, 45);
+
             doc.setFontSize(10);
             doc.text(`Date: ${bill.billDate.toLocaleDateString()}`, 20, 52);
             doc.text(`Due Date: ${bill.dueDate ? bill.dueDate.toLocaleDateString() : 'N/A'}`, 20, 58);
+
+            // Supplier Details (Right side)
             if (supplier) {
                 doc.text(`Supplier:`, 110, 45);
                 doc.setFont('helvetica', 'bold');
@@ -401,8 +435,11 @@ export default function PurchasesPage() {
                 if (supplier.phone) doc.text(`Ph: ${supplier.phone}`, 110, 60);
                 if (supplier.gstNumber) doc.text(`GST: ${supplier.gstNumber}`, 110, 65);
             }
+
+            // Items Table
             const tableColumn = ["Product", "Qty", "Cost", "Total"];
             const tableRows: any[] = [];
+
             if (bill.items && Array.isArray(bill.items)) {
                 bill.items.forEach((item: any) => {
                     const billItem = [
@@ -414,27 +451,34 @@ export default function PurchasesPage() {
                     tableRows.push(billItem);
                 });
             }
+
             (autoTable as any)(doc, {
                 head: [tableColumn],
                 body: tableRows,
                 startY: 80,
                 theme: 'grid',
-                headStyles: { fillColor: [16, 185, 129] },
+                headStyles: { fillColor: [16, 185, 129] }, // Emerald color to match theme
                 styles: { fontSize: 9 },
             });
+
+            // Totals
             const finalY = (doc as any).lastAutoTable.finalY + 10;
+
             doc.setFontSize(10);
             doc.text(`Total Amount:`, 140, finalY);
             doc.setFont('helvetica', 'bold');
             doc.text(`Rs. ${bill.amount.toLocaleString()}`, 170, finalY);
+
             doc.setFont('helvetica', 'normal');
             doc.text(`Paid Amount:`, 140, finalY + 6);
-            doc.setTextColor(22, 163, 74);
+            doc.setTextColor(22, 163, 74); // Green
             doc.text(`Rs. ${bill.paidAmount.toLocaleString()}`, 170, finalY + 6);
+
             doc.setTextColor(0, 0, 0);
             doc.text(`Balance:`, 140, finalY + 12);
-            if (bill.balance > 0) doc.setTextColor(220, 38, 38);
+            if (bill.balance > 0) doc.setTextColor(220, 38, 38); // Red
             doc.text(`Rs. ${bill.balance.toLocaleString()}`, 170, finalY + 12);
+
             doc.save(`bill_${bill.billNumber}.pdf`);
         } catch (error) {
             console.error('Error generating PDF:', error);
@@ -450,30 +494,41 @@ export default function PurchasesPage() {
         try {
             const jsPDF = (await import('jspdf')).default;
             const autoTable = (await import('jspdf-autotable')).default;
+
             const doc = new jsPDF();
+
+            // Header
             doc.setFontSize(22);
             doc.text('Supplier Statement', 14, 20);
+
             doc.setFontSize(10);
             doc.setTextColor(100, 100, 100);
             doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 26);
+
+            // Supplier Box
             doc.setDrawColor(200, 200, 200);
             doc.setFillColor(250, 250, 250);
             doc.rect(14, 30, 182, 30, 'FD');
+
             doc.setTextColor(0, 0, 0);
             doc.setFontSize(14);
             doc.setFont('helvetica', 'bold');
             doc.text(selectedSupplier.name, 20, 42);
+
             doc.setFontSize(10);
             doc.setFont('helvetica', 'normal');
             if (selectedSupplier.phone) doc.text(`Phone: ${selectedSupplier.phone}`, 20, 48);
             if (selectedSupplier.city) doc.text(`City: ${selectedSupplier.city}`, 20, 54);
+
             const finalBalance = selectedSupplier.balance;
             doc.text(`Current Balance:`, 140, 42);
             doc.setFontSize(12);
             doc.setFont('helvetica', 'bold');
-            if (finalBalance > 0) doc.setTextColor(220, 38, 38);
+            if (finalBalance > 0) doc.setTextColor(220, 38, 38); // Red if we owe money
             doc.text(`Rs. ${finalBalance.toLocaleString()}`, 140, 48);
             doc.setTextColor(0, 0, 0);
+
+            // Statement Table
             const tableColumn = ["Date", "Type", "Reference", "Debit (+)", "Credit (-)", "Balance"];
             const tableRows = statementData.map(entry => [
                 new Date(entry.date).toLocaleDateString(),
@@ -483,6 +538,7 @@ export default function PurchasesPage() {
                 entry.credit > 0 ? entry.credit.toLocaleString() : '-',
                 entry.balance.toLocaleString()
             ]);
+
             (autoTable as any)(doc, {
                 head: [tableColumn],
                 body: tableRows,
@@ -491,6 +547,7 @@ export default function PurchasesPage() {
                 headStyles: { fillColor: [16, 185, 129] },
                 styles: { fontSize: 8 },
             });
+
             doc.save(`${selectedSupplier.name}_Statement.pdf`);
         } catch (error) {
             console.error('Error generating PDF:', error);
@@ -500,6 +557,7 @@ export default function PurchasesPage() {
         }
     };
 
+    // Filtering
     const filteredSuppliers = useMemo(() => {
         const searchTermLower = searchTerm.toLowerCase();
         return suppliers.filter(s =>
@@ -528,6 +586,7 @@ export default function PurchasesPage() {
 
     return (
         <div className="p-6 h-full overflow-y-auto">
+            {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800">Purchase Management</h1>
@@ -553,6 +612,7 @@ export default function PurchasesPage() {
                 </button>
             </div>
 
+            {/* Tabs */}
             <div className="flex gap-2 mb-6">
                 <button
                     onClick={() => setActiveTab('bills')}
@@ -592,7 +652,9 @@ export default function PurchasesPage() {
                 </button>
             </div>
 
+            {/* Content */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* Search */}
                 <div className="p-4 border-b border-slate-200 flex gap-4 items-center">
                     <div className="relative flex-1 max-w-sm">
                         <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
@@ -609,6 +671,7 @@ export default function PurchasesPage() {
                 {isLoading ? (
                     <div className="p-8 text-center text-slate-500">Loading...</div>
                 ) : activeTab === 'suppliers' ? (
+                    /* Suppliers Table */
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-slate-50 text-slate-600 font-medium">
@@ -661,10 +724,18 @@ export default function PurchasesPage() {
                                         </td>
                                     </tr>
                                 ))}
+                                {filteredSuppliers.length === 0 && (
+                                    <tr>
+                                        <td colSpan={6} className="p-8 text-center text-slate-500">
+                                            No suppliers found. Add your first supplier!
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
                 ) : activeTab === 'bills' ? (
+                    /* Bills Table */
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-slate-50 text-slate-600 font-medium">
@@ -710,10 +781,18 @@ export default function PurchasesPage() {
                                         </tr>
                                     );
                                 })}
+                                {filteredBills.length === 0 && (
+                                    <tr>
+                                        <td colSpan={6} className="p-8 text-center text-slate-500">
+                                            No bills found. Create your first purchase bill!
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
                 ) : (
+                    /* Payments Table */
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-slate-50 text-slate-600 font-medium">
@@ -733,17 +812,28 @@ export default function PurchasesPage() {
                                             <td className="p-4 font-mono font-bold text-slate-800">{p.paymentNumber}</td>
                                             <td className="p-4 font-medium text-slate-700">{supplier?.name}</td>
                                             <td className="p-4 text-slate-600">{p.paymentDate.toLocaleDateString()}</td>
-                                            <td className="p-4 text-slate-600">{p.paymentMode}</td>
+                                            <td className="p-4">
+                                                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                                                    {p.paymentMode}
+                                                </span>
+                                            </td>
                                             <td className="p-4 text-right font-bold text-green-600">₹{p.amount.toLocaleString()}</td>
                                         </tr>
                                     );
                                 })}
+                                {filteredPayments.length === 0 && (
+                                    <tr>
+                                        <td colSpan={5} className="p-8 text-center text-slate-500">
+                                            No payments found. Record your first payment!
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
                 )}
             </div>
-            {/* END PART 1 */}
+            {/* END PART 2 */}
 
             {/* Supplier Modal */}
             {isSupplierModalOpen && (
@@ -755,27 +845,27 @@ export default function PurchasesPage() {
                     <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden z-10">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h2 className="text-xl font-bold text-slate-800">
-                                {editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
+                                {editingSupplier ? 'Edit Supplier' : 'Add Supplier'}
                             </h2>
                             <button onClick={() => setIsSupplierModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                                 <X size={24} />
                             </button>
                         </div>
                         <form onSubmit={handleSupplierSubmit} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Supplier Name *</label>
+                                <input
+                                    ref={supplierNameRef}
+                                    autoFocus
+                                    onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                    type="text"
+                                    required
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                    value={supplierForm.name}
+                                    onChange={e => setSupplierForm({ ...supplierForm, name: e.target.value })}
+                                />
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Supplier Name *</label>
-                                    <input
-                                        ref={supplierNameRef}
-                                        autoFocus
-                                        onKeyDown={(e) => handleSupplierKeyDown(e)}
-                                        type="text"
-                                        required
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={supplierForm.name}
-                                        onChange={e => setSupplierForm({ ...supplierForm, name: e.target.value })}
-                                    />
-                                </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
                                     <input
@@ -788,7 +878,7 @@ export default function PurchasesPage() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
                                     <input
                                         ref={supplierPhoneRef}
                                         onKeyDown={(e) => handleSupplierKeyDown(e)}
@@ -798,6 +888,8 @@ export default function PurchasesPage() {
                                         onChange={e => setSupplierForm({ ...supplierForm, phone: e.target.value })}
                                     />
                                 </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
                                     <input
@@ -817,7 +909,7 @@ export default function PurchasesPage() {
                                         type="text"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={supplierForm.gstNumber}
-                                        onChange={e => setSupplierForm({ ...supplierForm, gstNumber: e.target.value.toUpperCase() })}
+                                        onChange={e => setSupplierForm({ ...supplierForm, gstNumber: e.target.value })}
                                     />
                                 </div>
                             </div>
@@ -825,9 +917,16 @@ export default function PurchasesPage() {
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
                                 <textarea
                                     ref={supplierAddressRef}
-                                    onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            // Let it behave normally in textarea, or navigate if specific logic wanted
+                                            // For now, let's allow newlines
+                                        } else {
+                                            handleSupplierKeyDown(e);
+                                        }
+                                    }}
                                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                    rows={3}
+                                    rows={2}
                                     value={supplierForm.address}
                                     onChange={e => setSupplierForm({ ...supplierForm, address: e.target.value })}
                                 />
@@ -844,10 +943,130 @@ export default function PurchasesPage() {
                                     type="submit"
                                     className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-lg"
                                 >
-                                    {editingSupplier ? 'Update Supplier' : 'Save Supplier'}
+                                    {editingSupplier ? 'Save Changes' : 'Add Supplier'}
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* View Bill Modal */}
+            {isViewBillModalOpen && selectedBill && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setIsViewBillModalOpen(false)}
+                    />
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden z-10" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <h2 className="text-xl font-bold text-slate-800">Bill Details: {selectedBill.billNumber}</h2>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => downloadBillPdf(selectedBill)}
+                                    disabled={isGeneratingPdf}
+                                    className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors"
+                                    title="Download PDF"
+                                >
+                                    {isGeneratingPdf ? 'Generating...' : <><Download size={18} /> Download PDF</>}
+                                </button>
+                                <button onClick={() => setIsViewBillModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                                <div>
+                                    <p className="text-slate-500">Date</p>
+                                    <p className="font-medium">{selectedBill.billDate.toLocaleDateString()}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500">Amount</p>
+                                    <p className="font-bold text-slate-800">₹{selectedBill.amount.toLocaleString()}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500">Balance</p>
+                                    <p className="font-bold text-red-600">₹{selectedBill.balance.toLocaleString()}</p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 className="font-semibold text-sm text-slate-700 mb-2">Items</h3>
+                                <div className="border rounded-lg overflow-hidden">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-slate-50 text-slate-600 font-medium">
+                                            <tr>
+                                                <th className="p-2">Product</th>
+                                                <th className="p-2 text-center">Qty</th>
+                                                <th className="p-2 text-right">Cost</th>
+                                                <th className="p-2 text-right">Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {selectedBill.items && Array.isArray(selectedBill.items) && selectedBill.items.length > 0 ? (
+                                                selectedBill.items.map((item: any, idx: number) => (
+                                                    <tr key={idx} className="hover:bg-slate-50">
+                                                        <td className="p-2 font-medium">{item.productName}</td>
+                                                        <td className="p-2 text-center">{item.quantity}</td>
+                                                        <td className="p-2 text-right">₹{(item.unitPrice || 0).toLocaleString()}</td>
+                                                        <td className="p-2 text-right font-medium">₹{(item.total || 0).toLocaleString()}</td>
+                                                    </tr>
+                                                ))
+                                            ) : (
+                                                <tr>
+                                                    <td colSpan={4} className="p-4 text-center text-slate-500">No items recorded</td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                        {selectedBill.items && Array.isArray(selectedBill.items) && selectedBill.items.length > 0 && (
+                                            <tfoot className="bg-slate-50 font-bold">
+                                                <tr>
+                                                    <td colSpan={3} className="p-2 text-right">Total:</td>
+                                                    <td className="p-2 text-right">
+                                                        ₹{selectedBill.items.reduce((sum: number, item: any) => sum + (item.total || 0), 0).toLocaleString()}
+                                                    </td>
+                                                </tr>
+                                            </tfoot>
+                                        )}
+                                    </table>
+                                </div>
+                            </div>
+
+                            {/* Payment History Section */}
+                            {billAllocations && billAllocations.length > 0 && (
+                                <div>
+                                    <h3 className="font-semibold text-sm text-slate-700 mb-2">Payment History</h3>
+                                    <div className="border rounded-lg overflow-hidden">
+                                        <table className="w-full text-sm text-left">
+                                            <thead className="bg-slate-50 text-slate-600 font-medium">
+                                                <tr>
+                                                    <th className="p-2">Date</th>
+                                                    <th className="p-2">Payment No</th>
+                                                    <th className="p-2 text-right">Amount</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {billAllocations.map((alloc) => (
+                                                    <tr key={alloc.id}>
+                                                        <td className="p-2">{new Date(alloc.allocationDate).toLocaleDateString()}</td>
+                                                        <td className="p-2">{alloc.paymentNumber}</td>
+                                                        <td className="p-2 text-right text-green-600">₹{alloc.amount.toLocaleString()}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedBill.notes && (
+                                <div>
+                                    <p className="text-slate-500 text-sm">Notes</p>
+                                    <p className="text-sm border p-2 rounded bg-slate-50">{selectedBill.notes}</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
@@ -859,27 +1078,34 @@ export default function PurchasesPage() {
                         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
                         onClick={() => setIsBillModalOpen(false)}
                     />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden z-10">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h2 className="text-xl font-bold text-slate-800">New Purchase Bill</h2>
                             <button onClick={() => setIsBillModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                                 <X size={24} />
                             </button>
                         </div>
-                        <form onSubmit={handleBillSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
-                                    <SearchableSelect
-                                        options={suppliers}
-                                        value={billForm.supplierId}
-                                        onChange={(val) => setBillForm({ ...billForm, supplierId: val })}
-                                        placeholder="Search Supplier"
-                                        className="w-full"
-                                        ref={billSupplierRef}
-                                        onKeyDown={(e) => handleBillKeyDown(e)}
-                                    />
-                                </div>
+                        <form onSubmit={handleBillSubmit} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
+                                <select
+                                    ref={billSupplierRef}
+                                    autoFocus
+                                    onKeyDown={(e) => handleBillKeyDown(e)}
+                                    required
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                                    value={billForm.supplierId}
+                                    onChange={e => setBillForm({ ...billForm, supplierId: e.target.value })}
+                                >
+                                    <option value="">Select Supplier</option>
+                                    {suppliers.map(s => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Bill Details */}
+                            <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Bill Number *</label>
                                     <input
@@ -896,7 +1122,13 @@ export default function PurchasesPage() {
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Bill Date *</label>
                                     <input
                                         ref={billDateRef}
-                                        onKeyDown={(e) => handleBillKeyDown(e)}
+                                        onKeyDown={(e) => {
+                                            // Custom check to move to product entry on enter from date
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                billProductRef.current?.focus();
+                                            }
+                                        }}
                                         type="date"
                                         required
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -906,156 +1138,173 @@ export default function PurchasesPage() {
                                 </div>
                             </div>
 
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                <h3 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">Add Items</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                                    <div className="md:col-span-5">
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Product</label>
-                                        <SearchableSelect
-                                            options={products}
-                                            value={currentBillItem.productId}
-                                            onChange={(val: string) => {
-                                                const prod = products.find(p => p.id === val);
-                                                setCurrentBillItem({
-                                                    ...currentBillItem,
-                                                    productId: val,
-                                                    productName: prod?.name || '',
-                                                    unitPrice: prod?.costPrice || prod?.price || 0
-                                                });
-                                            }}
-                                            placeholder="Search Product"
-                                            className="w-full"
+                            {/* Product Entry Section */}
+                            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                <h3 className="font-semibold text-sm text-slate-700 mb-3">Add Products</h3>
+                                <div className="flex gap-2 mb-2">
+                                    <div className="flex-1">
+                                        <select
                                             ref={billProductRef}
-                                            onKeyDown={(e: React.KeyboardEvent) => handleProductEntryKeyDown(e, 'product')}
-                                        />
+                                            onKeyDown={(e) => handleProductEntryKeyDown(e, 'product')}
+                                            className="w-full p-2 border border-slate-300 rounded text-sm"
+                                            value={currentBillItem.productId}
+                                            onChange={e => {
+                                                const prod = products.find(p => p.id === e.target.value);
+                                                if (prod) {
+                                                    setCurrentBillItem({
+                                                        ...currentBillItem,
+                                                        productId: prod.id,
+                                                        productName: prod.name,
+                                                        unitPrice: prod.costPrice || 0
+                                                    });
+                                                }
+                                            }}
+                                        >
+                                            <option value="">Select Product...</option>
+                                            {products.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name} (Curr Stock: {p.stock})</option>
+                                            ))}
+                                        </select>
                                     </div>
-                                    <div className="md:col-span-2">
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Quantity</label>
+                                    <div className="w-20">
                                         <input
                                             ref={billQtyRef}
                                             onKeyDown={(e) => handleProductEntryKeyDown(e, 'qty')}
                                             type="number"
                                             min="1"
-                                            className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                            placeholder="Qty"
+                                            className="w-full p-2 border border-slate-300 rounded text-sm"
                                             value={currentBillItem.quantity || ''}
-                                            onChange={e => setCurrentBillItem({ ...currentBillItem, quantity: parseFloat(e.target.value) || 0 })}
+                                            onChange={e => setCurrentBillItem({ ...currentBillItem, quantity: parseInt(e.target.value) || 0 })}
                                         />
                                     </div>
-                                    <div className="md:col-span-3">
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Unit Cost</label>
+                                    <div className="w-24">
                                         <input
                                             ref={billCostRef}
                                             onKeyDown={(e) => handleProductEntryKeyDown(e, 'cost')}
                                             type="number"
-                                            className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                            min="0"
+                                            step="0.01"
+                                            placeholder="Cost"
+                                            className="w-full p-2 border border-slate-300 rounded text-sm"
                                             value={currentBillItem.unitPrice || ''}
                                             onChange={e => setCurrentBillItem({ ...currentBillItem, unitPrice: parseFloat(e.target.value) || 0 })}
                                         />
                                     </div>
-                                    <div className="md:col-span-2">
-                                        <button
-                                            ref={billAddBtnRef}
-                                            type="button"
-                                            onClick={handleAddBillItem}
-                                            className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold hover:bg-slate-700 transition-colors"
-                                        >
-                                            Add
-                                        </button>
-                                    </div>
+                                    <button
+                                        ref={billAddBtnRef}
+                                        type="button"
+                                        onClick={handleAddBillItem}
+                                        disabled={!currentBillItem.productId || !currentBillItem.quantity}
+                                        className="bg-emerald-600 text-white px-3 rounded hover:bg-emerald-700 disabled:bg-slate-300"
+                                    >
+                                        <Plus size={16} />
+                                    </button>
                                 </div>
 
+                                {/* Items List */}
                                 {billItems.length > 0 && (
-                                    <div className="mt-4 border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                        <table className="w-full text-xs">
-                                            <thead className="bg-slate-100 text-slate-600 font-bold">
-                                                <tr>
-                                                    <th className="p-2 text-left">Product</th>
-                                                    <th className="p-2 text-center">Qty</th>
-                                                    <th className="p-2 text-right">Cost</th>
-                                                    <th className="p-2 text-right">Total</th>
-                                                    <th className="p-2 text-center">Action</th>
+                                    <table className="w-full text-xs text-left">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 text-slate-500">
+                                                <th className="py-1">Product</th>
+                                                <th className="py-1 text-center">Qty</th>
+                                                <th className="py-1 text-right">Cost</th>
+                                                <th className="py-1 text-right">Total</th>
+                                                <th className="py-1 w-8"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {billItems.map((item, idx) => (
+                                                <tr key={idx}>
+                                                    <td className="py-1 font-medium">{item.productName}</td>
+                                                    <td className="py-1 text-center">{item.quantity}</td>
+                                                    <td className="py-1 text-right">₹{item.unitPrice}</td>
+                                                    <td className="py-1 text-right font-medium">₹{item.total.toLocaleString()}</td>
+                                                    <td className="py-1 text-center">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const newItems = [...billItems];
+                                                                newItems.splice(idx, 1);
+                                                                setBillItems(newItems);
+
+                                                                // Update form amount
+                                                                const newTotal = newItems.reduce((sum, item) => sum + item.total, 0);
+                                                                setBillForm(prev => ({ ...prev, amount: newTotal }));
+                                                            }}
+                                                            className="text-red-500 hover:text-red-700"
+                                                        >
+                                                            <X size={12} />
+                                                        </button>
+                                                    </td>
                                                 </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {billItems.map((item, idx) => (
-                                                    <tr key={idx}>
-                                                        <td className="p-2">{item.productName}</td>
-                                                        <td className="p-2 text-center">{item.quantity}</td>
-                                                        <td className="p-2 text-right">₹{item.unitPrice.toLocaleString()}</td>
-                                                        <td className="p-2 text-right font-bold">₹{item.total.toLocaleString()}</td>
-                                                        <td className="p-2 text-center">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const newItems = billItems.filter((_, i) => i !== idx);
-                                                                    setBillItems(newItems);
-                                                                    setBillForm(prev => ({ ...prev, amount: newItems.reduce((sum, item) => sum + item.total, 0) }));
-                                                                }}
-                                                                className="text-red-500 hover:text-red-700 p-1"
-                                                            >
-                                                                <X size={14} />
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                            ))}
+                                            <tr className="border-t border-slate-200 font-bold">
+                                                <td colSpan={3} className="py-2 text-right">Total:</td>
+                                                <td className="py-2 text-right">₹{billItems.reduce((sum, item) => sum + item.total, 0).toLocaleString()}</td>
+                                                <td></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
                                 )}
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Total Bill Amount *</label>
-                                        <input
-                                            ref={billTotalRef}
-                                            onKeyDown={(e) => handleBillKeyDown(e)}
-                                            type="number"
-                                            required
-                                            className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-emerald-500 outline-none text-2xl font-bold text-emerald-600"
-                                            value={billForm.amount || ''}
-                                            onChange={e => setBillForm({ ...billForm, amount: parseFloat(e.target.value) || 0 })}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Due Date</label>
-                                        <input
-                                            ref={billDueDateRef}
-                                            onKeyDown={(e) => handleBillKeyDown(e)}
-                                            type="date"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={billForm.dueDate}
-                                            onChange={e => setBillForm({ ...billForm, dueDate: e.target.value })}
-                                        />
-                                    </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Total Amount *</label>
+                                    <input
+                                        ref={billTotalRef}
+                                        onKeyDown={(e) => handleBillKeyDown(e)}
+                                        type="number"
+                                        required
+                                        min="0"
+                                        step="0.01"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold"
+                                        value={billForm.amount || ''}
+                                        onChange={e => setBillForm({ ...billForm, amount: parseFloat(e.target.value) || 0 })}
+                                    />
+                                    {billItems.length > 0 && (
+                                        <p className="text-xs text-slate-500 mt-1">Calculated from items: ₹{billItems.reduce((sum, item) => sum + item.total, 0)}</p>
+                                    )}
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Notes / Remarks</label>
-                                    <textarea
-                                        ref={billNotesRef}
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Due Date</label>
+                                    <input
+                                        ref={billDueDateRef}
                                         onKeyDown={(e) => handleBillKeyDown(e)}
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none h-[118px]"
-                                        placeholder="Add any additional details..."
-                                        value={billForm.notes}
-                                        onChange={e => setBillForm({ ...billForm, notes: e.target.value })}
+                                        type="date"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        value={billForm.dueDate}
+                                        onChange={e => setBillForm({ ...billForm, dueDate: e.target.value })}
                                     />
                                 </div>
                             </div>
 
-                            <div className="pt-6 border-t border-slate-100 flex gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                                <textarea
+                                    ref={billNotesRef}
+                                    onKeyDown={(e) => handleBillKeyDown(e)}
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                    rows={2}
+                                    value={billForm.notes}
+                                    onChange={e => setBillForm({ ...billForm, notes: e.target.value })}
+                                />
+                            </div>
+                            <div className="pt-4 flex gap-3">
                                 <button
                                     type="button"
                                     onClick={() => setIsBillModalOpen(false)}
-                                    className="flex-1 py-4 text-slate-700 font-bold hover:bg-slate-50 rounded-xl border-2 border-slate-200 transition-all"
+                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg border border-slate-200"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 py-4 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 transition-all"
+                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-lg"
                                 >
-                                    Save Purchase Bill
+                                    Create Bill
                                 </button>
                             </div>
                         </form>
@@ -1063,123 +1312,7 @@ export default function PurchasesPage() {
                 </div>
             )}
 
-            {/* View Bill Modal */}
-            {isViewBillModalOpen && selectedBill && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        onClick={() => setIsViewBillModalOpen(false)}
-                    />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <div>
-                                <h1 className="text-xl font-bold text-slate-800">
-                                    Bill Details: {selectedBill.billNumber}
-                                </h1>
-                                <p className="text-sm text-slate-500">
-                                    Supplier: {suppliers.find(s => s.id === selectedBill.supplierId)?.name}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => downloadBillPdf(selectedBill)}
-                                    disabled={isGeneratingPdf}
-                                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-md disabled:bg-emerald-400"
-                                >
-                                    {isGeneratingPdf ? 'Generating...' : <><Download size={16} /> Export PDF</>}
-                                </button>
-                                <button onClick={() => setIsViewBillModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
-                                    <X size={24} />
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="p-6 overflow-y-auto space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Bill Date</p>
-                                    <p className="font-medium text-slate-800">{selectedBill.billDate.toLocaleDateString()}</p>
-                                </div>
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Total Amount</p>
-                                    <p className="font-bold text-slate-800">₹{selectedBill.amount.toLocaleString()}</p>
-                                </div>
-                                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                                    <p className="text-[10px] text-emerald-600 uppercase font-bold mb-1">Paid Amount</p>
-                                    <p className="font-bold text-emerald-700">₹{selectedBill.paidAmount.toLocaleString()}</p>
-                                </div>
-                                <div className={`${selectedBill.balance > 0 ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-200'} p-4 rounded-xl border`}>
-                                    <p className={`text-[10px] ${selectedBill.balance > 0 ? 'text-red-500' : 'text-slate-500'} uppercase font-bold mb-1`}>Balance</p>
-                                    <p className={`font-bold ${selectedBill.balance > 0 ? 'text-red-600' : 'text-slate-800'}`}>₹{selectedBill.balance.toLocaleString()}</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-3">
-                                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Bill Items</h3>
-                                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-slate-50 text-slate-600 font-medium">
-                                            <tr>
-                                                <th className="p-3 text-left">Product</th>
-                                                <th className="p-3 text-center">Quantity</th>
-                                                <th className="p-3 text-right">Unit Price</th>
-                                                <th className="p-3 text-right">Total</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {selectedBill.items?.map((item: any, idx: number) => (
-                                                <tr key={idx} className="hover:bg-slate-50/50">
-                                                    <td className="p-3 font-medium text-slate-800">{item.productName}</td>
-                                                    <td className="p-3 text-center">{item.quantity}</td>
-                                                    <td className="p-3 text-right text-slate-600">₹{item.unitPrice.toLocaleString()}</td>
-                                                    <td className="p-3 text-right font-bold text-slate-800">₹{item.total.toLocaleString()}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-
-                            {billAllocations.length > 0 && (
-                                <div className="space-y-3">
-                                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Payments History</h3>
-                                    <div className="space-y-2">
-                                        {billAllocations.map((alloc, idx) => {
-                                            const payment = payments.find(p => p.id === alloc.paymentId);
-                                            return (
-                                                <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="bg-white p-2 rounded-md shadow-sm border border-slate-100">
-                                                            <Wallet size={16} className="text-emerald-600" />
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-sm font-bold text-slate-800">
-                                                                {payment?.paymentNumber || 'Initial Adjustment'}
-                                                            </p>
-                                                            <p className="text-[10px] text-slate-500">
-                                                                {payment ? new Date(payment.paymentDate).toLocaleDateString() : 'N/A'} • {payment?.paymentMode || '-'}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <p className="font-bold text-emerald-600">₹{alloc.amount.toLocaleString()}</p>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {selectedBill.notes && (
-                                <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl">
-                                    <p className="text-[10px] text-orange-500 uppercase font-bold mb-1">Notes</p>
-                                    <p className="text-sm text-slate-700">{selectedBill.notes}</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-            {/* END PART 2 */}
+            {/* END PART 3 */}
 
             {/* Payment Modal */}
             {isPaymentModalOpen && (
@@ -1198,15 +1331,20 @@ export default function PurchasesPage() {
                         <form onSubmit={handlePaymentSubmit} className="p-6 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
-                                <SearchableSelect
-                                    options={suppliers.map(s => ({ ...s, name: `${s.name} (Bal: ₹${s.balance.toLocaleString()})` }))}
-                                    value={paymentForm.supplierId}
-                                    onChange={(val: string) => setPaymentForm({ ...paymentForm, supplierId: val })}
-                                    placeholder="Search Supplier"
-                                    className="w-full"
+                                <select
                                     ref={paymentSupplierRef}
-                                    onKeyDown={(e: React.KeyboardEvent) => handlePaymentKeyDown(e)}
-                                />
+                                    autoFocus
+                                    onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                    required
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                                    value={paymentForm.supplierId}
+                                    onChange={e => setPaymentForm({ ...paymentForm, supplierId: e.target.value })}
+                                >
+                                    <option value="">Select Supplier</option>
+                                    {suppliers.map(s => (
+                                        <option key={s.id} value={s.id}>{s.name} (Bal: ₹{s.balance.toLocaleString()})</option>
+                                    ))}
+                                </select>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -1319,7 +1457,7 @@ export default function PurchasesPage() {
                     <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <div>
-                                <h1 className="text-xl font-bold text-slate-800">
+                                <h1 className="text-xl font-bold text-xl font-bold text-slate-800">
                                     Supplier Statement: {selectedSupplier.name}
                                 </h1>
                                 <p className="text-sm text-slate-500">History of bills and payments</p>

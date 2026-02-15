@@ -193,7 +193,7 @@ export interface Attendance {
   checkInTime?: Date;
   checkOutTime?: Date;
   totalHours?: number;
-  status?: 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'LEAVE';
+  status?: 'PRESENT' | 'ABSENT';
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -290,6 +290,20 @@ export interface AgentSalaryData {
   netSalary: number;
   paymentStatus: 'PENDING' | 'PAID';
   paidDate?: Date;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Company General Expenses
+export interface CompanyExpense {
+  id: string;
+  expenseType: 'GODOWN_RENT' | 'ELECTRICITY_BILL' | 'OFFICE_RENT' | 'OTHER';
+  customName?: string; // For 'OTHER' type
+  amount: number;
+  date: Date;
+  month: number;
+  year: number;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;

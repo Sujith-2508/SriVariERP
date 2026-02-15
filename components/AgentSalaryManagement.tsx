@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Agent, AgentSalaryData } from '@/types';
 import {
     createSalaryRecord,
@@ -8,7 +8,8 @@ import {
     markSalaryPaid,
     getSalaryByMonth
 } from '@/lib/salaryService';
-import { Calendar, DollarSign, Plus, Edit2, Check, X } from 'lucide-react';
+import { Calendar, DollarSign, Plus, Edit2, Check, X, Search } from 'lucide-react';
+import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 
 interface AgentSalaryManagementProps {
     agents: Agent[];
@@ -24,13 +25,25 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
 
     const [salaryForm, setSalaryForm] = useState({
         agentId: '',
-        baseSalary: 0,
-        travelExpense: 0,
-        stayExpense: 0,
-        foodExpense: 0,
-        otherExpense: 0,
+        baseSalary: '' as string | number,
+        travelExpense: '' as string | number,
+        stayExpense: '' as string | number,
+        foodExpense: '' as string | number,
+        otherExpense: '' as string | number,
         notes: ''
     });
+
+    const formRefs = [
+        useRef<any>(null), // Agent Selection
+        useRef<HTMLInputElement>(null), // Base Salary
+        useRef<HTMLInputElement>(null), // Travel Expense
+        useRef<HTMLInputElement>(null), // Stay Expense
+        useRef<HTMLInputElement>(null), // Food Expense
+        useRef<HTMLInputElement>(null), // Other Expense
+        useRef<HTMLTextAreaElement>(null), // Notes
+    ];
+
+    const { handleKeyDown } = useEnterKeyNavigation(formRefs);
 
     useEffect(() => {
         loadSalaries();
@@ -45,20 +58,22 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        const payload = {
+            agentId: salaryForm.agentId,
+            month: selectedMonth,
+            year: selectedYear,
+            baseSalary: Number(salaryForm.baseSalary) || 0,
+            travelExpense: Number(salaryForm.travelExpense) || 0,
+            stayExpense: Number(salaryForm.stayExpense) || 0,
+            foodExpense: Number(salaryForm.foodExpense) || 0,
+            otherExpense: Number(salaryForm.otherExpense) || 0,
+            notes: salaryForm.notes
+        };
+
         if (editingSalary) {
-            await updateSalaryRecord(editingSalary.id, salaryForm);
+            await updateSalaryRecord(editingSalary.id, payload);
         } else {
-            await createSalaryRecord({
-                agentId: salaryForm.agentId,
-                month: selectedMonth,
-                year: selectedYear,
-                baseSalary: salaryForm.baseSalary,
-                travelExpense: salaryForm.travelExpense,
-                stayExpense: salaryForm.stayExpense,
-                foodExpense: salaryForm.foodExpense,
-                otherExpense: salaryForm.otherExpense,
-                notes: salaryForm.notes
-            });
+            await createSalaryRecord(payload);
         }
         setIsModalOpen(false);
         resetForm();
@@ -74,11 +89,11 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
         setEditingSalary(null);
         setSalaryForm({
             agentId: '',
-            baseSalary: 0,
-            travelExpense: 0,
-            stayExpense: 0,
-            foodExpense: 0,
-            otherExpense: 0,
+            baseSalary: '',
+            travelExpense: '',
+            stayExpense: '',
+            foodExpense: '',
+            otherExpense: '',
             notes: ''
         });
     };
@@ -102,8 +117,9 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
         'July', 'August', 'September', 'October', 'November', 'December'
     ];
 
-    const totalExpense = salaryForm.travelExpense + salaryForm.stayExpense + salaryForm.foodExpense + salaryForm.otherExpense;
-    const netSalary = salaryForm.baseSalary + totalExpense;
+    const getNumValue = (val: string | number) => Number(val) || 0;
+    const totalExpense = getNumValue(salaryForm.travelExpense) + getNumValue(salaryForm.stayExpense) + getNumValue(salaryForm.foodExpense) + getNumValue(salaryForm.otherExpense);
+    const netSalary = getNumValue(salaryForm.baseSalary) + totalExpense;
 
     return (
         <div className="space-y-6">
@@ -239,15 +255,17 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Agent *</label>
                                 <select
-                                    required
-                                    disabled={!!editingSalary}
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white disabled:bg-slate-100"
+                                    ref={formRefs[0]}
+                                    onKeyDown={handleKeyDown}
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
                                     value={salaryForm.agentId}
                                     onChange={e => setSalaryForm({ ...salaryForm, agentId: e.target.value })}
+                                    required
+                                    disabled={!!editingSalary}
                                 >
                                     <option value="">Select Agent</option>
-                                    {agents.map(agent => (
-                                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                                    {agents.map(a => (
+                                        <option key={a.id} value={a.id}>{a.name}</option>
                                     ))}
                                 </select>
                             </div>
@@ -256,24 +274,28 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Base Salary *</label>
                                     <input
+                                        ref={formRefs[1]}
+                                        onKeyDown={handleKeyDown}
                                         type="number"
                                         required
                                         min="0"
                                         step="0.01"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={salaryForm.baseSalary}
-                                        onChange={e => setSalaryForm({ ...salaryForm, baseSalary: parseFloat(e.target.value) || 0 })}
+                                        onChange={e => setSalaryForm({ ...salaryForm, baseSalary: e.target.value })}
                                     />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Travel Expense</label>
                                     <input
+                                        ref={formRefs[2]}
+                                        onKeyDown={handleKeyDown}
                                         type="number"
                                         min="0"
                                         step="0.01"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={salaryForm.travelExpense}
-                                        onChange={e => setSalaryForm({ ...salaryForm, travelExpense: parseFloat(e.target.value) || 0 })}
+                                        onChange={e => setSalaryForm({ ...salaryForm, travelExpense: e.target.value })}
                                     />
                                 </div>
                             </div>
@@ -282,23 +304,27 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Stay Expense</label>
                                     <input
+                                        ref={formRefs[3]}
+                                        onKeyDown={handleKeyDown}
                                         type="number"
                                         min="0"
                                         step="0.01"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={salaryForm.stayExpense}
-                                        onChange={e => setSalaryForm({ ...salaryForm, stayExpense: parseFloat(e.target.value) || 0 })}
+                                        onChange={e => setSalaryForm({ ...salaryForm, stayExpense: e.target.value })}
                                     />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Food Expense</label>
                                     <input
+                                        ref={formRefs[4]}
+                                        onKeyDown={handleKeyDown}
                                         type="number"
                                         min="0"
                                         step="0.01"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={salaryForm.foodExpense}
-                                        onChange={e => setSalaryForm({ ...salaryForm, foodExpense: parseFloat(e.target.value) || 0 })}
+                                        onChange={e => setSalaryForm({ ...salaryForm, foodExpense: e.target.value })}
                                     />
                                 </div>
                             </div>
@@ -306,18 +332,22 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Other Expense</label>
                                 <input
+                                    ref={formRefs[5]}
+                                    onKeyDown={handleKeyDown}
                                     type="number"
                                     min="0"
                                     step="0.01"
                                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                     value={salaryForm.otherExpense}
-                                    onChange={e => setSalaryForm({ ...salaryForm, otherExpense: parseFloat(e.target.value) || 0 })}
+                                    onChange={e => setSalaryForm({ ...salaryForm, otherExpense: e.target.value })}
                                 />
                             </div>
 
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
                                 <textarea
+                                    ref={formRefs[6]}
+                                    onKeyDown={handleKeyDown}
                                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                     rows={2}
                                     value={salaryForm.notes}

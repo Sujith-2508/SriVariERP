@@ -3,13 +3,15 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Agent } from '@/types';
-import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign } from 'lucide-react';
+import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt } from 'lucide-react';
 import { LiveMap } from '@/components/LiveMap';
 import { AgentStatusList } from '@/components/AgentStatusList';
 import { AttendanceCalendar } from '@/components/AttendanceCalendar';
 import AgentSalaryManagement from '@/components/AgentSalaryManagement';
+import CompanyExpenseManagement from '@/components/CompanyExpenseManagement';
 
-type TabType = 'overview' | 'tracking' | 'attendance' | 'salary';
+
+type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses';
 
 export default function AgentsPage() {
     const { agents, transactions, addAgent, updateAgent, deleteAgent, isLoading, trackingData, loadingTracking, refreshData } = useData();
@@ -142,8 +144,10 @@ export default function AgentsPage() {
     const tabs = [
         { id: 'overview' as TabType, label: 'Overview', icon: Users },
         { id: 'tracking' as TabType, label: 'Live Tracking', icon: Navigation2 },
+        // { id: 'history' as TabType, label: 'History', icon: MapPin }, // Removed per user request
         { id: 'attendance' as TabType, label: 'Attendance', icon: Calendar },
         { id: 'salary' as TabType, label: 'Salary', icon: DollarSign },
+        { id: 'expenses' as TabType, label: 'Expenses', icon: Receipt },
     ];
 
     return (
@@ -152,16 +156,18 @@ export default function AgentsPage() {
             <div className="bg-white border-b border-slate-200 px-6 py-4 shrink-0">
                 <div className="flex justify-between items-center mb-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-slate-800">Collection Agents</h1>
-                        <p className="text-sm text-slate-500">Manage agents, track locations, and monitor attendance</p>
+                        <h1 className="text-2xl font-bold text-slate-800">Collection Agents & Expenses</h1>
+                        <p className="text-sm text-slate-500">Manage agents, track locations, monitor attendance, and company expenses</p>
                     </div>
-                    <button
-                        onClick={() => { resetForm(); setShowAddModal(true); }}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
-                    >
-                        <UserPlus size={18} />
-                        Add Agent
-                    </button>
+                    {activeTab !== 'expenses' && (
+                        <button
+                            onClick={() => { resetForm(); setShowAddModal(true); }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+                        >
+                            <UserPlus size={18} />
+                            Add Agent
+                        </button>
+                    )}
                 </div>
 
                 {/* Tabs */}
@@ -368,6 +374,8 @@ export default function AgentsPage() {
                     </div>
                 </div>
 
+
+
                 {/* Attendance Tab */}
                 {activeTab === 'attendance' && (
                     <div className="h-full flex">
@@ -408,6 +416,13 @@ export default function AgentsPage() {
                 {activeTab === 'salary' && (
                     <div className="h-full p-6 overflow-y-auto">
                         <AgentSalaryManagement agents={agents} />
+                    </div>
+                )}
+
+                {/* Expenses Tab */}
+                {activeTab === 'expenses' && (
+                    <div className="h-full p-6 overflow-y-auto">
+                        <CompanyExpenseManagement />
                     </div>
                 )}
             </div>

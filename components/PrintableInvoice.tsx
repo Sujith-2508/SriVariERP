@@ -319,12 +319,12 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                         <thead>
                             <tr className="border-b border-black">
                                 <th className="border-r border-black p-1 text-center w-[15%]">HSN / SAC</th>
-                                <th className="border-r border-black p-1 text-right w-[20%]">Taxable Value</th>
+                                <th className="border-r border-black p-1 text-right w-[25%]">Taxable Value</th>
                                 <th className="border-r border-black p-1 text-center w-[10%]">CGST %</th>
-                                <th className="border-r border-black p-1 text-center w-[10%]">SGST %</th>
-                                <th className="border-r border-black p-1 text-center w-[10%]">IGST %</th>
+                                {!isIGST && <th className="border-r border-black p-1 text-center w-[10%]">SGST %</th>}
+                                {isIGST && <th className="border-r border-black p-1 text-center w-[10%]">IGST %</th>}
                                 <th className="border-r border-black p-1 text-center w-[15%]">Total GST %</th>
-                                <th className="p-1 text-right w-[20%]">Tax Amount</th>
+                                <th className="p-1 text-right w-[25%]">Tax Amount</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -350,8 +350,8 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                                     <td className="border-r border-black p-1 text-center">{row.hsn}</td>
                                     <td className="border-r border-black p-1 text-right">{row.taxable.toFixed(2)}</td>
                                     <td className="border-r border-black p-1 text-center">{(row.rate / 2).toFixed(2)}%</td>
-                                    <td className="border-r border-black p-1 text-center">{(!isIGST ? (row.rate / 2) : 0).toFixed(2)}%</td>
-                                    <td className="border-r border-black p-1 text-center">{(isIGST ? (row.rate / 2) : 0).toFixed(2)}%</td>
+                                    {!isIGST && <td className="border-r border-black p-1 text-center">{(!isIGST ? (row.rate / 2) : 0).toFixed(2)}%</td>}
+                                    {isIGST && <td className="border-r border-black p-1 text-center">{(isIGST ? (row.rate / 2) : 0).toFixed(2)}%</td>}
                                     <td className="border-r border-black p-1 text-center">{row.rate.toFixed(2)}%</td>
                                     <td className="p-1 text-right">{row.tax.toFixed(2)}</td>
                                 </tr>
@@ -360,8 +360,8 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                                 <td className="border-r border-black p-1 text-center">Total</td>
                                 <td className="border-r border-black p-1 text-right">{subtotal.toFixed(2)}</td>
                                 <td className="border-r border-black p-1">&nbsp;</td>
-                                <td className="border-r border-black p-1">&nbsp;</td>
-                                <td className="border-r border-black p-1">&nbsp;</td>
+                                {!isIGST && <td className="border-r border-black p-1">&nbsp;</td>}
+                                {isIGST && <td className="border-r border-black p-1">&nbsp;</td>}
                                 <td className="border-r border-black p-1">&nbsp;</td>
                                 <td className="p-1 text-right">{totalTax.toFixed(2)}</td>
                             </tr>
@@ -391,9 +391,14 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                     </div>
 
                     {/* Signature Section */}
-                    <div className="w-1/3 p-2 flex flex-col justify-between">
-                        <div className="text-right text-[9px] font-semibold">for {company.companyName}</div>
-                        <div className="text-right text-[8px] mt-auto">Authorised Signatory</div>
+                    {/* Signature Section */}
+                    <div className="w-1/3 p-2 flex flex-col justify-between items-end border-l-2 border-black">
+                        <div className="text-right text-[9px] font-bold">for {company.companyName}</div>
+                        <div className="flex-1 flex items-end justify-end py-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src="/signature.png" alt="Signature" className="h-12 object-contain" />
+                        </div>
+                        <div className="text-right text-[8px] font-bold">Authorised Signatory</div>
                     </div>
                 </div>
 

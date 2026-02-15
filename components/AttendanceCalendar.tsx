@@ -68,12 +68,8 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
         switch (attendance.status) {
             case 'PRESENT':
                 return 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800';
-            case 'HALF_DAY':
-                return 'bg-yellow-100 hover:bg-yellow-200 text-yellow-800';
             case 'ABSENT':
                 return 'bg-red-100 hover:bg-red-200 text-red-800';
-            case 'LEAVE':
-                return 'bg-blue-100 hover:bg-blue-200 text-blue-800';
             default:
                 return 'bg-white hover:bg-slate-50';
         }
@@ -82,8 +78,6 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
     // Calculate summary stats
     const presentDays = Array.from(attendanceData.values()).filter(a => a.status === 'PRESENT').length;
     const absentDays = Array.from(attendanceData.values()).filter(a => a.status === 'ABSENT').length;
-    const halfDays = Array.from(attendanceData.values()).filter(a => a.status === 'HALF_DAY').length;
-    const totalHours = Array.from(attendanceData.values()).reduce((sum, a) => sum + (a.totalHours || 0), 0);
 
     return (
         <div className="h-full flex flex-col bg-white">
@@ -111,7 +105,7 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
                 </div>
 
                 {/* Summary stats */}
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                     <div className="bg-emerald-50 p-3 rounded-lg">
                         <div className="text-xs text-emerald-600 font-medium mb-1">Present</div>
                         <div className="text-2xl font-bold text-emerald-700">{presentDays}</div>
@@ -119,14 +113,6 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
                     <div className="bg-red-50 p-3 rounded-lg">
                         <div className="text-xs text-red-600 font-medium mb-1">Absent</div>
                         <div className="text-2xl font-bold text-red-700">{absentDays}</div>
-                    </div>
-                    <div className="bg-yellow-50 p-3 rounded-lg">
-                        <div className="text-xs text-yellow-600 font-medium mb-1">Half Day</div>
-                        <div className="text-2xl font-bold text-yellow-700">{halfDays}</div>
-                    </div>
-                    <div className="bg-blue-50 p-3 rounded-lg">
-                        <div className="text-xs text-blue-600 font-medium mb-1">Total Hours</div>
-                        <div className="text-2xl font-bold text-blue-700">{totalHours.toFixed(1)}</div>
                     </div>
                 </div>
             </div>
@@ -169,8 +155,8 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
                                         key={day.toISOString()}
                                         onClick={() => setSelectedDay(day)}
                                         className={`aspect-square rounded-lg border-2 transition-all ${isSelected
-                                                ? 'border-emerald-600 shadow-lg'
-                                                : 'border-transparent'
+                                            ? 'border-emerald-600 shadow-lg'
+                                            : 'border-transparent'
                                             } ${isToday
                                                 ? 'ring-2 ring-blue-500'
                                                 : ''
@@ -178,11 +164,6 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
                                     >
                                         <div className="flex flex-col items-center justify-center h-full">
                                             <div className="text-sm font-semibold">{format(day, 'd')}</div>
-                                            {attendance && (
-                                                <div className="text-xs mt-1">
-                                                    {attendance.totalHours ? `${attendance.totalHours.toFixed(1)}h` : ''}
-                                                </div>
-                                            )}
                                         </div>
                                     </button>
                                 );
@@ -211,12 +192,8 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
                             <div className="space-y-2 text-sm">
                                 <div className="flex justify-between">
                                     <span className="text-slate-600">Status:</span>
-                                    <span className={`font-semibold ${attendance.status === 'PRESENT' ? 'text-emerald-700' :
-                                            attendance.status === 'HALF_DAY' ? 'text-yellow-700' :
-                                                attendance.status === 'ABSENT' ? 'text-red-700' :
-                                                    'text-blue-700'
-                                        }`}>
-                                        {attendance.status?.replace('_', ' ')}
+                                    <span className={`font-semibold ${attendance.status === 'PRESENT' ? 'text-emerald-700' : 'text-red-700'}`}>
+                                        {attendance.status}
                                     </span>
                                 </div>
 
@@ -238,15 +215,6 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
                                     </div>
                                 )}
 
-                                {attendance.totalHours && (
-                                    <div className="flex justify-between">
-                                        <span className="text-slate-600">Total Hours:</span>
-                                        <span className="font-semibold text-slate-800">
-                                            {attendance.totalHours.toFixed(2)} hours
-                                        </span>
-                                    </div>
-                                )}
-
                                 {attendance.notes && (
                                     <div className="mt-3 p-2 bg-white rounded border border-slate-200">
                                         <div className="text-xs text-slate-500 mb-1">Notes:</div>
@@ -262,22 +230,14 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
             {/* Legend */}
             <div className="border-t border-slate-200 p-4">
                 <div className="text-xs font-semibold text-slate-600 mb-2">Legend</div>
-                <div className="grid grid-cols-4 gap-2 text-xs">
+                <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-emerald-100 rounded border border-emerald-200" />
                         <span className="text-slate-600">Present</span>
                     </div>
                     <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 bg-yellow-100 rounded border border-yellow-200" />
-                        <span className="text-slate-600">Half Day</span>
-                    </div>
-                    <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-red-100 rounded border border-red-200" />
                         <span className="text-slate-600">Absent</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 bg-blue-100 rounded border border-blue-200" />
-                        <span className="text-slate-600">Leave</span>
                     </div>
                 </div>
             </div>

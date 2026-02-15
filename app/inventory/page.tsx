@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { Search, Edit2, Trash2, Plus, X, Package, RefreshCw } from 'lucide-react';
@@ -18,8 +18,8 @@ export default function Inventory() {
     const [stockUpdateValue, setStockUpdateValue] = useState('');
     const [stockUpdateType, setStockUpdateType] = useState<'add' | 'set'>('add');
 
-    // Form State - Note: productId is auto-generated, not user input
     const [formData, setFormData] = useState<{
+        productId: string;
         name: string;
         category: string;
         price: number | string;
@@ -29,6 +29,7 @@ export default function Inventory() {
         hsnCode: string;
         unit: string;
     }>({
+        productId: '',
         name: '',
         category: 'Cookware',
         price: '',
@@ -39,36 +40,54 @@ export default function Inventory() {
         unit: 'nos'
     });
 
-    // Refs for Enter key navigation (mandatory fields only)
+    // Refs for Enter key navigation (all fields)
     const productIdRef = useRef<HTMLInputElement>(null);
+    const categoryRef = useRef<HTMLInputElement>(null);
     const nameRef = useRef<HTMLInputElement>(null);
-    const categoryRef = useRef<HTMLSelectElement>(null);
+    const hsnRef = useRef<HTMLInputElement>(null);
+    const unitRef = useRef<HTMLSelectElement>(null);
+    const stockRef = useRef<HTMLInputElement>(null);
+    const costRef = useRef<HTMLInputElement>(null);
     const priceRef = useRef<HTMLInputElement>(null);
+    const gstRef = useRef<HTMLInputElement>(null);
 
-    const productFieldRefs = [categoryRef, nameRef, priceRef] as any;
+    const productFieldRefs = [
+        productIdRef,
+        categoryRef,
+        nameRef,
+        hsnRef,
+        unitRef,
+        stockRef,
+        costRef,
+        priceRef,
+        gstRef
+    ];
     const { handleKeyDown: handleProductKeyDown } = useEnterKeyNavigation(productFieldRefs);
 
-    const filteredProducts = products
-        .filter(p =>
-            p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            p.productId?.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-        .sort((a, b) => {
-            // Extract numeric part of PDI-XXX for proper sorting
-            const idA = parseInt(a.productId.replace(/[^\d]/g, '')) || 0;
-            const idB = parseInt(b.productId.replace(/[^\d]/g, '')) || 0;
-            if (idA !== idB) return idA - idB;
+    const filteredProducts = useMemo(() => {
+        return products
+            .filter(p =>
+                p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                p.productId?.toLowerCase().includes(searchTerm.toLowerCase())
+            )
+            .sort((a, b) => {
+                // Extract numeric part of PDI-XXX for proper sorting
+                const idA = parseInt(a.productId.replace(/[^\d]/g, '')) || 0;
+                const idB = parseInt(b.productId.replace(/[^\d]/g, '')) || 0;
+                if (idA !== idB) return idA - idB;
 
-            // Secondary sort by stock
-            if (a.stock !== b.stock) return a.stock - b.stock;
+                // Secondary sort by stock
+                if (a.stock !== b.stock) return a.stock - b.stock;
 
-            // Tertiary sort by price
-            return a.price - b.price;
-        });
+                // Tertiary sort by price
+                return a.price - b.price;
+            });
+    }, [products, searchTerm]);
 
     const handleOpenAdd = () => {
         setEditingProduct(null);
         setFormData({
+            productId: '',
             name: '',
             category: 'Cookware',
             price: '',
@@ -109,6 +128,17 @@ export default function Inventory() {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
 
+        // Check for duplicate Product ID
+        const isDuplicate = products.some(p =>
+            p.productId === formData.productId && p.id !== (editingProduct?.id || '')
+        );
+
+        if (isDuplicate) {
+            alert(`Duplicate Product ID: "${formData.productId}" is already in use by another product.`);
+            productIdRef.current?.focus();
+            return;
+        }
+
         // Ensure price, costPrice and stock are numbers for saving
         const finalData: Product = {
             ...(editingProduct || {}), // Keep existing ID etc if editing
@@ -122,9 +152,7 @@ export default function Inventory() {
         if (editingProduct) {
             updateProduct(finalData);
         } else {
-            // Product ID is auto-generated in context
-            const { id, productId, ...newProductConfig } = finalData;
-            addProduct(newProductConfig);
+            addProduct(finalData);
         }
         setIsModalOpen(false);
     };
@@ -258,34 +286,31 @@ export default function Inventory() {
                         </div>
 
                         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                            {/* Show Product ID only for editing */}
-                            {editingProduct && (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Product ID</label>
-                                    <input
-                                        type="text"
-                                        disabled
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-100 text-slate-500 font-mono"
-                                        value={editingProduct.productId}
-                                    />
-                                    <p className="text-xs text-slate-400 mt-1">Product ID cannot be changed</p>
-                                </div>
-                            )}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Product ID *</label>
+                                <input
+                                    ref={productIdRef}
+                                    type="text"
+                                    required
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white disabled:bg-slate-100 font-mono"
+                                    value={formData.productId}
+                                    onChange={e => setFormData({ ...formData, productId: e.target.value.toUpperCase() })}
+                                    onKeyDown={(e) => handleProductKeyDown(e, 0)}
+                                    placeholder="e.g. PDI-006"
+                                />
+                            </div>
 
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                                <select
+                                <input
                                     ref={categoryRef}
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                                    type="text"
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                     value={formData.category}
                                     onChange={e => setFormData({ ...formData, category: e.target.value })}
-                                    onKeyDown={(e) => handleProductKeyDown(e, 0)}
-                                >
-                                    <option>Cookware</option>
-                                    <option>Appliances</option>
-                                    <option>Accessories</option>
-                                    <option>Spares</option>
-                                </select>
+                                    onKeyDown={(e) => handleProductKeyDown(e, 1)}
+                                    placeholder="Enter Category"
+                                />
                             </div>
 
                             <div>
@@ -297,7 +322,7 @@ export default function Inventory() {
                                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                     value={formData.name}
                                     onChange={e => setFormData({ ...formData, name: e.target.value })}
-                                    onKeyDown={(e) => handleProductKeyDown(e, 1)}
+                                    onKeyDown={(e) => handleProductKeyDown(e, 2)}
                                 />
                             </div>
 
@@ -310,6 +335,8 @@ export default function Inventory() {
                                         placeholder="e.g. 7323"
                                         value={formData.hsnCode}
                                         onChange={e => setFormData({ ...formData, hsnCode: e.target.value })}
+                                        ref={hsnRef}
+                                        onKeyDown={(e) => handleProductKeyDown(e, 3)}
                                     />
                                 </div>
                                 <div>
@@ -318,6 +345,8 @@ export default function Inventory() {
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
                                         value={formData.unit}
                                         onChange={e => setFormData({ ...formData, unit: e.target.value })}
+                                        ref={unitRef}
+                                        onKeyDown={(e) => handleProductKeyDown(e, 4)}
                                     >
                                         <option value="nos">Nos</option>
                                         <option value="kg">Kg</option>
@@ -329,15 +358,16 @@ export default function Inventory() {
 
                             <div className="grid grid-cols-4 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Stock *</label>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Stock</label>
                                     <input
                                         type="number"
-                                        required
                                         min="0"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         placeholder="0"
                                         value={formData.stock}
                                         onChange={e => setFormData({ ...formData, stock: e.target.value === '' ? '' : e.target.value })}
+                                        ref={stockRef}
+                                        onKeyDown={(e) => handleProductKeyDown(e, 5)}
                                     />
                                 </div>
                                 <div>
@@ -350,6 +380,8 @@ export default function Inventory() {
                                         placeholder="0"
                                         value={formData.costPrice}
                                         onChange={e => setFormData({ ...formData, costPrice: e.target.value === '' ? '' : e.target.value })}
+                                        ref={costRef}
+                                        onKeyDown={(e) => handleProductKeyDown(e, 6)}
                                     />
                                 </div>
                                 <div>
@@ -364,7 +396,7 @@ export default function Inventory() {
                                         placeholder="0"
                                         value={formData.price}
                                         onChange={e => setFormData({ ...formData, price: e.target.value === '' ? '' : e.target.value })}
-                                        onKeyDown={(e) => handleProductKeyDown(e, 2)}
+                                        onKeyDown={(e) => handleProductKeyDown(e, 7)}
                                     />
                                 </div>
                                 <div>
@@ -377,17 +409,11 @@ export default function Inventory() {
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={formData.gstRate}
                                         onChange={e => setFormData({ ...formData, gstRate: e.target.value })}
+                                        ref={gstRef}
+                                        onKeyDown={(e) => handleProductKeyDown(e, 8)}
                                     />
                                 </div>
                             </div>
-
-                            {!editingProduct && (
-                                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                                    <p className="text-sm text-blue-700">
-                                        <strong>Note:</strong> Product ID will be auto-generated in PDI-XXX format (e.g., PDI-006)
-                                    </p>
-                                </div>
-                            )}
 
                             <div className="pt-4 flex gap-3">
                                 <button

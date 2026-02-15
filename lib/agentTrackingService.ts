@@ -190,28 +190,17 @@ export async function getAttendanceSummary(
     month: number,
     year: number
 ): Promise<{
-    totalDays: number;
     presentDays: number;
     absentDays: number;
-    halfDays: number;
-    totalHours: number;
 }> {
     const attendance = await getAttendance(agentId, month, year);
 
     const presentDays = attendance.filter(a => a.status === 'PRESENT').length;
     const absentDays = attendance.filter(a => a.status === 'ABSENT').length;
-    const halfDays = attendance.filter(a => a.status === 'HALF_DAY').length;
-    const totalHours = attendance.reduce((sum, a) => sum + (a.totalHours || 0), 0);
-
-    // Get total days in month
-    const totalDays = new Date(year, month, 0).getDate();
 
     return {
-        totalDays,
         presentDays,
         absentDays,
-        halfDays,
-        totalHours,
     };
 }
 
@@ -227,20 +216,20 @@ export async function calculateSalary(
     baseSalary: number;
     presentDays: number;
     absentDays: number;
-    halfDays: number;
-    totalHours: number;
     deductions: number;
     netSalary: number;
 }> {
     const summary = await getAttendanceSummary(agentId, month, year);
 
+    // Get total days in month
+    const totalDays = new Date(year, month, 0).getDate();
+
     // Calculate per-day salary
-    const perDaySalary = baseSalary / summary.totalDays;
+    const perDaySalary = baseSalary / totalDays;
 
     // Calculate deductions
-    // Full day absent = full day deduction
-    // Half day = half day deduction
-    const deductions = (summary.absentDays * perDaySalary) + (summary.halfDays * perDaySalary * 0.5);
+    // Only full day absent = full day deduction
+    const deductions = summary.absentDays * perDaySalary;
 
     const netSalary = baseSalary - deductions;
 
@@ -248,8 +237,6 @@ export async function calculateSalary(
         baseSalary,
         presentDays: summary.presentDays,
         absentDays: summary.absentDays,
-        halfDays: summary.halfDays,
-        totalHours: summary.totalHours,
         deductions,
         netSalary,
     };

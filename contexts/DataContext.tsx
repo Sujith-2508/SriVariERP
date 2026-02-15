@@ -35,7 +35,7 @@ interface DataContextType {
     updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<void>;
     recordPayment: (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => Promise<string>;
     updateStock: (productId: string, quantity: number) => void;
-    addProduct: (product: Omit<Product, 'id' | 'productId'>) => Promise<void>;
+    addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
     updateProduct: (product: Product) => Promise<void>;
     deleteProduct: (id: string) => Promise<void>;
     addDealer: (dealer: Omit<Dealer, 'id'>) => Promise<string>;
@@ -102,6 +102,26 @@ const transformTransaction = (row: any): Transaction => ({
     transportCharges: row.transport_charges ? Number(row.transport_charges) : undefined,
     paymentTerms: row.payment_terms,
     discountPercent: row.discount_percent ? Number(row.discount_percent) : undefined,
+    items: row.invoice_items ? row.invoice_items.map(transformInvoiceItem) : [],
+});
+
+const transformInvoiceItem = (item: any): InvoiceItem => ({
+    productId: item.product_id,
+    productName: item.product_name,
+    quantity: item.quantity,
+    unitPrice: item.unit_price,
+    cgst: item.cgst,
+    sgst: item.sgst,
+    igst: item.igst,
+    cgstAmount: item.cgst_amount,
+    sgstAmount: item.sgst_amount,
+    igstAmount: item.igst_amount,
+    discount: item.discount,
+    discountAmount: item.discount_amount,
+    total: item.total,
+    hsnCode: item.hsn_code,
+    unit: item.unit,
+    gstRate: item.gst_rate // Note: createInvoice doesn't explicitly save gst_rate but it's derivable or maybe saved if I assume standard schema
 });
 
 const transformAgent = (row: any): Agent => ({
@@ -163,10 +183,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (dealersError) throw dealersError;
 
-            // Fetch transactions from Supabase
+            // Fetch transactions from Supabase with items
             const { data: transactionsData, error: transactionsError } = await supabase
                 .from('transactions')
-                .select('*')
+                .select('*, invoice_items(*)')
                 .order('date', { ascending: false });
 
             if (transactionsError) throw transactionsError;
@@ -220,6 +240,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fetchData();
         loadTrackingData();
 
+        // Listen for local storage product updates from purchase service
+        const handleStorageUpdate = () => {
+            fetchData();
+        };
+        window.addEventListener('storage_products_updated', handleStorageUpdate);
+
         // Subscribe to real-time tracking updates
         const statusSub = subscribeToStatusUpdates((status) => {
             setTrackingData(prev => prev.map(data =>
@@ -238,6 +264,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         return () => {
+            window.removeEventListener('storage_products_updated', handleStorageUpdate);
             statusSub.unsubscribe();
             locationSub.unsubscribe();
         };
@@ -255,13 +282,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
     };
 
-    const addProduct = async (productData: Omit<Product, 'id' | 'productId'>) => {
+    const addProduct = async (productData: Omit<Product, 'id'>) => {
         const currentProducts = getLocalProducts();
-        const newProductId = `PDI-${String(currentProducts.length + 1).padStart(3, '0')}`;
 
         const newProduct: Product = {
             id: crypto.randomUUID(),
-            productId: newProductId,
             ...productData
         };
 

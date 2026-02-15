@@ -18,7 +18,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
     { id: 'INVENTORY', label: 'Stock & Products', icon: ShoppingCart, href: '/inventory' },
     { id: 'PURCHASES', label: 'Purchases', icon: ShoppingBag, href: '/purchases' },
     { id: 'DEALERS', label: 'Ledger & Dealers', icon: Users, href: '/customers' },
-    { id: 'AGENTS', label: 'Agents', icon: UserCheck, href: '/agents' },
+    { id: 'AGENTS', label: 'Collection Agents & Expenses', icon: UserCheck, href: '/agents' },
     { id: 'SETTINGS', label: 'Settings', icon: Settings, href: '/settings' },
   ];
 

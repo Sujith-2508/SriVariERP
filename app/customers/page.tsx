@@ -132,10 +132,44 @@ export default function DealerLedger() {
         gstNumber: ''
     });
 
+    // Refs for Add Dealer sequential navigation
+    const addRefs = [
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLTextAreaElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+    ];
+    const { handleKeyDown: handleAddKeyDown } = useEnterKeyNavigation(addRefs);
+
+    // Refs for Edit Dealer sequential navigation
+    const editRefs = [
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLTextAreaElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null),
+    ];
+    const { handleKeyDown: handleEditKeyDown } = useEnterKeyNavigation(editRefs);
+
 
 
     const handleAddDealer = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Phone Number Validation
+        const phoneRegex = /^[0-9]{10}$/;
+        if (!phoneRegex.test(newDealer.phone)) {
+            alert('Please enter a valid 10-digit mobile number.');
+            return;
+        }
+
         try {
             await addDealer({
                 ...newDealer,
@@ -178,6 +212,13 @@ export default function DealerLedger() {
     const handleEditDealer = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingDealer) return;
+
+        // Phone Number Validation
+        const phoneRegex = /^[0-9]{10}$/;
+        if (!phoneRegex.test(editDealer.phone)) {
+            alert('Please enter a valid 10-digit mobile number.');
+            return;
+        }
 
         try {
             await updateDealer({
@@ -1018,6 +1059,8 @@ export default function DealerLedger() {
                                     <div className="col-span-2">
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
                                         <input
+                                            ref={addRefs[0] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e)}
                                             type="text"
                                             required
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -1029,6 +1072,8 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
                                         <input
+                                            ref={addRefs[1] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e)}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.contactPerson}
@@ -1039,17 +1084,22 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
                                         <input
+                                            ref={addRefs[2] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e)}
                                             type="text"
                                             required
+                                            maxLength={10}
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.phone}
-                                            onChange={e => setNewDealer({ ...newDealer, phone: e.target.value })}
+                                            onChange={e => setNewDealer({ ...newDealer, phone: e.target.value.replace(/\D/g, '') })}
                                             placeholder="10-digit mobile number"
                                         />
                                     </div>
                                     <div className="col-span-2">
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
                                         <textarea
+                                            ref={addRefs[3] as React.RefObject<HTMLTextAreaElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e as any)}
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             rows={2}
                                             value={newDealer.address}
@@ -1060,6 +1110,8 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
                                         <input
+                                            ref={addRefs[4] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e)}
                                             type="text"
                                             required
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -1069,19 +1121,23 @@ export default function DealerLedger() {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">District</label>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
                                         <input
+                                            ref={addRefs[5] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e)}
                                             type="text"
                                             required
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.district}
                                             onChange={e => setNewDealer({ ...newDealer, district: e.target.value })}
-                                            placeholder="District"
+                                            placeholder="State"
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
                                         <input
+                                            ref={addRefs[6] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e)}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.pinCode}
@@ -1092,6 +1148,8 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
                                         <input
+                                            ref={addRefs[7] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleAddKeyDown(e)}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none uppercase font-mono"
                                             value={newDealer.gstNumber}
@@ -1144,6 +1202,8 @@ export default function DealerLedger() {
                                     <div className="col-span-2">
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
                                         <input
+                                            ref={editRefs[0] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e)}
                                             type="text"
                                             required
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
@@ -1155,6 +1215,8 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
                                         <input
+                                            ref={editRefs[1] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e)}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={editDealer.contactPerson}
@@ -1165,17 +1227,22 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
                                         <input
+                                            ref={editRefs[2] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e)}
                                             type="text"
                                             required
+                                            maxLength={10}
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={editDealer.phone}
-                                            onChange={e => setEditDealer({ ...editDealer, phone: e.target.value })}
+                                            onChange={e => setEditDealer({ ...editDealer, phone: e.target.value.replace(/\D/g, '') })}
                                             placeholder="10-digit mobile number"
                                         />
                                     </div>
                                     <div className="col-span-2">
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
                                         <textarea
+                                            ref={editRefs[3] as React.RefObject<HTMLTextAreaElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e as any)}
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                             rows={2}
                                             value={editDealer.address}
@@ -1186,6 +1253,8 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
                                         <input
+                                            ref={editRefs[4] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e)}
                                             type="text"
                                             required
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
@@ -1195,19 +1264,23 @@ export default function DealerLedger() {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">District</label>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
                                         <input
+                                            ref={editRefs[5] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e)}
                                             type="text"
                                             required
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={editDealer.district}
                                             onChange={e => setEditDealer({ ...editDealer, district: e.target.value })}
-                                            placeholder="District"
+                                            placeholder="State"
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
                                         <input
+                                            ref={editRefs[6] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e)}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                             value={editDealer.pinCode}
@@ -1218,6 +1291,8 @@ export default function DealerLedger() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
                                         <input
+                                            ref={editRefs[7] as React.RefObject<HTMLInputElement>}
+                                            onKeyDown={(e) => handleEditKeyDown(e)}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono"
                                             value={editDealer.gstNumber}

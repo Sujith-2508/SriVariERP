@@ -1,74 +1,32 @@
-import { supabase } from './supabase';
 import {
     SupplierData,
     PurchaseBillData,
     PurchasePaymentData,
-    PurchaseAllocationData
+    PurchaseAllocationData,
+    Product
 } from '@/types';
 
 // ============================================
-// Mapper Functions (snake_case to camelCase)
+// LocalStorage Configuration & Helpers
 // ============================================
 
-function mapSupplier(data: any): SupplierData {
-    return {
-        id: data.id,
-        name: data.name,
-        contactPerson: data.contact_person,
-        phone: data.phone,
-        email: data.email,
-        address: data.address,
-        city: data.city,
-        gstNumber: data.gst_number,
-        balance: parseFloat(data.balance) || 0,
-        lastTransactionDate: data.last_transaction_date ? new Date(data.last_transaction_date) : undefined,
-        createdAt: new Date(data.created_at),
-        updatedAt: new Date(data.updated_at)
-    };
+const KEYS = {
+    SUPPLIERS: 'sve_suppliers',
+    BILLS: 'sve_purchase_bills',
+    PAYMENTS: 'sve_purchase_payments',
+    ALLOCATIONS: 'sve_purchase_allocations',
+    PRODUCTS: 'sve_products'
+};
+
+function getLocalData<T>(key: string): T[] {
+    if (typeof window === 'undefined') return [];
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : [];
 }
 
-function mapPurchaseBill(data: any): PurchaseBillData {
-    return {
-        id: data.id,
-        supplierId: data.supplier_id,
-        billNumber: data.bill_number,
-        billDate: new Date(data.bill_date),
-        amount: parseFloat(data.amount),
-        paidAmount: parseFloat(data.paid_amount) || 0,
-        balance: parseFloat(data.balance),
-        dueDate: data.due_date ? new Date(data.due_date) : undefined,
-        items: data.items,
-        notes: data.notes,
-        createdAt: new Date(data.created_at),
-        updatedAt: new Date(data.updated_at)
-    };
-}
-
-function mapPurchasePayment(data: any): PurchasePaymentData {
-    return {
-        id: data.id,
-        supplierId: data.supplier_id,
-        paymentNumber: data.payment_number,
-        paymentDate: new Date(data.payment_date),
-        amount: parseFloat(data.amount),
-        paymentMode: data.payment_mode,
-        referenceNumber: data.reference_number,
-        notes: data.notes,
-        createdAt: new Date(data.created_at)
-    };
-}
-
-function mapPurchaseAllocation(data: any): PurchaseAllocationData {
-    return {
-        id: data.id,
-        billId: data.bill_id,
-        billNumber: data.bill_number,
-        paymentId: data.payment_id,
-        paymentNumber: data.payment_number,
-        amount: parseFloat(data.amount),
-        allocationDate: new Date(data.allocation_date),
-        createdAt: new Date(data.created_at)
-    };
+function saveLocalData<T>(key: string, data: T[]) {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify(data));
 }
 
 // ============================================
@@ -76,93 +34,60 @@ function mapPurchaseAllocation(data: any): PurchaseAllocationData {
 // ============================================
 
 export async function getAllSuppliers(): Promise<SupplierData[]> {
-    const { data, error } = await supabase
-        .from('suppliers')
-        .select('*')
-        .order('name');
-
-    if (error) {
-        console.error('Error fetching suppliers:', error);
-        return [];
-    }
-
-    return data ? data.map(mapSupplier) : [];
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    return suppliers
+        .map(s => ({
+            ...s,
+            name: s.name || 'Unnamed Supplier',
+            balance: s.balance ?? 0
+        }))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }
 
 export async function getSupplier(supplierId: string): Promise<SupplierData | null> {
-    const { data, error } = await supabase
-        .from('suppliers')
-        .select('*')
-        .eq('id', supplierId)
-        .single();
-
-    if (error) {
-        console.error('Error fetching supplier:', error);
-        return null;
-    }
-
-    return data ? mapSupplier(data) : null;
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    return suppliers.find(s => s.id === supplierId) || null;
 }
 
 export async function createSupplier(supplier: Omit<SupplierData, 'id' | 'createdAt' | 'updatedAt' | 'balance' | 'lastTransactionDate'>): Promise<SupplierData | null> {
-    const { data, error } = await supabase
-        .from('suppliers')
-        .insert({
-            name: supplier.name,
-            contact_person: supplier.contactPerson,
-            phone: supplier.phone,
-            email: supplier.email,
-            address: supplier.address,
-            city: supplier.city,
-            gst_number: supplier.gstNumber,
-            balance: 0
-        })
-        .select()
-        .single();
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
 
-    if (error) {
-        console.error('Error creating supplier:', error);
-        return null;
-    }
+    const newSupplier: SupplierData = {
+        id: crypto.randomUUID(),
+        ...supplier,
+        balance: 0,
+        createdAt: new Date(),
+        updatedAt: new Date()
+    };
 
-    return data ? mapSupplier(data) : null;
+    saveLocalData(KEYS.SUPPLIERS, [newSupplier, ...suppliers]);
+    return newSupplier;
 }
 
 export async function updateSupplier(supplierId: string, updates: Partial<SupplierData>): Promise<SupplierData | null> {
-    const { data, error } = await supabase
-        .from('suppliers')
-        .update({
-            name: updates.name,
-            contact_person: updates.contactPerson,
-            phone: updates.phone,
-            email: updates.email,
-            address: updates.address,
-            city: updates.city,
-            gst_number: updates.gstNumber
-        })
-        .eq('id', supplierId)
-        .select()
-        .single();
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const index = suppliers.findIndex(s => s.id === supplierId);
 
-    if (error) {
-        console.error('Error updating supplier:', error);
-        return null;
-    }
+    if (index === -1) return null;
 
-    return data ? mapSupplier(data) : null;
+    const updatedSupplier = {
+        ...suppliers[index],
+        ...updates,
+        updatedAt: new Date()
+    };
+
+    suppliers[index] = updatedSupplier;
+    saveLocalData(KEYS.SUPPLIERS, suppliers);
+    return updatedSupplier;
 }
 
 export async function deleteSupplier(supplierId: string): Promise<boolean> {
-    const { error } = await supabase
-        .from('suppliers')
-        .delete()
-        .eq('id', supplierId);
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const filtered = suppliers.filter(s => s.id !== supplierId);
 
-    if (error) {
-        console.error('Error deleting supplier:', error);
-        return false;
-    }
+    if (filtered.length === suppliers.length) return false;
 
+    saveLocalData(KEYS.SUPPLIERS, filtered);
     return true;
 }
 
@@ -179,67 +104,129 @@ export async function createPurchaseBill(bill: {
     items?: any[];
     notes?: string;
 }): Promise<PurchaseBillData | null> {
-    // Insert bill
-    const { data: billData, error: billError } = await supabase
-        .from('purchase_bills')
-        .insert({
-            supplier_id: bill.supplierId,
-            bill_number: bill.billNumber,
-            bill_date: bill.billDate.toISOString().split('T')[0],
-            amount: bill.amount,
-            paid_amount: 0,
-            balance: bill.amount,
-            due_date: bill.dueDate?.toISOString().split('T')[0],
-            items: bill.items,
-            notes: bill.notes
-        })
-        .select()
-        .single();
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
 
-    if (billError) {
-        console.error('Error creating purchase bill:', billError);
-        return null;
+    const newBill: PurchaseBillData = {
+        id: crypto.randomUUID(),
+        supplierId: bill.supplierId,
+        billNumber: bill.billNumber,
+        billDate: bill.billDate,
+        amount: bill.amount,
+        paidAmount: 0,
+        balance: bill.amount,
+        dueDate: bill.dueDate,
+        items: bill.items,
+        notes: bill.notes,
+        createdAt: new Date(),
+        updatedAt: new Date()
+    };
+
+    // 1. Save bill
+    saveLocalData(KEYS.BILLS, [newBill, ...bills]);
+
+    // 2. Update supplier balance
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplierIndex = suppliers.findIndex(s => s.id === bill.supplierId);
+    if (supplierIndex !== -1) {
+        suppliers[supplierIndex].balance = (suppliers[supplierIndex].balance || 0) + bill.amount;
+        suppliers[supplierIndex].lastTransactionDate = new Date();
+        suppliers[supplierIndex].updatedAt = new Date();
+        saveLocalData(KEYS.SUPPLIERS, suppliers);
     }
 
-    // Update supplier balance (increase by bill amount)
-    const { data: supplier } = await supabase
-        .from('suppliers')
-        .select('balance')
-        .eq('id', bill.supplierId)
-        .single();
+    // 3. Update Product Stock
+    if (bill.items && Array.isArray(bill.items)) {
+        const products = getLocalData<Product>(KEYS.PRODUCTS);
+        let productsModified = false;
 
-    if (supplier) {
-        const newBalance = parseFloat(supplier.balance || '0') + bill.amount;
-        await supabase
-            .from('suppliers')
-            .update({
-                balance: newBalance,
-                last_transaction_date: new Date().toISOString()
-            })
-            .eq('id', bill.supplierId);
+        for (const item of bill.items) {
+            const productId = item.productId || item.product_id;
+            if (productId && item.quantity > 0) {
+                const productIndex = products.findIndex(p => p.id === productId || p.productId === productId);
+                if (productIndex !== -1) {
+                    products[productIndex].stock = (products[productIndex].stock || 0) + item.quantity;
+                    products[productIndex].costPrice = item.unitPrice || item.unit_price;
+                    productsModified = true;
+                }
+            }
+        }
+
+        if (productsModified) {
+            saveLocalData(KEYS.PRODUCTS, products);
+            // Dispatch custom event to notify DataContext
+            window.dispatchEvent(new Event('storage_products_updated'));
+        }
     }
 
-    return billData ? mapPurchaseBill(billData) : null;
+    return newBill;
 }
 
 export async function getPurchaseBills(supplierId?: string): Promise<PurchaseBillData[]> {
-    let query = supabase
-        .from('purchase_bills')
-        .select('*')
-        .order('bill_date', { ascending: false });
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    let filtered = bills.map(b => ({
+        ...b,
+        billDate: new Date(b.billDate),
+        createdAt: new Date(b.createdAt),
+        updatedAt: new Date(b.updatedAt),
+        dueDate: b.dueDate ? new Date(b.dueDate) : undefined
+    }));
 
     if (supplierId) {
-        query = query.eq('supplier_id', supplierId);
+        filtered = filtered.filter(b => b.supplierId === supplierId);
     }
 
-    const { data, error } = await query;
+    return filtered.sort((a, b) => b.billDate.getTime() - a.billDate.getTime());
+}
 
-    if (error) {
-        console.error('Error fetching purchase bills:', error);
-        return [];
+export async function deletePurchaseBill(billId: string): Promise<boolean> {
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    const billIndex = bills.findIndex(b => b.id === billId);
+
+    if (billIndex === -1) return false;
+    const bill = bills[billIndex];
+
+    // 1. Revert Supplier Balance
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplierIndex = suppliers.findIndex(s => s.id === bill.supplierId);
+    if (supplierIndex !== -1) {
+        suppliers[supplierIndex].balance = Math.max(0, suppliers[supplierIndex].balance - bill.amount);
+        suppliers[supplierIndex].updatedAt = new Date();
+        saveLocalData(KEYS.SUPPLIERS, suppliers);
     }
 
-    return data ? data.map(mapPurchaseBill) : [];
+    // 2. Revert Product Stock
+    if (bill.items && Array.isArray(bill.items)) {
+        const products = getLocalData<Product>(KEYS.PRODUCTS);
+        let productsModified = false;
+
+        for (const item of bill.items) {
+            const productId = item.productId || item.product_id;
+            const quantity = item.quantity || item.qty;
+            if (productId && quantity > 0) {
+                const productIndex = products.findIndex(p => p.id === productId || p.productId === productId);
+                if (productIndex !== -1) {
+                    products[productIndex].stock = Math.max(0, (products[productIndex].stock || 0) - quantity);
+                    productsModified = true;
+                }
+            }
+        }
+
+        if (productsModified) {
+            saveLocalData(KEYS.PRODUCTS, products);
+            window.dispatchEvent(new Event('storage_products_updated'));
+        }
+    }
+
+    // 3. Delete the bill
+    const filteredBills = bills.filter(b => b.id !== billId);
+    saveLocalData(KEYS.BILLS, filteredBills);
+
+    // 4. Also delete related allocations
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS);
+    const filteredAllocations = allocations.filter(a => a.billId !== billId);
+    saveLocalData(KEYS.ALLOCATIONS, filteredAllocations);
+
+    return true;
 }
 
 // ============================================
@@ -255,124 +242,100 @@ export async function createPurchasePayment(payment: {
     referenceNumber?: string;
     notes?: string;
 }): Promise<PurchasePaymentData | null> {
-    // 1. Insert payment record
-    const { data: paymentData, error: paymentError } = await supabase
-        .from('purchase_payments')
-        .insert({
-            supplier_id: payment.supplierId,
-            payment_number: payment.paymentNumber,
-            payment_date: payment.paymentDate.toISOString().split('T')[0],
-            amount: payment.amount,
-            payment_mode: payment.paymentMode,
-            reference_number: payment.referenceNumber,
-            notes: payment.notes
-        })
-        .select()
-        .single();
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
 
-    if (paymentError) {
-        console.error('Error creating payment:', paymentError);
-        return null;
-    }
+    const newPayment: PurchasePaymentData = {
+        id: crypto.randomUUID(),
+        supplierId: payment.supplierId,
+        paymentNumber: payment.paymentNumber,
+        paymentDate: payment.paymentDate,
+        amount: payment.amount,
+        paymentMode: payment.paymentMode as any,
+        referenceNumber: payment.referenceNumber,
+        notes: payment.notes,
+        createdAt: new Date()
+    };
+
+    // 1. Save payment
+    saveLocalData(KEYS.PAYMENTS, [newPayment, ...payments]);
 
     // 2. Apply FIFO allocation
-    await applyFIFOAllocation(payment.supplierId, paymentData.id, payment.paymentNumber, payment.amount, payment.paymentDate);
+    applyFIFOAllocationLocal(payment.supplierId, newPayment.id, payment.paymentNumber, payment.amount, payment.paymentDate);
 
-    // 3. Update supplier balance (decrease by payment amount)
-    const { data: supplier } = await supabase
-        .from('suppliers')
-        .select('balance')
-        .eq('id', payment.supplierId)
-        .single();
-
-    if (supplier) {
-        const newBalance = parseFloat(supplier.balance || '0') - payment.amount;
-        await supabase
-            .from('suppliers')
-            .update({
-                balance: newBalance,
-                last_transaction_date: new Date().toISOString()
-            })
-            .eq('id', payment.supplierId);
+    // 3. Update supplier balance
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplierIndex = suppliers.findIndex(s => s.id === payment.supplierId);
+    if (supplierIndex !== -1) {
+        suppliers[supplierIndex].balance = Math.max(0, suppliers[supplierIndex].balance - payment.amount);
+        suppliers[supplierIndex].lastTransactionDate = new Date();
+        suppliers[supplierIndex].updatedAt = new Date();
+        saveLocalData(KEYS.SUPPLIERS, suppliers);
     }
 
-    return paymentData ? mapPurchasePayment(paymentData) : null;
+    return newPayment;
 }
 
-async function applyFIFOAllocation(
+function applyFIFOAllocationLocal(
     supplierId: string,
     paymentId: string,
     paymentNumber: string,
     paymentAmount: number,
     paymentDate: Date
 ) {
-    // Get all unpaid bills for this supplier (oldest first)
-    const { data: bills, error } = await supabase
-        .from('purchase_bills')
-        .select('*')
-        .eq('supplier_id', supplierId)
-        .gt('balance', 0)
-        .order('bill_date', { ascending: true });
-
-    if (error || !bills) {
-        console.error('Error fetching bills for FIFO:', error);
-        return;
-    }
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    const supplierBills = bills
+        .filter(b => b.supplierId === supplierId && b.balance > 0)
+        .sort((a, b) => new Date(a.billDate).getTime() - new Date(b.billDate).getTime());
 
     let remainingAmount = paymentAmount;
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS);
 
-    for (const bill of bills) {
+    for (const bill of supplierBills) {
         if (remainingAmount <= 0) break;
 
-        const billBalance = parseFloat(bill.balance);
-        const allocationAmount = Math.min(remainingAmount, billBalance);
+        const allocationAmount = Math.min(remainingAmount, bill.balance);
 
-        // Create allocation record
-        await supabase
-            .from('purchase_allocations')
-            .insert({
-                bill_id: bill.id,
-                bill_number: bill.bill_number,
-                payment_id: paymentId,
-                payment_number: paymentNumber,
-                amount: allocationAmount,
-                allocation_date: paymentDate.toISOString().split('T')[0]
-            });
+        // Create allocation
+        const newAllocation: PurchaseAllocationData = {
+            id: crypto.randomUUID(),
+            billId: bill.id,
+            billNumber: bill.billNumber,
+            paymentId: paymentId,
+            paymentNumber: paymentNumber,
+            amount: allocationAmount,
+            allocationDate: paymentDate,
+            createdAt: new Date()
+        };
+        allocations.push(newAllocation);
 
-        // Update bill paid_amount and balance
-        const newPaidAmount = parseFloat(bill.paid_amount) + allocationAmount;
-        const newBalance = parseFloat(bill.amount) - newPaidAmount;
-
-        await supabase
-            .from('purchase_bills')
-            .update({
-                paid_amount: newPaidAmount,
-                balance: newBalance
-            })
-            .eq('id', bill.id);
+        // Update bill in main bills array
+        const billIdx = bills.findIndex(b => b.id === bill.id);
+        if (billIdx !== -1) {
+            bills[billIdx].paidAmount = (bills[billIdx].paidAmount || 0) + allocationAmount;
+            bills[billIdx].balance = bills[billIdx].amount - bills[billIdx].paidAmount;
+            bills[billIdx].updatedAt = new Date();
+        }
 
         remainingAmount -= allocationAmount;
     }
+
+    saveLocalData(KEYS.BILLS, bills);
+    saveLocalData(KEYS.ALLOCATIONS, allocations);
 }
 
 export async function getPurchasePayments(supplierId?: string): Promise<PurchasePaymentData[]> {
-    let query = supabase
-        .from('purchase_payments')
-        .select('*')
-        .order('payment_date', { ascending: false });
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+    let filtered = payments.map(p => ({
+        ...p,
+        paymentDate: new Date(p.paymentDate),
+        createdAt: new Date(p.createdAt)
+    }));
 
     if (supplierId) {
-        query = query.eq('supplier_id', supplierId);
+        filtered = filtered.filter(p => p.supplierId === supplierId);
     }
 
-    const { data, error } = await query;
-
-    if (error) {
-        console.error('Error fetching payments:', error);
-        return [];
-    }
-
-    return data ? data.map(mapPurchasePayment) : [];
+    return filtered.sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime());
 }
 
 // ============================================
@@ -383,8 +346,8 @@ export interface SupplierStatementEntry {
     date: Date;
     type: 'BILL' | 'PAYMENT';
     reference: string;
-    debit: number;  // Bills increase what we owe
-    credit: number; // Payments decrease what we owe
+    debit: number;
+    credit: number;
     balance: number;
     notes?: string;
 }
@@ -394,67 +357,37 @@ export async function getSupplierStatement(
     startDate?: Date,
     endDate?: Date
 ): Promise<SupplierStatementEntry[]> {
-    // Fetch bills
-    let billsQuery = supabase
-        .from('purchase_bills')
-        .select('*')
-        .eq('supplier_id', supplierId);
+    const bills = (await getPurchaseBills(supplierId)).map(b => ({
+        date: new Date(b.billDate),
+        type: 'BILL' as const,
+        reference: b.billNumber,
+        debit: b.amount,
+        credit: 0,
+        balance: 0,
+        notes: b.notes
+    }));
+
+    const payments = (await getPurchasePayments(supplierId)).map(p => ({
+        date: new Date(p.paymentDate),
+        type: 'PAYMENT' as const,
+        reference: p.paymentNumber,
+        debit: 0,
+        credit: p.amount,
+        balance: 0,
+        notes: p.notes
+    }));
+
+    let entries = [...bills, ...payments];
 
     if (startDate) {
-        billsQuery = billsQuery.gte('bill_date', startDate.toISOString().split('T')[0]);
+        entries = entries.filter(e => e.date >= startDate);
     }
     if (endDate) {
-        billsQuery = billsQuery.lte('bill_date', endDate.toISOString().split('T')[0]);
+        entries = entries.filter(e => e.date <= endDate);
     }
 
-    const { data: bills } = await billsQuery;
-
-    // Fetch payments
-    let paymentsQuery = supabase
-        .from('purchase_payments')
-        .select('*')
-        .eq('supplier_id', supplierId);
-
-    if (startDate) {
-        paymentsQuery = paymentsQuery.gte('payment_date', startDate.toISOString().split('T')[0]);
-    }
-    if (endDate) {
-        paymentsQuery = paymentsQuery.lte('payment_date', endDate.toISOString().split('T')[0]);
-    }
-
-    const { data: payments } = await paymentsQuery;
-
-    // Combine and sort
-    const entries: SupplierStatementEntry[] = [];
-
-    bills?.forEach(bill => {
-        entries.push({
-            date: new Date(bill.bill_date),
-            type: 'BILL',
-            reference: bill.bill_number,
-            debit: parseFloat(bill.amount),
-            credit: 0,
-            balance: 0, // Will calculate below
-            notes: bill.notes
-        });
-    });
-
-    payments?.forEach(payment => {
-        entries.push({
-            date: new Date(payment.payment_date),
-            type: 'PAYMENT',
-            reference: payment.payment_number,
-            debit: 0,
-            credit: parseFloat(payment.amount),
-            balance: 0,
-            notes: payment.notes
-        });
-    });
-
-    // Sort by date
     entries.sort((a, b) => a.date.getTime() - b.date.getTime());
 
-    // Calculate running balance
     let runningBalance = 0;
     entries.forEach(entry => {
         runningBalance += entry.debit - entry.credit;
@@ -469,14 +402,42 @@ export async function getSupplierStatement(
 // ============================================
 
 export async function getTotalPayables(): Promise<number> {
-    const { data, error } = await supabase
-        .from('suppliers')
-        .select('balance');
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    return suppliers.reduce((sum, s) => sum + (s.balance || 0), 0);
+}
 
-    if (error) {
-        console.error('Error fetching total payables:', error);
-        return 0;
+// ============================================
+// Maintenance & Helpers
+// ============================================
+
+export async function recalculateSupplierBalance(supplierId: string): Promise<number> {
+    const bills = await getPurchaseBills(supplierId);
+    const payments = await getPurchasePayments(supplierId);
+
+    const totalBills = bills.reduce((sum, b) => sum + b.amount, 0);
+    const totalPayments = payments.reduce((sum, p) => sum + p.amount, 0);
+    const newBalance = totalBills - totalPayments;
+
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const index = suppliers.findIndex(s => s.id === supplierId);
+    if (index !== -1) {
+        suppliers[index].balance = newBalance;
+        suppliers[index].lastTransactionDate = new Date();
+        suppliers[index].updatedAt = new Date();
+        saveLocalData(KEYS.SUPPLIERS, suppliers);
     }
 
-    return data?.reduce((sum, s) => sum + parseFloat(s.balance || '0'), 0) || 0;
+    return newBalance;
+}
+
+export async function getBillAllocations(billId: string): Promise<PurchaseAllocationData[]> {
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS);
+    return allocations
+        .filter(a => a.billId === billId)
+        .map(a => ({
+            ...a,
+            allocationDate: new Date(a.allocationDate),
+            createdAt: new Date(a.createdAt)
+        }))
+        .sort((a, b) => b.allocationDate.getTime() - a.allocationDate.getTime());
 }

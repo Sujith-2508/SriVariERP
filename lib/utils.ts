@@ -1,5 +1,5 @@
 
-import { Transaction, TransactionType } from '@/types';
+import { Transaction, TransactionType, InvoiceItem, Product } from '@/types';
 
 export interface InvoiceStatement {
     id: string;
@@ -137,13 +137,13 @@ export interface DealerProfitSummary {
 /**
  * Calculate Cost of Goods Sold (COGS) from invoice items
  */
-export function calculateCOGS(items: any[], products: any[]): number {
+export function calculateCOGS(items: InvoiceItem[], products: Product[]): number {
     if (!items || items.length === 0) return 0;
 
     let totalCOGS = 0;
     items.forEach(item => {
         const product = products.find(p => p.id === item.productId || p.productId === item.productId);
-        const costPrice = product?.costPrice || 0;
+        const costPrice = Number(product?.costPrice) || 0;
         totalCOGS += costPrice * item.quantity;
     });
 
@@ -155,7 +155,7 @@ export function calculateCOGS(items: any[], products: any[]): number {
  */
 export function calculateInvoiceProfit(
     invoice: Transaction,
-    products: any[],
+    products: Product[],
     agentExpenses: number = 0
 ): ProfitCalculation {
     const revenue = invoice.amount;
@@ -164,7 +164,8 @@ export function calculateInvoiceProfit(
     const dealerDiscountPercent = invoice.discountPercent || 0;
 
     // Calculate gross profit before discount
-    const grossProfit = revenue - cogs - serviceCharges - agentExpenses;
+    // Note: serviceCharges (transport) are treated as profit since company uses its own transport (SV Transport)
+    const grossProfit = revenue - cogs - agentExpenses;
 
     // Calculate dealer discount amount
     const dealerDiscount = (grossProfit * dealerDiscountPercent) / 100;
@@ -192,7 +193,7 @@ export function calculateInvoiceProfit(
  */
 export function getDealerProfitSummary(
     transactions: Transaction[],
-    products: any[]
+    products: Product[]
 ): DealerProfitSummary {
     const invoices = transactions.filter(t => t.type === TransactionType.INVOICE);
 

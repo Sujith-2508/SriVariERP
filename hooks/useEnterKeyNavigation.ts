@@ -6,7 +6,7 @@ import { RefObject } from 'react';
  * @returns handleKeyDown function to attach to form fields
  */
 export function useEnterKeyNavigation(
-    fieldRefs: RefObject<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>[]
+    fieldRefs: { current: HTMLElement | null }[]
 ) {
     const handleKeyDown = (e: React.KeyboardEvent, passedIndex?: number) => {
         if (e.key === 'Enter') {
@@ -24,7 +24,7 @@ export function useEnterKeyNavigation(
                 const nextField = fieldRefs[nextIndex]?.current;
 
                 // Skip disabled or hidden fields
-                if (nextField && !nextField.disabled && nextField.offsetParent !== null) {
+                if (nextField && !(nextField as any).disabled && nextField.offsetParent !== null) {
                     nextField.focus();
 
                     // If it's a select, open the dropdown

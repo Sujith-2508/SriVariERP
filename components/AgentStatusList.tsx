@@ -111,8 +111,8 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                                                 <Circle
                                                     size={12}
                                                     className={`${isActive
-                                                            ? 'fill-emerald-500 text-emerald-500'
-                                                            : 'fill-slate-400 text-slate-400'
+                                                        ? 'fill-emerald-500 text-emerald-500'
+                                                        : 'fill-slate-400 text-slate-400'
                                                         }`}
                                                 />
                                                 <h4 className="font-semibold text-slate-800">{data.agent.name}</h4>
@@ -151,8 +151,8 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                                         {/* Status badge */}
                                         <div>
                                             <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${isActive
-                                                    ? 'bg-emerald-100 text-emerald-700'
-                                                    : 'bg-slate-100 text-slate-600'
+                                                ? 'bg-emerald-100 text-emerald-700'
+                                                : 'bg-slate-100 text-slate-600'
                                                 }`}>
                                                 {isActive ? 'Active' : 'Inactive'}
                                             </span>
@@ -178,11 +178,6 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                                                             hour: '2-digit',
                                                             minute: '2-digit'
                                                         })}
-                                                    </span>
-                                                )}
-                                                {data.todayAttendance.totalHours && (
-                                                    <span className="ml-2 font-semibold">
-                                                        ({data.todayAttendance.totalHours.toFixed(1)}h)
                                                     </span>
                                                 )}
                                             </div>

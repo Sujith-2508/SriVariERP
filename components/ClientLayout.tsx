@@ -11,20 +11,30 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
     const [mounted, setMounted] = useState(false);
-    const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(() => {
+        if (typeof window !== 'undefined') {
+            return sessionStorage.getItem('isAuthenticated') === 'true';
+        }
+        return null;
+    });
+
+    // Handle client-side mounting
+    useEffect(() => {
+        setMounted(true);
+    }, []);
+
+    // Re-sync auth status if session storage changes (optional but good for consistency)
+    useEffect(() => {
+        if (mounted) {
+            const authStatus = sessionStorage.getItem('isAuthenticated') === 'true';
+            if (authStatus !== isAuthenticated) {
+                setIsAuthenticated(authStatus);
+            }
+        }
+    }, [pathname, mounted, isAuthenticated]);
 
     // Check if on login page (handles both /login and /login/)
     const isLoginPage = pathname === '/login' || pathname === '/login/';
-
-    // Wait for client-side mount and check authentication
-    // Re-check auth when pathname changes (important for after login redirect)
-    useEffect(() => {
-        setMounted(true);
-        // Check authentication status from sessionStorage (cleared on browser close)
-        // This ensures users must login every time they open a new session
-        const authStatus = sessionStorage.getItem('isAuthenticated') === 'true';
-        setIsAuthenticated(authStatus);
-    }, [pathname]);
 
     // Handle redirect based on authentication status
     useEffect(() => {

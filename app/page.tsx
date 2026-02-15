@@ -1,40 +1,72 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent } from 'lucide-react';
+import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent, Wallet, Receipt } from 'lucide-react';
 import { calculateInvoiceProfit, formatCurrency } from '@/lib/utils';
-import { TransactionType } from '@/types';
+import { TransactionType, SupplierData, PurchaseBillData, AgentSalaryData } from '@/types';
+import { getAllSuppliers, getPurchaseBills } from '@/lib/purchaseService';
+import { getSalaryByMonth } from '@/lib/salaryService';
+import { getExpensesByMonth } from '@/lib/expenseService';
+import { CompanyExpense } from '@/types';
 
 export default function Dashboard() {
     const { dealers, products, transactions, agents } = useData();
+    const [suppliers, setSuppliers] = useState<SupplierData[]>([]);
+    const [purchaseBills, setPurchaseBills] = useState<PurchaseBillData[]>([]);
+    const [agentSalaries, setAgentSalaries] = useState<AgentSalaryData[]>([]);
+    const [companyExpenses, setCompanyExpenses] = useState<CompanyExpense[]>([]);
+
+    useEffect(() => {
+        const loadDashboardData = async () => {
+            const [suppliersData, billsData, salariesData, expensesData] = await Promise.all([
+                getAllSuppliers(),
+                getPurchaseBills(),
+                getSalaryByMonth(new Date().getMonth() + 1, new Date().getFullYear()),
+                getExpensesByMonth(new Date().getMonth() + 1, new Date().getFullYear())
+            ]);
+            setSuppliers(suppliersData);
+            setPurchaseBills(billsData);
+            setAgentSalaries(salariesData);
+            setCompanyExpenses(expensesData);
+        };
+        loadDashboardData();
+    }, []);
 
     // ========================================================================
     // 1. FUNDAMENTAL STATS
     // ========================================================================
-    const totalOutstanding = dealers.reduce((acc, d) => acc + d.balance, 0);
-    const lowStockItems = products.filter(p => p.stock < 50);
+    const { totalOutstanding, totalPayables, lowStockItems, todaysSales, monthlySales, totalPurchases } = useMemo(() => {
+        const totalOutstanding = dealers.reduce((acc, d) => acc + d.balance, 0);
+        const totalPayables = suppliers.reduce((acc, s) => acc + (s.balance || 0), 0);
+        const lowStockItems = products.filter(p => p.stock < 50);
 
-    // Today's Sales
-    const todaysSales = transactions
-        .filter(t => t.type === 'INVOICE' && new Date(t.date).toDateString() === new Date().toDateString())
-        .reduce((acc, t) => acc + t.amount, 0);
+        const totalPurchases = purchaseBills.reduce((acc, b) => acc + b.amount, 0);
 
-    // Monthly Sales (current month)
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    const monthlySales = transactions
-        .filter(t => {
-            const txnDate = new Date(t.date);
-            return t.type === 'INVOICE' &&
-                txnDate.getMonth() === currentMonth &&
-                txnDate.getFullYear() === currentYear;
-        })
-        .reduce((acc, t) => acc + t.amount, 0);
+        const todayStr = new Date().toDateString();
+        const todaysSales = transactions
+            .filter(t => t.type === 'INVOICE' && new Date(t.date).toDateString() === todayStr)
+            .reduce((acc, t) => acc + t.amount, 0);
+
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        const monthlySales = transactions
+            .filter(t => {
+                const txnDate = new Date(t.date);
+                return t.type === 'INVOICE' &&
+                    txnDate.getMonth() === currentMonth &&
+                    txnDate.getFullYear() === currentYear;
+            })
+            .reduce((acc, t) => acc + t.amount, 0);
+
+        return { totalOutstanding, totalPayables, lowStockItems, todaysSales, monthlySales, totalPurchases };
+    }, [dealers, products, transactions, suppliers, purchaseBills]);
 
     // Weekly Sales Chart Data
-    const getWeeklySalesData = () => {
+    const { chartData, weeklySalesTotal } = useMemo(() => {
         const today = new Date();
         const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const result = [];
@@ -58,121 +90,150 @@ export default function Dashboard() {
                 date: dayStart.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
             });
         }
-        return result;
-    };
-
-    const chartData = getWeeklySalesData();
-    const weeklySalesTotal = chartData.reduce((acc, d) => acc + d.sales, 0);
+        const weeklySalesTotal = result.reduce((acc, d) => acc + d.sales, 0);
+        return { chartData: result, weeklySalesTotal };
+    }, [transactions]);
 
     // ========================================================================
-    // 2. PROFIT ANALYSIS (NEW)
+    // 2. PROFIT ANALYSIS (UPDATED)
     // ========================================================================
-    const invoices = transactions.filter(t => t.type === TransactionType.INVOICE);
-    let totalRevenue = 0;
-    let totalCOGS = 0;
-    // let totalServiceCharges = 0;
-    let totalDiscounts = 0;
-    let totalProfit = 0;
+    const { totalRevenue, totalCOGS, totalDiscounts, totalAgentExpenses, totalCompanyExpenses, totalProfit, profitMargin } = useMemo(() => {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
 
-    invoices.forEach(invoice => {
-        const profit = calculateInvoiceProfit(invoice, products);
-        totalRevenue += profit.revenue;
-        totalCOGS += profit.cogs;
-        // totalServiceCharges += profit.serviceCharges;
-        totalDiscounts += profit.dealerDiscount;
-        totalProfit += profit.netProfit;
-    });
+        const invoices = transactions.filter(t => {
+            const txnDate = new Date(t.date);
+            return t.type === TransactionType.INVOICE &&
+                txnDate.getMonth() === currentMonth &&
+                txnDate.getFullYear() === currentYear;
+        });
 
-    const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+        let revenue = 0;
+        let cogs = 0;
+        let discounts = 0;
+        let profit = 0;
+
+        invoices.forEach(invoice => {
+            const p = calculateInvoiceProfit(invoice, products);
+            revenue += p.revenue;
+            cogs += p.cogs;
+            discounts += p.dealerDiscount;
+            profit += p.netProfit;
+        });
+
+        const agentExpenses = agentSalaries.reduce((acc, s) => acc + (s.totalExpense || 0) + s.baseSalary, 0);
+        const compExpenses = companyExpenses.reduce((acc, e) => acc + e.amount, 0);
+
+        const netProfit = profit - agentExpenses - compExpenses;
+        const margin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
+        return {
+            totalRevenue: revenue,
+            totalCOGS: cogs,
+            totalDiscounts: discounts,
+            totalAgentExpenses: agentExpenses,
+            totalCompanyExpenses: compExpenses,
+            totalProfit: netProfit,
+            profitMargin: margin
+        };
+    }, [transactions, products, agentSalaries, companyExpenses]);
 
     // ========================================================================
-    // 3. OUTSTANDING ANALYSIS (NEW)
+    // 3. OUTSTANDING ANALYSIS
     // ========================================================================
-    const today = new Date();
-    const outstandingByAge = {
-        days0to30: 0,
-        days31to60: 0,
-        days61to90: 0,
-        overdue: 0
-    };
+    const outstandingData = useMemo(() => {
+        const day0to30 = 0;
+        const day31to60 = 0;
+        const day61to90 = 0;
+        const overdue = 0;
+        const counts = { day0to30, day31to60, day61to90, overdue };
+        const now = new Date();
+        const invoices = transactions.filter(t => t.type === TransactionType.INVOICE);
 
-    dealers.forEach(dealer => {
-        if (dealer.balance > 0) {
-            // Find unpaid invoices for this dealer
-            const dealerInvoices = invoices
-                .filter(inv => inv.customerId === dealer.id)
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        dealers.forEach(dealer => {
+            if (dealer.balance > 0) {
+                const dealerInvoices = invoices
+                    .filter(inv => inv.customerId === dealer.id)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-            // Simple aging logic: Assume oldest balance is from oldest invoice (FIFO)
-            // Ideally we should track balance per invoice, but for dashboard summary:
-            let remainingBalance = dealer.balance;
+                let remainingBalance = dealer.balance;
 
-            // Iterate invoices from newest to oldest to categorizing current balance? 
-            // NO, standard aging is usually FIFO - oldest debt remains.
-            // But usually we apply payments to oldest. So remaining balance belongs to NEWEST invoices.
-            // Correct approach: Remaining balance is attributed to the MOST RECENT invoices.
+                for (const invoice of dealerInvoices) {
+                    if (remainingBalance <= 0) break;
 
-            for (const invoice of dealerInvoices) {
-                if (remainingBalance <= 0) break;
+                    const amount = Math.min(remainingBalance, invoice.amount);
+                    const invoiceDate = new Date(invoice.date);
+                    const ageDays = Math.ceil((now.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24));
 
-                const amount = Math.min(remainingBalance, invoice.amount);
-                const invoiceDate = new Date(invoice.date);
-                const ageDays = Math.ceil((today.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24));
+                    if (ageDays <= 30) counts.day0to30 += amount;
+                    else if (ageDays <= 60) counts.day31to60 += amount;
+                    else if (ageDays <= 90) counts.day61to90 += amount;
+                    else counts.overdue += amount;
 
-                if (ageDays <= 30) outstandingByAge.days0to30 += amount;
-                else if (ageDays <= 60) outstandingByAge.days31to60 += amount;
-                else if (ageDays <= 90) outstandingByAge.days61to90 += amount;
-                else outstandingByAge.overdue += amount;
+                    remainingBalance -= amount;
+                }
 
-                remainingBalance -= amount;
+                if (remainingBalance > 0) {
+                    counts.overdue += remainingBalance;
+                }
             }
+        });
 
-            // If there's still balance left (e.g. opening balance not linked to invoices), put in overdue
-            if (remainingBalance > 0) {
-                outstandingByAge.overdue += remainingBalance;
-            }
-        }
-    });
-
-    const outstandingData = [
-        { name: '0-30 Days', value: outstandingByAge.days0to30, color: '#10b981' },
-        { name: '31-60 Days', value: outstandingByAge.days31to60, color: '#f59e0b' },
-        { name: '61-90 Days', value: outstandingByAge.days61to90, color: '#f97316' },
-        { name: '90+ Days', value: outstandingByAge.overdue, color: '#ef4444' },
-    ].filter(d => d.value > 0);
+        return [
+            { name: '0-30 Days', value: counts.day0to30, color: '#10b981' },
+            { name: '31-60 Days', value: counts.day31to60, color: '#f59e0b' },
+            { name: '61-90 Days', value: counts.day61to90, color: '#f97316' },
+            { name: '90+ Days', value: counts.overdue, color: '#ef4444' },
+        ].filter(d => d.value > 0);
+    }, [dealers, transactions]);
 
     // ========================================================================
     // 4. AGENT COLLECTION ANALYSIS
     // ========================================================================
-    const agentCollectionData = agents.map(agent => {
-        const collected = transactions
-            .filter(t => {
-                const txnDate = new Date(t.date);
-                return t.type === 'PAYMENT' &&
-                    t.agentName === agent.name &&
-                    txnDate.getMonth() === currentMonth &&
-                    txnDate.getFullYear() === currentYear;
-            })
-            .reduce((acc, t) => acc + t.amount, 0);
+    const { agentCollectionData, totalCollected, totalTarget, collectionPercentage, pieData } = useMemo(() => {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
 
-        const target = agent.collectionTarget || 100000;
+        const data = agents.map(agent => {
+            const collected = transactions
+                .filter(t => {
+                    const txnDate = new Date(t.date);
+                    return t.type === 'PAYMENT' &&
+                        t.agentName === agent.name &&
+                        txnDate.getMonth() === currentMonth &&
+                        txnDate.getFullYear() === currentYear;
+                })
+                .reduce((acc, t) => acc + t.amount, 0);
+
+            const target = agent.collectionTarget || 100000;
+
+            return {
+                name: agent.name,
+                collected: collected,
+                target: target,
+                percentage: target > 0 ? Math.round((collected / target) * 100) : 0
+            };
+        });
+
+        const collected = data.reduce((acc, a) => acc + a.collected, 0);
+        const target = data.reduce((acc, a) => acc + a.target, 0);
+        const percentage = target > 0 ? Math.min(Math.round((collected / target) * 100), 100) : 0;
+
+        const pie = [
+            { name: 'Collected', value: collected },
+            { name: 'Pending', value: Math.max(target - collected, 0) },
+        ];
 
         return {
-            name: agent.name,
-            collected: collected,
-            target: target,
-            percentage: target > 0 ? Math.round((collected / target) * 100) : 0
+            agentCollectionData: data,
+            totalCollected: collected,
+            totalTarget: target,
+            collectionPercentage: percentage,
+            pieData: pie
         };
-    });
+    }, [agents, transactions]);
 
-    const totalCollected = agentCollectionData.reduce((acc, a) => acc + a.collected, 0);
-    const totalTarget = agentCollectionData.reduce((acc, a) => acc + a.target, 0);
-    const collectionPercentage = totalTarget > 0 ? Math.min(Math.round((totalCollected / totalTarget) * 100), 100) : 0;
-
-    const pieData = [
-        { name: 'Collected', value: totalCollected },
-        { name: 'Pending', value: Math.max(totalTarget - totalCollected, 0) },
-    ];
     const COLORS = ['#10b981', '#e2e8f0'];
 
 
@@ -214,6 +275,8 @@ export default function Dashboard() {
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800">Business Dashboard</h1>
                     <p className="text-sm text-slate-500">Overview for {new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' })}</p>
+
+
                 </div>
                 <div className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-lg">
                     <Calendar size={16} className="text-slate-500" />
@@ -230,7 +293,7 @@ export default function Dashboard() {
                     value={formatCurrency(totalRevenue)}
                     icon={IndianRupee}
                     color="bg-blue-500"
-                    subtitle="All time revenue"
+                    subtitle="Sales revenue"
                 />
                 <StatCard
                     title="Net Profit"
@@ -241,18 +304,18 @@ export default function Dashboard() {
                     trend={{ value: `${profitMargin.toFixed(1)}% Margin`, positive: profitMargin > 15 }}
                 />
                 <StatCard
-                    title="Outstanding"
+                    title="Receivables"
                     value={formatCurrency(totalOutstanding)}
                     icon={Clock}
                     color="bg-red-500"
-                    subtitle={`${dealers.filter(d => d.balance > 0).length} dealers pending`}
+                    subtitle="Outstanding from dealers"
                 />
                 <StatCard
-                    title="Low Stock"
-                    value={lowStockItems.length.toString()}
-                    icon={AlertCircle}
-                    color="bg-orange-400"
-                    subtitle="Items below threshold"
+                    title="Payables"
+                    value={formatCurrency(totalPayables)}
+                    icon={Wallet}
+                    color="bg-orange-500"
+                    subtitle="Dues to suppliers"
                 />
             </div>
 
@@ -278,8 +341,16 @@ export default function Dashboard() {
                             <span className="text-sm text-orange-600">Discounts Given</span>
                             <span className="font-bold text-orange-700">-{formatCurrency(totalDiscounts)}</span>
                         </div>
+                        <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg border border-purple-100">
+                            <span className="text-sm text-purple-600">Agent Expenses</span>
+                            <span className="font-bold text-purple-700">-{formatCurrency(totalAgentExpenses)}</span>
+                        </div>
+                        <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border border-blue-100">
+                            <span className="text-sm text-blue-600">Company Expenses</span>
+                            <span className="font-bold text-blue-700">-{formatCurrency(totalCompanyExpenses)}</span>
+                        </div>
                         <div className="border-t border-slate-200 pt-3 flex justify-between items-center">
-                            <span className="font-bold text-slate-800">Net Profit</span>
+                            <span className="font-bold text-slate-800">Net Company Profit</span>
                             <span className="font-bold text-emerald-600 text-lg">{formatCurrency(totalProfit)}</span>
                         </div>
                     </div>
@@ -324,6 +395,63 @@ export default function Dashboard() {
                                 </div>
                             ))}
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* FINANCIAL OVERVIEW (NEW) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                {/* Payables Column */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                        <Wallet size={18} className="text-orange-500" />
+                        Supplier Payables (Credits to Pay)
+                    </h3>
+                    <div className="space-y-3 overflow-y-auto max-h-64 pr-2 custom-scrollbar">
+                        {suppliers.filter(s => (s.balance || 0) > 0).length === 0 ? (
+                            <p className="text-sm text-slate-400 text-center py-4">No outstanding payables.</p>
+                        ) : (
+                            suppliers
+                                .filter(s => (s.balance || 0) > 0)
+                                .sort((a, b) => (b.balance || 0) - (a.balance || 0))
+                                .slice(0, 10)
+                                .map((supplier, idx) => (
+                                    <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium text-slate-700">{supplier.name}</span>
+                                            <span className="text-xs text-slate-400">{supplier.phone}</span>
+                                        </div>
+                                        <span className="font-bold text-red-600">{formatCurrency(supplier.balance || 0)}</span>
+                                    </div>
+                                ))
+                        )}
+                    </div>
+                </div>
+
+                {/* Receivables Column */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                        <IndianRupee size={18} className="text-emerald-500" />
+                        Dealer Receivables (Outstanding)
+                    </h3>
+                    <div className="space-y-3 overflow-y-auto max-h-64 pr-2 custom-scrollbar">
+                        {dealers.filter(d => d.balance > 0).length === 0 ? (
+                            <p className="text-sm text-slate-400 text-center py-4">No outstanding receivables.</p>
+                        ) : (
+                            dealers
+                                .filter(d => d.balance > 0)
+                                .sort((a, b) => b.balance - a.balance)
+                                .slice(0, 10)
+                                .map((dealer, idx) => (
+                                    <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium text-slate-700">{dealer.businessName}</span>
+                                            <span className="text-xs text-slate-400">{dealer.city}</span>
+                                        </div>
+                                        <span className="font-bold text-emerald-600">{formatCurrency(dealer.balance)}</span>
+                                    </div>
+                                ))
+                        )}
                     </div>
                 </div>
             </div>

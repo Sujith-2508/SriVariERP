@@ -75,12 +75,14 @@ export default function Billing() {
     const dispatchDateRef = useRef<HTMLInputElement>(null);
     const dispatchThroughRef = useRef<HTMLInputElement>(null);
     const termsOfDeliveryRef = useRef<HTMLInputElement>(null);
+    const paymentTermsRef = useRef<HTMLInputElement>(null);
 
     const invoiceFieldRefs = [
         vehicleNameRef,
         vehicleNumberRef,
         destinationRef,
         transportChargesRef,
+        paymentTermsRef,
         creditDaysRef,
         globalDiscountRef,
         globalCGSTRef,
@@ -946,6 +948,18 @@ export default function Billing() {
                                     />
                                 </div>
                                 <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Mode/Terms of Payment</label>
+                                    <input
+                                        ref={paymentTermsRef}
+                                        type="text"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder="e.g., Immediate, Cash, Cheque"
+                                        value={paymentTerms}
+                                        onChange={(e) => setPaymentTerms(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 4)}
+                                    />
+                                </div>
+                                <div>
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Credit Days *</label>
                                     <input
                                         ref={creditDaysRef}
@@ -955,7 +969,7 @@ export default function Billing() {
                                         placeholder="e.g., 30, 45, 60, 90"
                                         value={creditDays}
                                         onChange={(e) => setCreditDays(e.target.value.replace(/[^0-9]/g, ''))}
-                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 4)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 5)}
                                     />
                                     <p className="text-xs text-slate-400 mt-1">Days until payment due</p>
                                 </div>
@@ -969,7 +983,7 @@ export default function Billing() {
                                         placeholder="0"
                                         value={globalDiscount}
                                         onChange={(e) => setGlobalDiscount(e.target.value.replace(/[^0-9.]/g, ''))}
-                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 5)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 6)}
                                     />
                                 </div>
 
@@ -986,7 +1000,7 @@ export default function Billing() {
                                             placeholder="0"
                                             value={globalCGST}
                                             onChange={(e) => setGlobalCGST(e.target.value.replace(/[^0-9.]/g, ''))}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 8)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
                                         />
                                     </div>
 
@@ -1002,7 +1016,7 @@ export default function Billing() {
                                                 placeholder="0"
                                                 value={globalSGST}
                                                 onChange={(e) => setGlobalSGST(e.target.value.replace(/[^0-9.]/g, ''))}
-                                                onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
+                                                onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
                                             />
                                         </div>
                                     )}
@@ -1018,7 +1032,7 @@ export default function Billing() {
                                             placeholder="0"
                                             value={globalIGST}
                                             onChange={(e) => setGlobalIGST(e.target.value.replace(/[^0-9.]/g, ''))}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 11)}
                                         />
                                     </div>
                                 </div>
@@ -1039,7 +1053,7 @@ export default function Billing() {
                                                 setRoundOff(value);
                                             }
                                         }}
-                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 6)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 7)}
                                     />
                                     <p className="text-xs text-slate-400 mt-1">Use + or - to adjust total</p>
                                 </div>
@@ -1054,7 +1068,7 @@ export default function Billing() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                             value={buyerOrderNo}
                                             onChange={(e) => setBuyerOrderNo(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 6)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 7)}
                                         />
                                     </div>
                                     <div>
@@ -1065,7 +1079,7 @@ export default function Billing() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                             value={buyerOrderDate}
                                             onChange={(e) => setBuyerOrderDate(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 7)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 8)}
                                         />
                                     </div>
                                     <div>
@@ -1076,7 +1090,7 @@ export default function Billing() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                             value={dispatchDocNo}
                                             onChange={(e) => setDispatchDocNo(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 8)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
                                         />
                                     </div>
                                     <div>
@@ -1087,7 +1101,7 @@ export default function Billing() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                             value={dispatchDate}
                                             onChange={(e) => setDispatchDate(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
                                         />
                                     </div>
                                     <div>
@@ -1098,7 +1112,7 @@ export default function Billing() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                             value={dispatchThrough}
                                             onChange={(e) => setDispatchThrough(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 11)}
                                         />
                                     </div>
                                     <div>
@@ -1109,7 +1123,7 @@ export default function Billing() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                             value={termsOfDelivery}
                                             onChange={(e) => setTermsOfDelivery(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 11)}
+                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 12)}
                                         />
                                     </div>
                                 </div>
@@ -1329,98 +1343,102 @@ export default function Billing() {
             </div>
 
             {/* Printable Invoice - Only visible when printing */}
-            {showPrintPreview && selectedDealer && companySettings && (
-                <div className="hidden print:block">
-                    <PrintableInvoice
-                        invoice={{
-                            id: editInvoiceId || '',
-                            customerId: selectedDealer.id,
-                            type: TransactionType.INVOICE,
-                            amount: invoiceTotal,
-                            date: new Date(invoiceDate),
-                            referenceId: generatedRef || `INV${manualInvoiceNo}`,
-                            items: invoiceItems,
-                            vehicleName,
-                            vehicleNumber,
-                            destination,
-                            transportCharges: parseFloat(transportCharges) || 0,
-                            paymentTerms,
-                            discountPercent: parseFloat(globalDiscount) || 0,
-                            creditDays: parseInt(creditDays) || 30,
-                            notes: JSON.stringify({
-                                buyerOrderNo,
-                                buyerOrderDate,
-                                dispatchDocNo,
-                                dispatchDate,
-                                dispatchThrough,
-                                termsOfDelivery,
-                                manualInvoiceNo,
-                                roundOff,
-                                globalCGST,
-                                globalSGST,
-                                globalIGST
-                            })
-                        }}
-                        dealer={selectedDealer}
-                        items={invoiceItems}
-                        company={companySettings}
-                    />
-                </div>
-            )}
+            {
+                showPrintPreview && selectedDealer && companySettings && (
+                    <div className="hidden print:block">
+                        <PrintableInvoice
+                            invoice={{
+                                id: editInvoiceId || '',
+                                customerId: selectedDealer.id,
+                                type: TransactionType.INVOICE,
+                                amount: invoiceTotal,
+                                date: new Date(invoiceDate),
+                                referenceId: generatedRef || `INV${manualInvoiceNo}`,
+                                items: invoiceItems,
+                                vehicleName,
+                                vehicleNumber,
+                                destination,
+                                transportCharges: parseFloat(transportCharges) || 0,
+                                paymentTerms,
+                                discountPercent: parseFloat(globalDiscount) || 0,
+                                creditDays: parseInt(creditDays) || 30,
+                                notes: JSON.stringify({
+                                    buyerOrderNo,
+                                    buyerOrderDate,
+                                    dispatchDocNo,
+                                    dispatchDate,
+                                    dispatchThrough,
+                                    termsOfDelivery,
+                                    manualInvoiceNo,
+                                    roundOff,
+                                    globalCGST,
+                                    globalSGST,
+                                    globalIGST
+                                })
+                            }}
+                            dealer={selectedDealer}
+                            items={invoiceItems}
+                            company={companySettings}
+                        />
+                    </div>
+                )
+            }
 
             {/* Success Screen - Show after bill is generated */}
-            {showSuccess && selectedDealer && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-300 print:hidden">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
-                        <div className="bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center">
-                            <div className="w-20 h-20 bg-white rounded-full mx-auto flex items-center justify-center mb-4 animate-in zoom-in duration-500">
-                                <CheckCircle className="text-emerald-600" size={48} />
-                            </div>
-                            <h2 className="text-2xl font-bold text-white mb-2">Invoice Generated!</h2>
-                            <p className="text-emerald-50">Invoice {generatedRef} created successfully</p>
-                        </div>
-
-                        <div className="p-6 space-y-4">
-                            <div className="bg-slate-50 p-4 rounded-lg">
-                                <p className="text-sm text-slate-500 mb-1">Dealer</p>
-                                <p className="font-bold text-slate-800">{selectedDealer.businessName}</p>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-slate-50 p-4 rounded-lg">
-                                    <p className="text-sm text-slate-500 mb-1">Amount</p>
-                                    <p className="font-bold text-slate-800">₹{invoiceTotal.toFixed(2)}</p>
+            {
+                showSuccess && selectedDealer && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-300 print:hidden">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
+                            <div className="bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center">
+                                <div className="w-20 h-20 bg-white rounded-full mx-auto flex items-center justify-center mb-4 animate-in zoom-in duration-500">
+                                    <CheckCircle className="text-emerald-600" size={48} />
                                 </div>
-                                <div className="bg-slate-50 p-4 rounded-lg">
-                                    <p className="text-sm text-slate-500 mb-1">Items</p>
-                                    <p className="font-bold text-slate-800">{invoiceItems.length}</p>
-                                </div>
+                                <h2 className="text-2xl font-bold text-white mb-2">Invoice Generated!</h2>
+                                <p className="text-emerald-50">Invoice {generatedRef} created successfully</p>
                             </div>
 
-                            <div className="flex gap-3 pt-4">
-                                <button
-                                    onClick={handlePrint}
-                                    className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
-                                >
-                                    <Printer size={20} />
-                                    Print Invoice
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        resetForm();
-                                        router.push('/billing');
-                                    }}
-                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors"
-                                >
-                                    New Invoice
-                                </button>
+                            <div className="p-6 space-y-4">
+                                <div className="bg-slate-50 p-4 rounded-lg">
+                                    <p className="text-sm text-slate-500 mb-1">Dealer</p>
+                                    <p className="font-bold text-slate-800">{selectedDealer.businessName}</p>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-slate-50 p-4 rounded-lg">
+                                        <p className="text-sm text-slate-500 mb-1">Amount</p>
+                                        <p className="font-bold text-slate-800">₹{invoiceTotal.toFixed(2)}</p>
+                                    </div>
+                                    <div className="bg-slate-50 p-4 rounded-lg">
+                                        <p className="text-sm text-slate-500 mb-1">Items</p>
+                                        <p className="font-bold text-slate-800">{invoiceItems.length}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 pt-4">
+                                    <button
+                                        onClick={handlePrint}
+                                        className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Printer size={20} />
+                                        Print Invoice
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            resetForm();
+                                            router.push('/billing');
+                                        }}
+                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors"
+                                    >
+                                        New Invoice
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
             {/* End of Print Preview */}
-        </div>
+        </div >
     );
 }
 
