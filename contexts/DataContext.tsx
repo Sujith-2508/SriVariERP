@@ -629,110 +629,56 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const recordPayment = async (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => {
-        const receiptNumber = reference || `R${String(receiptCount).padStart(3, '0')}`;
         const paymentDate = new Date();
 
-        // FIFO: Get all unpaid/partially paid invoices for this dealer
-        const dealerInvoices = transactions
-            .filter(t => t.customerId === dealerId && t.type === TransactionType.INVOICE)
-            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-        // Calculate current balances
-        const invoiceBalances = new Map<string, number>();
-        dealerInvoices.forEach(inv => {
-            invoiceBalances.set(inv.id, inv.amount);
+        // Use the atomic RPC function for consistent FIFO allocation across all apps
+        // This handles: Transaction creation, FIFO allocations, and Dealer balance update
+        const { data: rpcData, error: rpcError } = await supabase.rpc('record_payment_fifo', {
+            p_customer_id: dealerId,
+            p_amount: amount,
+            p_payment_mode: method,
+            p_agent_name: agentName || 'Admin',
+            p_notes: `via ${method}`
         });
 
-        // Subtract existing payments
-        transactions
-            .filter(t => t.customerId === dealerId && t.type === TransactionType.PAYMENT)
-            .forEach(payment => {
-                if (payment.paymentAllocations) {
-                    payment.paymentAllocations.forEach(alloc => {
-                        const currentBalance = invoiceBalances.get(alloc.invoiceId) || 0;
-                        invoiceBalances.set(alloc.invoiceId, currentBalance - alloc.amount);
-                    });
-                }
-            });
+        if (rpcError) {
+            console.error('Error recording payment via RPC:', rpcError);
+            throw rpcError;
+        }
 
-        // Insert payment transaction
-        const { data: txnData, error: txnError } = await supabase
+        const receiptNumber = rpcData.receipt_ref;
+
+        // Fetch the newly created transaction to update local state
+        const { data: txnRow, error: fetchError } = await supabase
             .from('transactions')
-            .insert({
-                customer_id: dealerId,
-                type: 'PAYMENT',
-                amount: amount,
-                date: paymentDate.toISOString(),
-                reference_id: receiptNumber,
-                notes: `via ${method}`,
-                agent_name: agentName || 'Admin',
-                collection_date: paymentDate.toISOString(),
-            })
-            .select()
+            .select('*, payment_allocations(*)')
+            .eq('id', rpcData.receipt_id)
             .single();
 
-        if (txnError) {
-            console.error('Error recording payment:', txnError);
-            throw txnError;
+        if (fetchError) {
+            console.error('Error fetching created transaction:', fetchError);
+            // Even if fetch fails, the DB is updated, so we should refresh
+            await fetchData();
+            return receiptNumber;
         }
 
-        // Apply new payment using FIFO and insert allocations
-        const paymentAllocations: PaymentAllocation[] = [];
-        let remainingAmount = amount;
+        // Update local dealer balance
+        setDealers(prev => prev.map(d => {
+            if (d.id === dealerId) {
+                return {
+                    ...d,
+                    balance: d.balance - amount,
+                    lastTransactionDate: paymentDate
+                };
+            }
+            return d;
+        }));
 
-        for (const invoice of dealerInvoices) {
-            if (remainingAmount <= 0) break;
-
-            const invoiceBalance = invoiceBalances.get(invoice.id) || 0;
-            if (invoiceBalance <= 0) continue;
-
-            const amountToApply = Math.min(remainingAmount, invoiceBalance);
-
-            // Insert allocation to Supabase
-            await supabase.from('payment_allocations').insert({
-                invoice_id: invoice.id,
-                invoice_ref: invoice.referenceId || 'N/A',
-                receipt_id: txnData.id,
-                receipt_ref: receiptNumber,
-                amount: amountToApply,
-                date: paymentDate.toISOString(),
-                agent_name: agentName || 'Admin',
-            });
-
-            paymentAllocations.push({
-                invoiceId: invoice.id,
-                invoiceRef: invoice.referenceId || 'N/A',
-                receiptId: txnData.id,
-                receiptRef: receiptNumber,
-                amount: amountToApply,
-                date: paymentDate,
-                agentName: agentName || 'Admin'
-            });
-
-            remainingAmount -= amountToApply;
-        }
-
-        // Update dealer balance
-        const dealer = dealers.find(d => d.id === dealerId);
-        if (dealer) {
-            const newBalance = dealer.balance - amount;
-            await supabase
-                .from('dealers')
-                .update({
-                    balance: newBalance,
-                    last_transaction_date: paymentDate.toISOString()
-                })
-                .eq('id', dealerId);
-
-            setDealers(prev => prev.map(d =>
-                d.id === dealerId ? { ...d, balance: newBalance, lastTransactionDate: paymentDate } : d
-            ));
-        }
-
-        // Update local state
-        const newTxn = transformTransaction(txnData);
-        newTxn.paymentAllocations = paymentAllocations;
+        // Update local transactions state
+        const newTxn = transformTransaction(txnRow);
+        newTxn.paymentAllocations = txnRow.payment_allocations;
         setTransactions(prev => [newTxn, ...prev]);
+
         if (!reference) {
             setReceiptCount(prev => prev + 1);
         }
