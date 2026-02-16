@@ -87,12 +87,18 @@ const transformDealer = (row: any): Dealer => ({
 
 const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []): Transaction => {
     const transactionId = row.id;
-    const allocations = allAllocations.filter(a => a.invoiceId === transactionId);
+    const type = row.type as TransactionType;
+
+    // For Invoices: show what payments were applied TO this invoice
+    // For Payments: show what invoices were reduced BY this payment
+    const allocations = allAllocations.filter(a =>
+        type === TransactionType.INVOICE ? a.invoiceId === transactionId : a.receiptId === transactionId
+    );
 
     return {
         id: row.id,
         customerId: row.customer_id,
-        type: row.type as TransactionType,
+        type: type,
         amount: Number(row.amount),
         date: new Date(row.date),
         referenceId: row.reference_id,
@@ -418,17 +424,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const getInvoicePaymentHistory = (invoiceId: string): PaymentAllocation[] => {
-        const allAllocations: PaymentAllocation[] = [];
-
-        transactions.forEach(txn => {
-            if (txn.type === TransactionType.PAYMENT && txn.paymentAllocations) {
-                txn.paymentAllocations
-                    .filter(alloc => alloc.invoiceId === invoiceId)
-                    .forEach(alloc => allAllocations.push(alloc));
-            }
-        });
-
-        return allAllocations.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        const invoice = transactions.find(t => t.id === invoiceId);
+        return invoice?.paymentAllocations || [];
     };
 
     const createInvoice = async (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {
