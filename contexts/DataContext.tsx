@@ -85,25 +85,41 @@ const transformDealer = (row: any): Dealer => ({
     lastTransactionDate: row.last_transaction_date ? new Date(row.last_transaction_date) : undefined,
 });
 
-const transformTransaction = (row: any): Transaction => ({
-    id: row.id,
-    customerId: row.customer_id,
-    type: row.type as TransactionType,
+const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []): Transaction => {
+    const transactionId = row.id;
+    const allocations = allAllocations.filter(a => a.invoiceId === transactionId);
+
+    return {
+        id: row.id,
+        customerId: row.customer_id,
+        type: row.type as TransactionType,
+        amount: Number(row.amount),
+        date: new Date(row.date),
+        referenceId: row.reference_id,
+        notes: row.notes,
+        agentName: row.agent_name,
+        collectionDate: row.collection_date ? new Date(row.collection_date) : undefined,
+        creditDays: row.credit_days,
+        dueDate: row.due_date ? new Date(row.due_date) : undefined,
+        vehicleName: row.vehicle_name,
+        vehicleNumber: row.vehicle_number,
+        destination: row.destination,
+        transportCharges: row.transport_charges ? Number(row.transport_charges) : undefined,
+        paymentTerms: row.payment_terms,
+        discountPercent: row.discount_percent ? Number(row.discount_percent) : undefined,
+        items: row.invoice_items ? row.invoice_items.map(transformInvoiceItem) : [],
+        paymentAllocations: allocations,
+    };
+};
+
+const transformAllocation = (row: any): PaymentAllocation => ({
+    invoiceId: row.invoice_id,
+    invoiceRef: row.invoice_ref,
+    receiptId: row.receipt_id,
+    receiptRef: row.receipt_ref,
     amount: Number(row.amount),
     date: new Date(row.date),
-    referenceId: row.reference_id,
-    notes: row.notes,
     agentName: row.agent_name,
-    collectionDate: row.collection_date ? new Date(row.collection_date) : undefined,
-    creditDays: row.credit_days,
-    dueDate: row.due_date ? new Date(row.due_date) : undefined,
-    vehicleName: row.vehicle_name,
-    vehicleNumber: row.vehicle_number,
-    destination: row.destination,
-    transportCharges: row.transport_charges ? Number(row.transport_charges) : undefined,
-    paymentTerms: row.payment_terms,
-    discountPercent: row.discount_percent ? Number(row.discount_percent) : undefined,
-    items: row.invoice_items ? row.invoice_items.map(transformInvoiceItem) : [],
 });
 
 const transformInvoiceItem = (item: any): InvoiceItem => ({
@@ -192,6 +208,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (transactionsError) throw transactionsError;
 
+            // Fetch payment allocations separately
+            const { data: allocationsData, error: allocationsError } = await supabase
+                .from('payment_allocations')
+                .select('*');
+
+            if (allocationsError) throw allocationsError;
+
+            const transformedAllocations = allocationsData?.map(transformAllocation) || [];
+
             // Fetch agents from Supabase
             const { data: agentsData, error: agentsError } = await supabase
                 .from('agents')
@@ -202,7 +227,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             // Transform and set data
             setDealers(dealersData?.map(transformDealer) || []);
-            setTransactions(transactionsData?.map(transformTransaction) || []);
+            setTransactions(transactionsData?.map(row => transformTransaction(row, transformedAllocations)) || []);
             setAgents(agentsData?.map(transformAgent) || []);
 
             // Calculate counts for numbering

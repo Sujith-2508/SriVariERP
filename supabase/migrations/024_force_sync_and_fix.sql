@@ -111,7 +111,7 @@ BEGIN
         WHERE t.customer_id = p_customer_id 
           AND t.type = 'INVOICE' 
           AND (t.amount - COALESCE(paid.total, 0)) > 0
-        ORDER BY t.created_at ASC
+        ORDER BY t.date ASC, t.created_at ASC
     ) LOOP
         EXIT WHEN v_remaining_payment <= 0;
         v_applied_amount := LEAST(v_remaining_payment, v_invoice.pending);
