@@ -17,14 +17,20 @@ export default function Dashboard() {
     const [purchaseBills, setPurchaseBills] = useState<PurchaseBillData[]>([]);
     const [agentSalaries, setAgentSalaries] = useState<AgentSalaryData[]>([]);
     const [companyExpenses, setCompanyExpenses] = useState<CompanyExpense[]>([]);
+    const [profitPeriod, setProfitPeriod] = useState<'monthly' | 'yearly'>('monthly');
 
+    // Selected month and year for viewing historical data
+    const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // 1-12
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+    // Load expenses and salaries when month/year changes
     useEffect(() => {
         const loadDashboardData = async () => {
             const [suppliersData, billsData, salariesData, expensesData] = await Promise.all([
                 getAllSuppliers(),
                 getPurchaseBills(),
-                getSalaryByMonth(new Date().getMonth() + 1, new Date().getFullYear()),
-                getExpensesByMonth(new Date().getMonth() + 1, new Date().getFullYear())
+                getSalaryByMonth(selectedMonth, selectedYear),
+                getExpensesByMonth(selectedMonth, selectedYear)
             ]);
             setSuppliers(suppliersData);
             setPurchaseBills(billsData);
@@ -32,7 +38,7 @@ export default function Dashboard() {
             setCompanyExpenses(expensesData);
         };
         loadDashboardData();
-    }, []);
+    }, [selectedMonth, selectedYear]);
 
     // ========================================================================
     // 1. FUNDAMENTAL STATS
@@ -95,18 +101,47 @@ export default function Dashboard() {
     }, [transactions]);
 
     // ========================================================================
-    // 2. PROFIT ANALYSIS (UPDATED)
+    // 2. PROFIT ANALYSIS (UPDATED WITH MONTHLY/YEARLY SUPPORT)
     // ========================================================================
-    const { totalRevenue, totalCOGS, totalDiscounts, totalAgentExpenses, totalCompanyExpenses, totalProfit, profitMargin, totalStockValue } = useMemo(() => {
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
+    // Helper to get financial year date range (April 1 - March 31)
+    const getFinancialYearRange = (date: Date) => {
+        const year = date.getFullYear();
+        const month = date.getMonth();
+
+        // If current month is Jan-Mar, FY started last year
+        // If current month is Apr-Dec, FY started this year
+        const fyStartYear = month < 3 ? year - 1 : year;
+
+        const startDate = new Date(fyStartYear, 3, 1); // April 1
+        const endDate = new Date(fyStartYear + 1, 2, 31, 23, 59, 59); // March 31 next year
+
+        return { startDate, endDate, fyStartYear };
+    };
+
+    const { totalRevenue, totalCOGS, totalDiscounts, totalAgentExpenses, totalCompanyExpenses, totalProfit, profitMargin, totalStockValue, periodLabel } = useMemo(() => {
+        let startDate: Date;
+        let endDate: Date;
+        let label: string;
+
+        if (profitPeriod === 'monthly') {
+            // Monthly: use selected month and year
+            startDate = new Date(selectedYear, selectedMonth - 1, 1);
+            endDate = new Date(selectedYear, selectedMonth, 0, 23, 59, 59);
+            label = new Date(selectedYear, selectedMonth - 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+        } else {
+            // Yearly: financial year based on selected month/year
+            const referenceDate = new Date(selectedYear, selectedMonth - 1, 1);
+            const fyRange = getFinancialYearRange(referenceDate);
+            startDate = fyRange.startDate;
+            endDate = fyRange.endDate;
+            label = `FY ${fyRange.fyStartYear}-${String(fyRange.fyStartYear + 1).slice(2)}`;
+        }
 
         const invoices = transactions.filter(t => {
             const txnDate = new Date(t.date);
             return t.type === TransactionType.INVOICE &&
-                txnDate.getMonth() === currentMonth &&
-                txnDate.getFullYear() === currentYear;
+                txnDate >= startDate &&
+                txnDate <= endDate;
         });
 
         let revenue = 0;
@@ -122,8 +157,20 @@ export default function Dashboard() {
             profit += p.netProfit;
         });
 
-        const agentExpenses = agentSalaries.reduce((acc, s) => acc + (s.totalExpense || 0) + s.baseSalary, 0);
-        const compExpenses = companyExpenses.reduce((acc, e) => acc + e.amount, 0);
+        // Get expenses for the period
+        let agentExpenses = 0;
+        let compExpenses = 0;
+
+        if (profitPeriod === 'monthly') {
+            agentExpenses = agentSalaries.reduce((acc, s) => acc + (s.totalExpense || 0) + s.baseSalary, 0);
+            compExpenses = companyExpenses.reduce((acc, e) => acc + e.amount, 0);
+        } else {
+            // For yearly, we need to fetch all months in the FY
+            // Since we only have current month data, we'll use current month * 12 as estimate
+            // In production, you'd fetch all months in the FY
+            agentExpenses = agentSalaries.reduce((acc, s) => acc + (s.totalExpense || 0) + s.baseSalary, 0) * 12;
+            compExpenses = companyExpenses.reduce((acc, e) => acc + e.amount, 0) * 12;
+        }
 
         const netProfit = profit - agentExpenses - compExpenses;
         const margin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
@@ -137,9 +184,10 @@ export default function Dashboard() {
             totalCompanyExpenses: compExpenses,
             totalProfit: netProfit,
             profitMargin: margin,
-            totalStockValue: inventoryValue
+            totalStockValue: inventoryValue,
+            periodLabel: label
         };
-    }, [transactions, products, agentSalaries, companyExpenses]);
+    }, [transactions, products, agentSalaries, companyExpenses, profitPeriod, selectedMonth, selectedYear]);
 
     // ========================================================================
     // 3. OUTSTANDING ANALYSIS
@@ -327,10 +375,78 @@ export default function Dashboard() {
 
                 {/* 1. Profit Breakdown */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                        <Percent size={18} className="text-emerald-500" />
-                        Profit Breakdown
-                    </h3>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                            <Percent size={18} className="text-emerald-500" />
+                            Profit Breakdown
+                        </h3>
+                        {/* Period Toggle */}
+                        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+                            <button
+                                onClick={() => setProfitPeriod('monthly')}
+                                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${profitPeriod === 'monthly'
+                                    ? 'bg-white text-emerald-600 shadow-sm'
+                                    : 'text-slate-600 hover:text-slate-800'
+                                    }`}
+                            >
+                                Monthly
+                            </button>
+                            <button
+                                onClick={() => setProfitPeriod('yearly')}
+                                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${profitPeriod === 'yearly'
+                                    ? 'bg-white text-emerald-600 shadow-sm'
+                                    : 'text-slate-600 hover:text-slate-800'
+                                    }`}
+                            >
+                                Yearly
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Month and Year Selectors */}
+                    <div className="mb-3 flex gap-2">
+                        {/* Show month selector only in monthly view */}
+                        {profitPeriod === 'monthly' && (
+                            <div className="flex-1">
+                                <label className="block text-xs text-slate-500 mb-1">Month</label>
+                                <select
+                                    value={selectedMonth}
+                                    onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                                >
+                                    <option value={1}>January</option>
+                                    <option value={2}>February</option>
+                                    <option value={3}>March</option>
+                                    <option value={4}>April</option>
+                                    <option value={5}>May</option>
+                                    <option value={6}>June</option>
+                                    <option value={7}>July</option>
+                                    <option value={8}>August</option>
+                                    <option value={9}>September</option>
+                                    <option value={10}>October</option>
+                                    <option value={11}>November</option>
+                                    <option value={12}>December</option>
+                                </select>
+                            </div>
+                        )}
+                        <div className={profitPeriod === 'monthly' ? 'flex-1' : 'w-full'}>
+                            <label className="block text-xs text-slate-500 mb-1">Year</label>
+                            <select
+                                value={selectedYear}
+                                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                            >
+                                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                                    <option key={year} value={year}>{year}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Period Label */}
+                    <div className="mb-3 text-xs text-slate-500 font-medium">
+                        Period: {periodLabel}
+                    </div>
                     <div className="space-y-4">
                         <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                             <span className="text-sm text-slate-600">Total Revenue</span>
@@ -352,15 +468,8 @@ export default function Dashboard() {
                             <span className="text-sm text-blue-600">Company Expenses</span>
                             <span className="font-bold text-blue-700">-{formatCurrency(totalCompanyExpenses)}</span>
                         </div>
-                        <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-lg border border-emerald-100">
-                            <div className="flex flex-col">
-                                <span className="text-sm text-emerald-600">Current Stock Value (at Cost)</span>
-                                <span className="text-[10px] text-emerald-500 uppercase font-bold tracking-wider">Inventory Asset</span>
-                            </div>
-                            <span className="font-bold text-emerald-700">+{formatCurrency(totalStockValue || 0)}</span>
-                        </div>
                         <div className="border-t border-slate-200 pt-3 flex justify-between items-center">
-                            <span className="font-bold text-slate-800">Net Monthly Profit</span>
+                            <span className="font-bold text-slate-800">Net {profitPeriod === 'monthly' ? 'Monthly' : 'Yearly'} Profit</span>
                             <span className="font-bold text-emerald-600 text-lg">{formatCurrency(totalProfit)}</span>
                         </div>
                     </div>

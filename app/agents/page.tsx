@@ -76,6 +76,12 @@ export default function AgentsPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
+        // Validate phone number is exactly 10 digits
+        if (!/^\d{10}$/.test(formData.phone)) {
+            alert('Phone number must be exactly 10 digits');
+            return;
+        }
+
         try {
             if (editingAgent) {
                 await updateAgent({
@@ -102,7 +108,7 @@ export default function AgentsPage() {
                     area: formData.division,
                     collectionTarget: formData.collectionTarget,
                     monthlySalary: formData.monthlySalary === '' ? 0 : Number(formData.monthlySalary),
-                    isActive: formData.isActive,
+                    isActive: true,
                     agentId: formData.agentId,
                     password: formData.password,
                 });
@@ -488,9 +494,16 @@ export default function AgentsPage() {
                                 <input
                                     type="tel"
                                     value={formData.phone}
-                                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                    onChange={(e) => {
+                                        // Only allow digits and limit to 10 characters
+                                        const value = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                        setFormData({ ...formData, phone: value });
+                                    }}
                                     className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                                    placeholder="Enter phone number"
+                                    placeholder="10-digit phone number"
+                                    pattern="[0-9]{10}"
+                                    maxLength={10}
+                                    minLength={10}
                                     required
                                 />
                             </div>
@@ -532,16 +545,7 @@ export default function AgentsPage() {
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-3">
-                                <input
-                                    type="checkbox"
-                                    id="isActive"
-                                    checked={formData.isActive}
-                                    onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                                    className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
-                                />
-                                <label htmlFor="isActive" className="text-sm text-slate-600">Agent is active</label>
-                            </div>
+
 
                             <div className="flex gap-3 pt-4">
                                 <button
