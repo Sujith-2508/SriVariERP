@@ -41,6 +41,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     name: row.name,
     category: row.category,
     price: row.price,
+    costPrice: Number(row.cost_price) || 0,
     stock: row.stock,
     gstRate: row.gst_rate,
     hsnCode: row.hsn_code,

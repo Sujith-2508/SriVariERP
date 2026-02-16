@@ -618,49 +618,64 @@ export default function PurchasesPage() {
                                     <th className="p-4">Phone</th>
                                     <th className="p-4">City</th>
                                     <th className="p-4 text-right">Balance</th>
+                                    <th className="p-4 text-right pr-8">Stock Value (COGS)</th>
                                     <th className="p-4 text-center">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredSuppliers.map(s => (
-                                    <tr key={s.id} className="hover:bg-slate-50">
-                                        <td className="p-4 font-medium text-slate-800">{s.name}</td>
-                                        <td className="p-4 text-slate-600">{s.contactPerson || '-'}</td>
-                                        <td className="p-4 text-slate-600">{s.phone || '-'}</td>
-                                        <td className="p-4 text-slate-600">{s.city || '-'}</td>
-                                        <td className="p-4 text-right font-bold text-red-600">₹{(s.balance || 0).toLocaleString()}</td>
-                                        <td className="p-4">
-                                            <div className="flex items-center justify-center gap-1">
-                                                <button
-                                                    onClick={() => handleRefreshBalance(s)}
-                                                    className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                                                    title="Refresh Balance"
-                                                >
-                                                    <RefreshCw size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => viewStatement(s)}
-                                                    className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                                                    title="View Statement"
-                                                >
-                                                    <FileText size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => openEditSupplier(s)}
-                                                    className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteSupplier(s.id)}
-                                                    className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {filteredSuppliers.map(s => {
+                                    // Calculate Stock Value for this supplier
+                                    // Logic: Find all products bought from this supplier and sum (stock * costPrice)
+                                    const supplierProductIds = new Set(
+                                        bills
+                                            .filter(b => b.supplierId === s.id)
+                                            .flatMap(b => (b.items || []).map((item: any) => item.productId))
+                                    );
+                                    const stockValue = products
+                                        .filter(p => supplierProductIds.has(p.id) || supplierProductIds.has(p.productId))
+                                        .reduce((sum, p) => sum + ((p.stock || 0) * (p.costPrice || 0)), 0);
+
+                                    return (
+                                        <tr key={s.id} className="hover:bg-slate-50">
+                                            <td className="p-4 font-medium text-slate-800">{s.name}</td>
+                                            <td className="p-4 text-slate-600">{s.contactPerson || '-'}</td>
+                                            <td className="p-4 text-slate-600">{s.phone || '-'}</td>
+                                            <td className="p-4 text-slate-600">{s.city || '-'}</td>
+                                            <td className="p-4 text-right font-bold text-red-600">₹{(s.balance || 0).toLocaleString()}</td>
+                                            <td className="p-4 text-right font-bold text-emerald-600 pr-8">₹{stockValue.toLocaleString()}</td>
+                                            <td className="p-4">
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <button
+                                                        onClick={() => handleRefreshBalance(s)}
+                                                        className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                                                        title="Refresh Balance"
+                                                    >
+                                                        <RefreshCw size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => viewStatement(s)}
+                                                        className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                                                        title="View Statement"
+                                                    >
+                                                        <FileText size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => openEditSupplier(s)}
+                                                        className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteSupplier(s.id)}
+                                                        className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

@@ -97,7 +97,7 @@ export default function Dashboard() {
     // ========================================================================
     // 2. PROFIT ANALYSIS (UPDATED)
     // ========================================================================
-    const { totalRevenue, totalCOGS, totalDiscounts, totalAgentExpenses, totalCompanyExpenses, totalProfit, profitMargin } = useMemo(() => {
+    const { totalRevenue, totalCOGS, totalDiscounts, totalAgentExpenses, totalCompanyExpenses, totalProfit, profitMargin, totalStockValue } = useMemo(() => {
         const now = new Date();
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
@@ -127,6 +127,8 @@ export default function Dashboard() {
 
         const netProfit = profit - agentExpenses - compExpenses;
         const margin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
+        const inventoryValue = products.reduce((sum, p) => sum + ((p.stock || 0) * (p.costPrice || 0)), 0);
+
         return {
             totalRevenue: revenue,
             totalCOGS: cogs,
@@ -134,7 +136,8 @@ export default function Dashboard() {
             totalAgentExpenses: agentExpenses,
             totalCompanyExpenses: compExpenses,
             totalProfit: netProfit,
-            profitMargin: margin
+            profitMargin: margin,
+            totalStockValue: inventoryValue
         };
     }, [transactions, products, agentSalaries, companyExpenses]);
 
@@ -349,8 +352,15 @@ export default function Dashboard() {
                             <span className="text-sm text-blue-600">Company Expenses</span>
                             <span className="font-bold text-blue-700">-{formatCurrency(totalCompanyExpenses)}</span>
                         </div>
+                        <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-lg border border-emerald-100">
+                            <div className="flex flex-col">
+                                <span className="text-sm text-emerald-600">Current Stock Value (at Cost)</span>
+                                <span className="text-[10px] text-emerald-500 uppercase font-bold tracking-wider">Inventory Asset</span>
+                            </div>
+                            <span className="font-bold text-emerald-700">+{formatCurrency(totalStockValue || 0)}</span>
+                        </div>
                         <div className="border-t border-slate-200 pt-3 flex justify-between items-center">
-                            <span className="font-bold text-slate-800">Net Company Profit</span>
+                            <span className="font-bold text-slate-800">Net Monthly Profit</span>
                             <span className="font-bold text-emerald-600 text-lg">{formatCurrency(totalProfit)}</span>
                         </div>
                     </div>

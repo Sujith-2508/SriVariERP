@@ -64,6 +64,7 @@ const transformProduct = (row: any): Product => ({
     name: row.name,
     category: row.category,
     price: Number(row.price),
+    costPrice: Number(row.cost_price) || 0,
     stock: Number(row.stock),
     gstRate: Number(row.gst_rate),
     hsnCode: row.hsn_code,
@@ -287,7 +288,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const newProduct: Product = {
             id: crypto.randomUUID(),
-            ...productData
+            ...productData,
+            costPrice: Number(productData.costPrice) || 0
         };
 
         const updatedProducts = [newProduct, ...currentProducts];
