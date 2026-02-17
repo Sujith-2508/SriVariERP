@@ -124,6 +124,7 @@ export interface CompanySettings {
   accountNumber?: string;
   ifscCode?: string;
   accountHolderName?: string;
+  accountType?: string;
 }
 
 // Supplier - production companies you purchase from
@@ -310,3 +311,21 @@ export interface CompanyExpense {
 }
 
 export type ViewState = 'DASHBOARD' | 'BILLING' | 'INVENTORY' | 'DEALERS' | 'COLLECTIONS' | 'AGENTS' | 'REPORTS' | 'SETTINGS' | 'PURCHASES';
+
+// Global Electron Types
+declare global {
+  interface Window {
+    electron: {
+      whatsapp: {
+        onQR: (callback: (qr: string) => void) => void;
+        onReady: (callback: () => void) => void;
+        onAuthenticated: (callback: () => void) => void;
+        onAuthFailure: (callback: (msg: string) => void) => void;
+        onStatus: (callback: (status: string) => void) => void;
+        sendPDF: (phoneNumber: string, pdfBase64: string, filename?: string, caption?: string) => Promise<{ success: boolean }>;
+        getStatus: () => Promise<string>;
+        logout: () => Promise<{ success: boolean }>;
+      };
+    };
+  }
+}

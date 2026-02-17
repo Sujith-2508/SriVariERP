@@ -214,6 +214,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (transactionsError) throw transactionsError;
 
+            console.log('[DataContext] Fetched transactions:', transactionsData?.length);
+            const invoicesWithItems = transactionsData?.filter(t => t.type === 'INVOICE' && t.invoice_items && t.invoice_items.length > 0) || [];
+            console.log('[DataContext] Invoices with items:', invoicesWithItems.length);
+            if (invoicesWithItems.length > 0) {
+                console.log('[DataContext] Sample invoice items:', invoicesWithItems[0].invoice_items);
+            }
+
             // Fetch payment allocations separately
             const { data: allocationsData, error: allocationsError } = await supabase
                 .from('payment_allocations')

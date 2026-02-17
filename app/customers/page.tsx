@@ -3,12 +3,13 @@
 import React, { useState, useRef } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
-import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit } from 'lucide-react';
+import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2 } from 'lucide-react';
 import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
+import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 
 // ... existing imports
 
@@ -18,12 +19,11 @@ export default function DealerLedger() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDealerId, setSelectedDealerId] = useState<string | null>(null);
     const [selectedInvoice, setSelectedInvoice] = useState<Transaction | null>(null);
+    const [whatsappSending, setWhatsappSending] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+    const [whatsappError, setWhatsappError] = useState<string | null>(null);
 
-    // Print State
-    const [showPrintPreview, setShowPrintPreview] = useState(false);
+    // Company Settings
     const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
-    const [printInvoiceItems, setPrintInvoiceItems] = useState<InvoiceItem[]>([]);
-    const [isPrinting, setIsPrinting] = useState(false);
 
     // Load Company Settings
     React.useEffect(() => {
@@ -58,49 +58,92 @@ export default function DealerLedger() {
         loadCompanySettings();
     }, []);
 
-    const handlePrintInvoice = async () => {
-        if (!selectedInvoice) return;
-        setIsPrinting(true);
+    const handleDownloadInvoicePDF = async () => {
+        if (!selectedInvoice || !selectedDealer) return;
 
-        // Fetch items for this invoice
-        const { data: items, error } = await supabase
-            .from('invoice_items')
-            .select('*')
-            .eq('transaction_id', selectedInvoice.id);
+        const jsPDF = (await import('jspdf')).default;
+        const autoTable = (await import('jspdf-autotable')).default;
 
-        if (!error && items) {
-            const loadedItems: InvoiceItem[] = items.map(item => ({
-                productId: item.product_id,
-                productName: item.product_name,
-                quantity: item.quantity,
-                unitPrice: item.unit_price,
-                cgst: item.cgst,
-                sgst: item.sgst,
-                igst: item.igst,
-                cgstAmount: item.cgst_amount,
-                sgstAmount: item.sgst_amount,
-                igstAmount: item.igst_amount,
-                discount: item.discount,
-                discountAmount: item.discount_amount,
-                total: item.total,
-                gstAmount: item.gst_amount,
-                hsnCode: item.product?.hsn_code || '', // Assuming simplified mapping or need to join product
-                unit: item.product?.unit || 'nos'
-            }));
-            setPrintInvoiceItems(loadedItems);
-            setShowPrintPreview(true);
-            setTimeout(() => {
-                window.print();
-                setIsPrinting(false);
-                // setShowPrintPreview(false); // Keep true if user wants to see it, or false to hide?
-                // Usually keeping it might block view if it overlays. 
-                // But since it's hidden print:block, it doesn't matter on screen.
-                // Actually, if I use hidden print:block, I don't need to unset it.
-            }, 500);
-        } else {
-            setIsPrinting(false);
-            alert('Failed to load invoice items for printing');
+        const doc = new jsPDF();
+        const paymentHistory = getInvoicePaymentHistory(selectedInvoice.id);
+
+        // Helper for PDF currency
+        const formatCurrencyPDF = (amount: number) => {
+            return `Rs. ${amount.toLocaleString('en-IN')}`;
+        };
+
+        // Header
+        doc.setFontSize(20);
+        const companyName = companySettings?.companyName || 'Sri Vari Enterprises';
+        doc.text(companyName, 14, 22);
+
+        doc.setFontSize(10);
+        doc.text(companySettings?.addressLine1 || '', 14, 28);
+        doc.text(`${companySettings?.city || ''}, ${companySettings?.state || ''}`, 14, 32);
+
+        doc.setFontSize(16);
+        doc.text('Invoice & Payment History', 14, 45);
+
+        // Invoice Details
+        doc.setFontSize(10);
+        doc.text(`Invoice No: ${selectedInvoice.referenceId}`, 14, 55);
+        doc.text(`Date: ${selectedInvoice.date.toLocaleDateString('en-IN')}`, 14, 60);
+        doc.text(`Dealer: ${selectedDealer.businessName}`, 14, 65);
+        doc.text(`Contact: ${selectedDealer.phone}`, 14, 70);
+
+        // Invoice Summary
+        doc.setDrawColor(200);
+        doc.line(14, 75, 196, 75);
+
+        doc.text('Invoice Summary:', 14, 85);
+        doc.text(`Amount: ${formatCurrencyPDF(selectedInvoice.amount)}`, 14, 91);
+        doc.text(`Paid: ${formatCurrencyPDF(paymentHistory.reduce((acc, p) => acc + p.amount, 0))}`, 80, 91);
+        const balance = selectedInvoice.amount - paymentHistory.reduce((acc, p) => acc + p.amount, 0);
+        doc.setTextColor(balance > 0 ? 220 : 34, balance > 0 ? 38 : 185, balance > 0 ? 38 : 129);
+        doc.text(`Balance: ${formatCurrencyPDF(balance)}`, 140, 91);
+        doc.setTextColor(0);
+
+        if (selectedInvoice.dueDate) {
+            doc.text(`Due Date: ${new Date(selectedInvoice.dueDate).toLocaleDateString('en-IN')}`, 14, 97);
         }
+
+        // Payment History Table
+        if (paymentHistory.length > 0) {
+            doc.text('Payment History:', 14, 107);
+            autoTable(doc, {
+                startY: 112,
+                head: [['Receipt No', 'Date', 'Amount', 'Collected By']],
+                body: paymentHistory.map(payment => [
+                    payment.receiptRef,
+                    new Date(payment.date).toLocaleDateString('en-IN'),
+                    formatCurrencyPDF(payment.amount),
+                    payment.agentName || 'Admin'
+                ]),
+                theme: 'grid',
+                headStyles: { fillColor: [16, 185, 129] }, // Emerald-600
+                styles: { fontSize: 9 },
+            });
+
+            // Total Paid Footer
+            const finalY = (doc as any).lastAutoTable.finalY || 112;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Total Paid:', 14, finalY + 10);
+            doc.setTextColor(16, 185, 129);
+            doc.text(formatCurrencyPDF(paymentHistory.reduce((acc, p) => acc + p.amount, 0)), 140, finalY + 10, { align: 'right' });
+            doc.setTextColor(0);
+            doc.setFont('helvetica', 'normal');
+        } else {
+            doc.text('No payments recorded yet', 14, 112);
+        }
+
+        // Footer
+        doc.setFontSize(10);
+        doc.setTextColor(128);
+        doc.text('by Sri Vari Enterprises', 14, 285);
+        doc.text('Page 1 of 1', 196, 285, { align: 'right' });
+
+        doc.save(`Invoice_${selectedInvoice.referenceId}_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
     // Add Dealer State
@@ -290,7 +333,7 @@ export default function DealerLedger() {
         const autoTable = (await import('jspdf-autotable')).default;
 
         const doc = new jsPDF();
-        const { invoices } = getDealerStatement(selectedDealer.id);
+        const { invoices, payments } = getDealerStatement(selectedDealer.id);
         const totalInvoiced = invoices.reduce((acc, inv) => acc + inv.amount, 0);
         const totalPaid = invoices.reduce((acc, inv) => acc + inv.paid, 0);
         const totalBalance = invoices.reduce((acc, inv) => acc + inv.balance, 0);
@@ -333,7 +376,7 @@ export default function DealerLedger() {
         doc.text(`Outstanding Balance: ${formatCurrencyPDF(totalBalance)}`, 140, 86);
         doc.setTextColor(0); // Reset
 
-        // Table
+        // Invoice History Table
         autoTable(doc, {
             startY: 95,
             head: [['Date', 'Ref No', 'Amount', 'Paid', 'Balance', 'Status', 'Due Date']],
@@ -348,6 +391,25 @@ export default function DealerLedger() {
             ]),
             theme: 'grid',
             headStyles: { fillColor: [16, 185, 129] }, // Emerald-600
+            styles: { fontSize: 9 },
+        });
+
+        // Collection History Section
+        const collectionY = (doc as any).lastAutoTable.finalY + 15;
+        doc.setFontSize(14);
+        doc.text('Collection History', 14, collectionY);
+
+        autoTable(doc, {
+            startY: collectionY + 5,
+            head: [['Date', 'Receipt No', 'Amount', 'Collected By']],
+            body: payments.map(p => [
+                new Date(p.date).toLocaleDateString('en-IN'),
+                p.referenceId,
+                formatCurrencyPDF(p.amount),
+                p.agentName || 'Admin'
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [5, 150, 105] }, // Emerald-700
             styles: { fontSize: 9 },
         });
 
@@ -369,6 +431,45 @@ export default function DealerLedger() {
         }
 
         doc.save(`${selectedDealer.businessName}_Statement_${new Date().toISOString().split('T')[0]}.pdf`);
+    };
+
+    const handleSendWhatsAppStatement = async () => {
+        const selectedDealer = dealers.find(d => d.id === selectedDealerId);
+        if (!selectedDealer || !window.electron?.whatsapp || !companySettings) return;
+
+        setWhatsappSending('sending');
+        setWhatsappError(null);
+
+        try {
+            const status = await window.electron.whatsapp.getStatus();
+            if (status !== 'READY') {
+                throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+            }
+
+            const { invoices, payments, summary } = getDealerStatement(selectedDealer.id);
+
+            const base64Pdf = await generateStatementPDFBase64(
+                selectedDealer,
+                invoices,
+                payments,
+                companySettings,
+                summary
+            );
+
+            await window.electron.whatsapp.sendPDF(
+                selectedDealer.phone,
+                base64Pdf,
+                `${selectedDealer.businessName}_Statement.pdf`,
+                `Hello ${selectedDealer.businessName}, please find your account statement as of ${new Date().toLocaleDateString('en-IN')}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`
+            );
+
+            setWhatsappSending('success');
+            setTimeout(() => setWhatsappSending('idle'), 5000);
+        } catch (err: any) {
+            console.error('WhatsApp send failed', err);
+            setWhatsappSending('error');
+            setWhatsappError(err.message || 'Failed to send WhatsApp message');
+        }
     };
 
 
@@ -408,16 +509,12 @@ export default function DealerLedger() {
                     </div>
                     <div>
                         <button
-                            onClick={handlePrintInvoice}
-                            disabled={isPrinting || !companySettings}
-                            className="bg-slate-800 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-slate-900 transition-colors disabled:opacity-50"
+                            onClick={handleDownloadInvoicePDF}
+                            disabled={!companySettings}
+                            className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-50"
                         >
-                            {isPrinting ? (
-                                <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
-                            ) : (
-                                <Printer size={16} />
-                            )}
-                            Print Invoice
+                            <Download size={16} />
+                            Download PDF
                         </button>
                     </div>
                 </div>
@@ -629,17 +726,7 @@ export default function DealerLedger() {
                     </div>
                 </div>
 
-                {/* Printable Invoice - Hidden on screen, visible on print */}
-                {showPrintPreview && selectedInvoice && companySettings && (
-                    <div className="hidden print:block">
-                        <PrintableInvoice
-                            invoice={selectedInvoice}
-                            dealer={selectedDealer}
-                            items={printInvoiceItems}
-                            company={companySettings}
-                        />
-                    </div>
-                )}
+
             </div>
         );
     }
@@ -691,6 +778,29 @@ export default function DealerLedger() {
                                 className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors">
                                 <Download size={16} />
                                 Export PDF
+                            </button>
+
+                            {/* WhatsApp Button */}
+                            <button
+                                onClick={handleSendWhatsAppStatement}
+                                disabled={whatsappSending === 'sending'}
+                                className={`px-4 py-2 rounded-lg border font-medium flex items-center gap-2 transition-all ${whatsappSending === 'success'
+                                    ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
+                                    : whatsappSending === 'error'
+                                        ? 'bg-red-50 border-red-500 text-red-600'
+                                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                    }`}
+                            >
+                                {whatsappSending === 'sending' ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                ) : whatsappSending === 'success' ? (
+                                    <Check size={16} />
+                                ) : (
+                                    <MessageSquare size={16} className="text-emerald-500" />
+                                )}
+                                {whatsappSending === 'sending' ? 'Sending...' :
+                                    whatsappSending === 'success' ? 'Sent!' :
+                                        whatsappSending === 'error' ? 'Retry' : 'WhatsApp'}
                             </button>
                         </div>
                     </div>

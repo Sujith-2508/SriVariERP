@@ -3,13 +3,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Dealer, InvoiceItem, Product, CompanySettings, TransactionType } from '@/types';
-import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer } from 'lucide-react';
+import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2 } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
+import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfGenerator';
+import { calculateDealerStatement } from '@/lib/utils';
 
 export default function Billing() {
     const { dealers, products, createInvoice, updateInvoice, addDealer, transactions } = useData();
@@ -24,6 +26,10 @@ export default function Billing() {
     const [generatedRef, setGeneratedRef] = useState<string>('');
     const [showPrintPreview, setShowPrintPreview] = useState(false);
     const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
+    const [whatsappSending, setWhatsappSending] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+    const [whatsappError, setWhatsappError] = useState<string | null>(null);
+    const [showWhatsAppPreview, setShowWhatsAppPreview] = useState(false);
+    const [previewData, setPreviewData] = useState<{ dealer: Dealer; invoiceData: any } | null>(null);
 
     // Dealer Search
     const [dealerSearch, setDealerSearch] = useState('');
@@ -138,6 +144,22 @@ export default function Billing() {
 
     // Invoice Date
     const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+    const [invoiceNoExists, setInvoiceNoExists] = useState(false);
+
+    const checkInvoiceNumberExists = (no: string) => {
+        const exists = transactions.some(t =>
+            t.type === 'INVOICE' &&
+            t.id !== editInvoiceId &&
+            (t.referenceId === `INV${no}` ||
+                (t.notes && (() => {
+                    try {
+                        const n = JSON.parse(t.notes);
+                        return n.manualInvoiceNo === no;
+                    } catch { return false; }
+                })()))
+        );
+        setInvoiceNoExists(exists);
+    };
 
     // Initialize Manual Invoice Number
     useEffect(() => {
@@ -406,6 +428,10 @@ export default function Billing() {
 
     const handleCreateBill = async () => {
         if (!selectedDealer || invoiceItems.length === 0) return;
+        if (invoiceNoExists) {
+            alert('Invoice number already exists. Please use a unique number.');
+            return;
+        }
 
         setIsSubmitting(true);
         await new Promise(resolve => setTimeout(resolve, 1500));
@@ -458,6 +484,114 @@ export default function Billing() {
 
         setIsSubmitting(false);
         setShowSuccess(true);
+
+        // Prepare data for WhatsApp Preview instead of sending automatically
+        if (selectedDealer && selectedDealer.phone) {
+            const invoiceData = {
+                id: editInvoiceId || '',
+                customerId: selectedDealer.id,
+                type: TransactionType.INVOICE,
+                amount: invoiceTotal,
+                date: new Date(invoiceDate),
+                referenceId: (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP'),
+                items: invoiceItems,
+                vehicleName,
+                vehicleNumber,
+                destination,
+                transportCharges: parseFloat(transportCharges) || 0,
+                paymentTerms,
+                discountPercent: parseFloat(globalDiscount) || 0,
+                creditDays: parseInt(creditDays) || 30,
+                notes: JSON.stringify({
+                    buyerOrderNo,
+                    buyerOrderDate,
+                    dispatchDocNo,
+                    dispatchDate,
+                    dispatchThrough,
+                    termsOfDelivery,
+                    manualInvoiceNo,
+                    roundOff,
+                    globalCGST,
+                    globalSGST,
+                    globalIGST
+                })
+            };
+            setPreviewData({ dealer: selectedDealer, invoiceData });
+            setShowWhatsAppPreview(true);
+        }
+    };
+
+    const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
+        if (!window.electron?.whatsapp || !companySettings) return;
+
+        setWhatsappSending('sending');
+        setWhatsappError(null);
+
+        try {
+            const status = await window.electron.whatsapp.getStatus();
+            if (status !== 'READY') {
+                throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+            }
+
+            // 1. Generate Invoice PDF
+            const invoiceBase64 = await generateInvoicePDFBase64(
+                invoiceData,
+                dealer,
+                invoiceItems,
+                companySettings
+            );
+
+            // 2. Generate Statement PDF
+            // Ensure the newly created invoice is included in the statement calculation
+            const filteredTxns = transactions.filter(t => t.customerId === dealer.id);
+            // Check if context already has this invoice to avoid duplication
+            const alreadyIncluded = filteredTxns.some(t =>
+                (t.referenceId === invoiceData.referenceId && t.referenceId !== 'TMP') ||
+                (t.id === invoiceData.id && t.id !== '')
+            );
+
+            const dealerTransactions = alreadyIncluded ? filteredTxns : [...filteredTxns, invoiceData];
+            const { invoices: stmtInvoices, payments: stmtPayments } = calculateDealerStatement(dealerTransactions);
+
+            // Calculate summary for statement
+            const totalInvoiced = stmtInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+            const totalPaid = stmtPayments.reduce((sum, p) => sum + p.amount, 0);
+            const totalOutstanding = totalInvoiced - totalPaid;
+
+            const statementBase64 = await generateStatementPDFBase64(
+                dealer,
+                stmtInvoices,
+                stmtPayments,
+                companySettings,
+                { totalInvoiced, totalPaid, totalOutstanding }
+            );
+
+            // 3. Send Invoice
+            await window.electron.whatsapp.sendPDF(
+                dealer.phone,
+                invoiceBase64,
+                `Invoice_${invoiceData.referenceId}.pdf`,
+                `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
+            );
+
+            // Small delay between documents
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // 4. Send Statement
+            await window.electron.whatsapp.sendPDF(
+                dealer.phone,
+                statementBase64,
+                `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`,
+                `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`
+            );
+
+            setWhatsappSending('success');
+            setTimeout(() => setWhatsappSending('idle'), 5000);
+        } catch (err: any) {
+            console.error('WhatsApp send failed', err);
+            setWhatsappSending('error');
+            setWhatsappError(err.message || 'Failed to send WhatsApp message');
+        }
     };
 
     const handleAddNewDealer = () => {
@@ -560,7 +694,11 @@ export default function Billing() {
                                             ref={invoiceNoRef}
                                             type="text"
                                             value={manualInvoiceNo}
-                                            onChange={(e) => setManualInvoiceNo(e.target.value)}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setManualInvoiceNo(val);
+                                                checkInvoiceNumberExists(val);
+                                            }}
                                             onFocus={(e) => e.target.select()}
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Enter') {
@@ -569,8 +707,11 @@ export default function Billing() {
                                                 }
                                             }}
                                             placeholder="Auto"
-                                            className="w-24 p-1 bg-transparent font-bold text-slate-800 outline-none"
+                                            className={`w-24 p-1 bg-transparent font-bold outline-none ${invoiceNoExists ? 'text-red-500' : 'text-slate-800'}`}
                                         />
+                                        {invoiceNoExists && (
+                                            <span className="absolute -bottom-4 left-0 text-[10px] text-red-500 font-medium whitespace-nowrap">Number already exists!</span>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <label className="text-xs font-medium text-slate-500">Date:</label>
@@ -1414,29 +1555,141 @@ export default function Billing() {
                                     </div>
                                 </div>
 
-                                <div className="flex gap-3 pt-4">
-                                    <button
-                                        onClick={handlePrint}
-                                        className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        <Printer size={20} />
-                                        Print Invoice
-                                    </button>
+                                <div className="flex flex-col gap-3 pt-4">
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={handlePrint}
+                                            className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
+                                        >
+                                            <Printer size={20} />
+                                            Print Invoice
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                resetForm();
+                                                router.push('/billing');
+                                            }}
+                                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors"
+                                        >
+                                            New Invoice
+                                        </button>
+                                    </div>
+
+                                    {/* WhatsApp Action - Trigger Preview */}
                                     <button
                                         onClick={() => {
-                                            resetForm();
-                                            router.push('/billing');
+                                            const invoiceData = {
+                                                id: editInvoiceId || '',
+                                                customerId: selectedDealer.id,
+                                                type: TransactionType.INVOICE,
+                                                amount: invoiceTotal,
+                                                date: new Date(invoiceDate),
+                                                referenceId: generatedRef,
+                                                items: invoiceItems,
+                                                vehicleName,
+                                                vehicleNumber,
+                                                destination,
+                                                transportCharges: parseFloat(transportCharges) || 0,
+                                                paymentTerms,
+                                                discountPercent: parseFloat(globalDiscount) || 0,
+                                                creditDays: parseInt(creditDays) || 30,
+                                                notes: JSON.stringify({
+                                                    buyerOrderNo,
+                                                    buyerOrderDate,
+                                                    dispatchDocNo,
+                                                    dispatchDate,
+                                                    dispatchThrough,
+                                                    termsOfDelivery,
+                                                    manualInvoiceNo,
+                                                    roundOff,
+                                                    globalCGST,
+                                                    globalSGST,
+                                                    globalIGST
+                                                })
+                                            };
+                                            setPreviewData({ dealer: selectedDealer, invoiceData });
+                                            setShowWhatsAppPreview(true);
                                         }}
-                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors"
+                                        disabled={whatsappSending === 'sending'}
+                                        className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all border-2 ${whatsappSending === 'success'
+                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
+                                            : whatsappSending === 'error'
+                                                ? 'bg-red-50 border-red-500 text-red-600'
+                                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                            }`}
                                     >
-                                        New Invoice
+                                        {whatsappSending === 'sending' ? (
+                                            <Loader2 size={20} className="animate-spin" />
+                                        ) : whatsappSending === 'success' ? (
+                                            <Check size={20} />
+                                        ) : (
+                                            <MessageSquare size={20} className="text-emerald-500" />
+                                        )}
+                                        {whatsappSending === 'sending' ? 'Sending WhatsApp...' :
+                                            whatsappSending === 'success' ? 'Sent to WhatsApp!' :
+                                                whatsappSending === 'error' ? 'Retry WhatsApp Send' : 'Send via WhatsApp'}
                                     </button>
+                                    {whatsappError && (
+                                        <p className="text-[10px] text-red-500 text-center">{whatsappError}</p>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     </div>
                 )
             }
+            {/* WhatsApp Preview Modal */}
+            {showWhatsAppPreview && previewData && companySettings && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-in fade-in duration-300 print:hidden">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+                        {/* Modal Header */}
+                        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800">WhatsApp Invoice Preview</h2>
+                                <p className="text-sm text-slate-500">Review the invoice before sending it to {previewData.dealer.businessName}</p>
+                            </div>
+                            <button
+                                onClick={() => setShowWhatsAppPreview(false)}
+                                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                            >
+                                <X size={24} className="text-slate-500" />
+                            </button>
+                        </div>
+
+                        {/* Modal Body - Scrollable Preview */}
+                        <div className="flex-1 overflow-y-auto p-8 bg-slate-100">
+                            <div className="max-w-[210mm] mx-auto shadow-xl">
+                                <PrintableInvoice
+                                    invoice={previewData.invoiceData}
+                                    dealer={previewData.dealer}
+                                    items={previewData.invoiceData.items}
+                                    company={companySettings}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-4 border-t border-slate-200 bg-white flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowWhatsAppPreview(false)}
+                                className="px-6 py-2.5 border border-slate-200 text-slate-600 font-bold rounded-lg hover:bg-slate-50 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    setShowWhatsAppPreview(false);
+                                    await handleSendWhatsApp(previewData.dealer, previewData.invoiceData);
+                                }}
+                                className="px-8 py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-lg shadow-emerald-200"
+                            >
+                                <MessageSquare size={20} />
+                                {whatsappSending === 'sending' ? 'Sending...' : 'Confirm & Send WhatsApp'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* End of Print Preview */}
         </div >
     );

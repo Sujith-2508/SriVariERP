@@ -134,21 +134,26 @@ export interface DealerProfitSummary {
     invoiceCount: number;
 }
 
-/**
- * Calculate Cost of Goods Sold (COGS) from invoice items
- */
 export function calculateCOGS(items: InvoiceItem[], products: Product[]): number {
-    if (!items || items.length === 0) return 0;
+    if (!items || items.length === 0) {
+        console.log('[COGS] No items provided');
+        return 0;
+    }
 
+    console.log(`[COGS] Calculating for ${items.length} items with ${products.length} products`);
     let totalCOGS = 0;
     items.forEach(item => {
         const product = products.find(p => p.id === item.productId || p.productId === item.productId);
         const costPrice = Number(product?.costPrice) || 0;
-        totalCOGS += costPrice * item.quantity;
+        const itemCOGS = costPrice * item.quantity;
+        console.log(`[COGS] Item: ${item.productName}, Qty: ${item.quantity}, Cost: ${costPrice}, COGS: ${itemCOGS}`);
+        totalCOGS += itemCOGS;
     });
 
+    console.log(`[COGS] Total COGS: ${totalCOGS}`);
     return totalCOGS;
 }
+
 
 /**
  * Calculate profit for a single invoice

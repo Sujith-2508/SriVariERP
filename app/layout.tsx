@@ -23,7 +23,7 @@ export default function RootLayout({
                 {/* - img-src 'self' blob: data:: Allow images */}
                 <meta
                     httpEquiv="Content-Security-Policy"
-                    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://qimbzfensppfzgokrkuz.supabase.co wss://qimbzfensppfzgokrkuz.supabase.co https://*.tile.openstreetmap.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data: https://*.tile.openstreetmap.org https://unpkg.com https://raw.githubusercontent.com https://cdnjs.cloudflare.com;"
+                    content="default-src 'self' http://localhost:3000; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3000; connect-src 'self' http://localhost:3000 ws://localhost:3000 https://qimbzfensppfzgokrkuz.supabase.co wss://qimbzfensppfzgokrkuz.supabase.co https://*.tile.openstreetmap.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data: https://*.tile.openstreetmap.org https://unpkg.com https://raw.githubusercontent.com https://cdnjs.cloudflare.com;"
                 />
                 <title>Sri Vari Enterprises - Billing ERP</title>
             </head>

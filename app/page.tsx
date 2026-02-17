@@ -157,6 +157,11 @@ export default function Dashboard() {
             profit += p.netProfit;
         });
 
+        console.log(`[Dashboard] Period: ${label}`);
+        console.log(`[Dashboard] Products loaded: ${products.length}`);
+        console.log(`[Dashboard] Invoices in period: ${invoices.length}`);
+        console.log(`[Dashboard] Total Revenue: ${revenue}, Total COGS: ${cogs}`);
+
         // Get expenses for the period
         let agentExpenses = 0;
         let compExpenses = 0;

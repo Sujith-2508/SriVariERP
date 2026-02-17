@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle } from 'lucide-react';
+import WhatsAppSection from '@/components/WhatsAppSection';
 
 export default function SettingsPage() {
     const [currentUsername, setCurrentUsername] = useState('');
@@ -89,6 +90,9 @@ export default function SettingsPage() {
     return (
         <div className="h-full overflow-y-auto p-6 bg-slate-50">
             <div className="max-w-2xl mx-auto">
+                {/* WhatsApp Connection Section */}
+                <WhatsAppSection />
+
                 {/* Header */}
                 <div className="flex items-center gap-3 mb-8">
                     <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
