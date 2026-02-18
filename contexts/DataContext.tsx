@@ -110,11 +110,15 @@ const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []
         vehicleName: row.vehicle_name,
         vehicleNumber: row.vehicle_number,
         destination: row.destination,
-        transportCharges: row.transport_charges ? Number(row.transport_charges) : undefined,
         paymentTerms: row.payment_terms,
         discountPercent: row.discount_percent ? Number(row.discount_percent) : undefined,
         items: row.invoice_items ? row.invoice_items.map(transformInvoiceItem) : [],
         paymentAllocations: allocations,
+        // Profit Analysis fields from DB
+        cogs: Number(row.cogs) || 0,
+        transportCharges: row.transport_charges ? Number(row.transport_charges) : 0,
+        profitAmount: Number(row.profit_amount) || 0,
+        profitPercentage: Number(row.profit_percentage) || 0,
     };
 };
 
@@ -156,6 +160,7 @@ const transformAgent = (row: any): Agent => ({
     collectionTarget: row.collection_target ? Number(row.collection_target) : undefined,
     monthlySalary: row.monthly_salary ? Number(row.monthly_salary) : undefined,
     isActive: row.is_active,
+    agentId: row.agent_id,
 });
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -369,34 +374,90 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const addProduct = async (productData: Omit<Product, 'id'>) => {
-        const currentProducts = getLocalProducts();
+        const { data, error: supabaseError } = await supabase
+            .from('products')
+            .insert({
+                product_id: productData.productId,
+                name: productData.name,
+                category: productData.category,
+                price: productData.price,
+                cost_price: Number(productData.costPrice) || 0,
+                stock: productData.stock,
+                gst_rate: productData.gstRate,
+                hsn_code: productData.hsnCode,
+                unit: productData.unit,
+            })
+            .select()
+            .single();
 
-        const newProduct: Product = {
-            id: crypto.randomUUID(),
-            ...productData,
-            costPrice: Number(productData.costPrice) || 0
-        };
+        if (supabaseError) {
+            console.error('Error adding product to Supabase:', supabaseError.message);
+            throw new Error(`Failed to add product: ${supabaseError.message}`);
+        }
 
-        const updatedProducts = [newProduct, ...currentProducts];
-        saveLocalProducts(updatedProducts);
-        setProducts(updatedProducts);
-        setProductCount(updatedProducts.length + 1);
+        const newProduct = transformProduct(data);
+        setProducts(prev => [newProduct, ...prev]);
+        setProductCount(prev => prev + 1);
+
+        // Update local cache
+        const currentLocal = getLocalProducts();
+        saveLocalProducts([newProduct, ...currentLocal]);
     };
 
     const updateProduct = async (updatedProduct: Product) => {
-        const currentProducts = getLocalProducts();
-        const updatedProducts = currentProducts.map(p =>
-            p.id === updatedProduct.id ? updatedProduct : p
-        );
-        saveLocalProducts(updatedProducts);
-        setProducts(updatedProducts);
+        if (!updatedProduct.id) {
+            console.error('[DataContext] Cannot update product: Missing ID');
+            return;
+        }
+
+        const { error: supabaseError } = await supabase
+            .from('products')
+            .update({
+                product_id: updatedProduct.productId,
+                name: updatedProduct.name,
+                category: updatedProduct.category,
+                price: updatedProduct.price,
+                cost_price: Number(updatedProduct.costPrice) || 0,
+                stock: updatedProduct.stock,
+                gst_rate: updatedProduct.gstRate,
+                hsn_code: updatedProduct.hsnCode || null,
+                unit: updatedProduct.unit || 'nos',
+            })
+            .eq('id', updatedProduct.id);
+
+        if (supabaseError) {
+            console.error('[DataContext] Error updating product in Supabase:', {
+                message: supabaseError.message,
+                details: supabaseError.details,
+                hint: supabaseError.hint,
+                code: supabaseError.code
+            });
+            throw new Error(`Failed to update product: ${supabaseError.message}`);
+        }
+
+        setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+
+        // Update local cache
+        const currentLocal = getLocalProducts();
+        saveLocalProducts(currentLocal.map(p => p.id === updatedProduct.id ? updatedProduct : p));
     };
 
     const deleteProduct = async (id: string) => {
-        const currentProducts = getLocalProducts();
-        const updatedProducts = currentProducts.filter(p => p.id !== id);
-        saveLocalProducts(updatedProducts);
-        setProducts(updatedProducts);
+        const { error: supabaseError } = await supabase
+            .from('products')
+            .delete()
+            .eq('id', id);
+
+        if (supabaseError) {
+            console.error('Error deleting product from Supabase:', supabaseError.message);
+            throw new Error(`Failed to delete product: ${supabaseError.message}`);
+        }
+
+        setProducts(prev => prev.filter(p => p.id !== id));
+
+        // Update local cache
+        const currentLocal = getLocalProducts();
+        saveLocalProducts(currentLocal.filter(p => p.id !== id));
     };
 
     const addDealer = async (dealerData: Omit<Dealer, 'id'>): Promise<string> => {
@@ -490,6 +551,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const dueDate = new Date(invoiceDate);
         dueDate.setDate(dueDate.getDate() + creditDays);
 
+        // Calculate COGS and Profit metrics for the invoice
+        let totalCOGS = 0;
+        items.forEach(item => {
+            const product = products.find(p => p.id === item.productId || p.productId === item.productId);
+            const costPrice = Number(product?.costPrice) || 0;
+            totalCOGS += (costPrice * item.quantity);
+        });
+
+        const transportCharges = invoiceData?.transportCharges || 0;
+        const grossProfit = totalAmount - totalCOGS;
+        const discountPercent = invoiceData?.discountPercent || 0;
+        const dealerDiscountAmount = (grossProfit * discountPercent) / 100;
+        const netProfit = grossProfit - dealerDiscountAmount;
+        const profitPercentage = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
+
         // Insert transaction
         const { data: txnData, error: txnError } = await supabase
             .from('transactions')
@@ -504,17 +580,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 vehicle_name: invoiceData?.vehicleName,
                 vehicle_number: invoiceData?.vehicleNumber,
                 destination: invoiceData?.destination,
-                transport_charges: invoiceData?.transportCharges,
+                transport_charges: transportCharges,
                 payment_terms: invoiceData?.paymentTerms,
-                discount_percent: invoiceData?.discountPercent,
+                discount_percent: discountPercent,
                 notes: invoiceData?.notes,
+                // Persist calculation results
+                cogs: totalCOGS,
+                profit_amount: netProfit,
+                profit_percentage: profitPercentage,
+                dealer_discount_amount: dealerDiscountAmount,
+                source: 'DESKTOP'
             })
             .select()
             .single();
 
         if (txnError) {
-            console.error('Error creating invoice:', txnError);
-            throw txnError;
+            console.error('[DataContext] Error creating invoice:', txnError.message, txnError.details);
+            throw new Error(`Failed to create invoice: ${txnError.message}`);
         }
 
         // Insert invoice items
@@ -537,7 +619,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             unit: item.unit,
         }));
 
-        await supabase.from('invoice_items').insert(itemsToInsert);
+        const { error: itemsError } = await supabase.from('invoice_items').insert(itemsToInsert);
+        if (itemsError) {
+            console.error('[DataContext] Error inserting invoice items:', itemsError.message, itemsError.details);
+            // We should probably still continue as the transaction is created, but log the error
+        }
 
         // Calculate tax totals
         const totalCGST = items.reduce((sum, item) => sum + item.cgstAmount, 0);
@@ -551,25 +637,27 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const dealer = dealers.find(d => d.id === dealerId);
 
         // Insert into bill_payments table for mobile app to display invoice metadata
-        // receipt_number is NULL until payment is made
-        await supabase.from('bill_payments').insert({
+        const { error: billPayError } = await supabase.from('bill_payments').insert({
             receipt_number: null,
             bill_number: invoiceNumber,
             amount_applied: 0, // No payment applied yet
             payment_date: invoiceDate.toISOString().split('T')[0], // Use invoice date as placeholder
             payment_mode: null, // No payment mode until payment is made
         });
+        if (billPayError) console.error('[DataContext] Error inserting bill_payment metadata:', billPayError.message);
 
         // Update dealer balance
         if (dealer) {
             const newBalance = dealer.balance + totalAmount;
-            await supabase
+            const { error: dealerUpdateError } = await supabase
                 .from('dealers')
                 .update({
                     balance: newBalance,
                     last_transaction_date: invoiceDate.toISOString()
                 })
                 .eq('id', dealerId);
+
+            if (dealerUpdateError) console.error('[DataContext] Error updating dealer balance:', dealerUpdateError.message);
 
             setDealers(prev => prev.map(d =>
                 d.id === dealerId ? { ...d, balance: newBalance, lastTransactionDate: invoiceDate } : d
@@ -578,7 +666,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Update stock for each item
         for (const item of items) {
-            await updateStock(item.productId, item.quantity);
+            try {
+                await updateStock(item.productId, item.quantity);
+            } catch (err) {
+                console.error(`[DataContext] Failed to update stock for ${item.productName}:`, err);
+            }
         }
 
         // Update local state
@@ -610,10 +702,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 3. Update Transaction Details
         const creditDays = invoiceData?.creditDays || existingTxn.creditDays || 30;
-        // Keep original date if needed, or update? usually invoice date stays same, but details change.
-        // Let's keep original date unless explicitly asked to change logic.
         const dueDate = new Date(existingTxn.date);
         dueDate.setDate(dueDate.getDate() + creditDays);
+
+        // Recalculate COGS and Profit metrics for the updated invoice
+        let totalCOGS = 0;
+        items.forEach(item => {
+            const product = products.find(p => p.id === item.productId || p.productId === item.productId);
+            const costPrice = Number(product?.costPrice) || 0;
+            totalCOGS += (costPrice * item.quantity);
+        });
+
+        const transportCharges = invoiceData?.transportCharges || 0;
+        const grossProfit = totalAmount - totalCOGS;
+        const discountPercent = invoiceData?.discountPercent || 0;
+        const dealerDiscountAmount = (grossProfit * discountPercent) / 100;
+        const netProfit = grossProfit - dealerDiscountAmount;
+        const profitPercentage = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
 
         const { error: updateError } = await supabase
             .from('transactions')
@@ -624,20 +729,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 vehicle_name: invoiceData?.vehicleName,
                 vehicle_number: invoiceData?.vehicleNumber,
                 destination: invoiceData?.destination,
-                transport_charges: invoiceData?.transportCharges,
+                transport_charges: transportCharges,
                 payment_terms: invoiceData?.paymentTerms,
-                discount_percent: invoiceData?.discountPercent,
+                discount_percent: discountPercent,
                 notes: invoiceData?.notes,
+                cogs: totalCOGS,
+                profit_amount: netProfit,
+                profit_percentage: profitPercentage,
+                dealer_discount_amount: dealerDiscountAmount,
             })
             .eq('id', invoiceId);
 
-        if (updateError) throw updateError;
+        if (updateError) {
+            console.error('[DataContext] Error updating invoice transaction:', updateError.message);
+            throw new Error(`Failed to update invoice: ${updateError.message}`);
+        }
 
         // 4. Delete OLD invoice items
-        await supabase
+        const { error: deleteItemsError } = await supabase
             .from('invoice_items')
             .delete()
             .eq('transaction_id', invoiceId);
+
+        if (deleteItemsError) console.error('[DataContext] Error deleting old items:', deleteItemsError.message);
 
         // 5. Insert NEW invoice items
         const itemsToInsert = items.map(item => ({
@@ -659,7 +773,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             unit: item.unit,
         }));
 
-        await supabase.from('invoice_items').insert(itemsToInsert);
+        const { error: newItemsError } = await supabase.from('invoice_items').insert(itemsToInsert);
+        if (newItemsError) console.error('[DataContext] Error inserting new items during update:', newItemsError.message);
 
         // 6. Deduct Stock for NEW items
         for (const item of items) {
@@ -761,18 +876,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         return receiptNumber;
     };
-
-    const transformAgent = (row: any): Agent => ({
-        id: row.id,
-        name: row.name,
-        phone: row.phone,
-        area: row.area,
-        division: row.division,
-        collectionTarget: row.collection_target ? Number(row.collection_target) : undefined,
-        monthlySalary: row.monthly_salary ? Number(row.monthly_salary) : undefined,
-        isActive: row.is_active,
-        agentId: row.agent_id,
-    });
 
     // Agent CRUD methods
     const addAgent = async (agentData: Omit<Agent, 'id'>): Promise<string> => {

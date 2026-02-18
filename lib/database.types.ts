@@ -61,6 +61,7 @@ export type Database = {
                     price: number;
                     stock: number;
                     gst_rate: number;
+                    cost_price: number | null;
                     sku: string | null;
                     created_at: string;
                     updated_at: string;
@@ -71,6 +72,7 @@ export type Database = {
                     name: string;
                     category: string;
                     price: number;
+                    cost_price?: number | null;
                     stock?: number;
                     gst_rate?: number;
                     sku?: string | null;
@@ -83,6 +85,7 @@ export type Database = {
                     name?: string;
                     category?: string;
                     price?: number;
+                    cost_price?: number | null;
                     stock?: number;
                     gst_rate?: number;
                     sku?: string | null;
@@ -110,6 +113,13 @@ export type Database = {
                     transport_charges: number | null;
                     payment_terms: string | null;
                     discount_percent: number | null;
+                    cogs: number | null;
+                    service_charges: number | null;
+                    allocated_agent_expenses: number | null;
+                    dealer_discount_amount: number | null;
+                    profit_amount: number | null;
+                    profit_percentage: number | null;
+                    source: string | null;
                     created_at: string;
                     updated_at: string;
                 };
@@ -131,6 +141,11 @@ export type Database = {
                     transport_charges?: number | null;
                     payment_terms?: string | null;
                     discount_percent?: number | null;
+                    cogs?: number | null;
+                    profit_amount?: number | null;
+                    profit_percentage?: number | null;
+                    dealer_discount_amount?: number | null;
+                    source?: string | null;
                     created_at?: string;
                     updated_at?: string;
                 };
@@ -152,6 +167,11 @@ export type Database = {
                     transport_charges?: number | null;
                     payment_terms?: string | null;
                     discount_percent?: number | null;
+                    cogs?: number | null;
+                    profit_amount?: number | null;
+                    profit_percentage?: number | null;
+                    dealer_discount_amount?: number | null;
+                    source?: string | null;
                     created_at?: string;
                     updated_at?: string;
                 };
@@ -182,6 +202,8 @@ export type Database = {
                     discount_amount: number;
                     total: number;
                     gst_amount: number | null;
+                    hsn_code: string | null;
+                    unit: string | null;
                     created_at: string;
                 };
                 Insert: {
@@ -201,6 +223,8 @@ export type Database = {
                     discount_amount?: number;
                     total: number;
                     gst_amount?: number | null;
+                    hsn_code?: string | null;
+                    unit?: string | null;
                     created_at?: string;
                 };
                 Update: {
@@ -220,6 +244,8 @@ export type Database = {
                     discount_amount?: number;
                     total?: number;
                     gst_amount?: number | null;
+                    hsn_code?: string | null;
+                    unit?: string | null;
                     created_at?: string;
                 };
                 Relationships: [
@@ -279,6 +305,39 @@ export type Database = {
                         referencedColumns: ['id'];
                     }
                 ];
+            };
+            bill_payments: {
+                Row: {
+                    id: string;
+                    bill_number: string | null;
+                    receipt_number: string | null;
+                    amount_applied: number | null;
+                    payment_date: string | null;
+                    payment_mode: string | null;
+                    created_at: string;
+                    updated_at: string;
+                };
+                Insert: {
+                    id?: string;
+                    bill_number?: string | null;
+                    receipt_number?: string | null;
+                    amount_applied?: number | null;
+                    payment_date?: string | null;
+                    payment_mode?: string | null;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Update: {
+                    id?: string;
+                    bill_number?: string | null;
+                    receipt_number?: string | null;
+                    amount_applied?: number | null;
+                    payment_date?: string | null;
+                    payment_mode?: string | null;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Relationships: [];
             };
             agents: {
                 Row: {

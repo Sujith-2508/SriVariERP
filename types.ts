@@ -68,6 +68,9 @@ export interface Transaction {
   transportCharges?: number;
   paymentTerms?: string;
   discountPercent?: number;
+  cogs?: number;
+  profitAmount?: number;
+  profitPercentage?: number;
 
 }
 

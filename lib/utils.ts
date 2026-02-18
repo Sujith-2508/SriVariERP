@@ -164,7 +164,8 @@ export function calculateInvoiceProfit(
     agentExpenses: number = 0
 ): ProfitCalculation {
     const revenue = invoice.amount;
-    const cogs = calculateCOGS(invoice.items || [], products);
+    // Prefer stored COGS if available, fallback to recalculation
+    const cogs = (invoice.cogs && invoice.cogs > 0) ? invoice.cogs : calculateCOGS(invoice.items || [], products);
     const serviceCharges = invoice.transportCharges || 0;
     const dealerDiscountPercent = invoice.discountPercent || 0;
 
