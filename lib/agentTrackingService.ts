@@ -329,16 +329,19 @@ export function subscribeToAttendanceUpdates(
 // ============================================
 
 function mapAgentStatus(data: any): AgentStatus {
+    const lat = data.current_latitude !== null ? Number(data.current_latitude) : undefined;
+    const lng = data.current_longitude !== null ? Number(data.current_longitude) : undefined;
+
     return {
         id: data.id,
         agentId: data.agent_id,
-        isActive: data.is_active,
+        isActive: data.is_active || false,
         lastActiveAt: data.last_active_at ? new Date(data.last_active_at) : new Date(),
-        currentLatitude: data.current_latitude,
-        currentLongitude: data.current_longitude,
-        currentAddress: data.current_address,
-        createdAt: new Date(data.created_at),
-        updatedAt: new Date(data.updated_at),
+        currentLatitude: (lat !== undefined && !isNaN(lat)) ? lat : undefined,
+        currentLongitude: (lng !== undefined && !isNaN(lng)) ? lng : undefined,
+        currentAddress: data.current_address || undefined,
+        createdAt: data.created_at ? new Date(data.created_at) : new Date(),
+        updatedAt: data.updated_at ? new Date(data.updated_at) : new Date(),
     };
 }
 

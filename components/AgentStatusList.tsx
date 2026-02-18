@@ -8,31 +8,10 @@ import { MapPin, Phone, Clock, Circle } from 'lucide-react';
 interface AgentStatusListProps {
     agentData: AgentTrackingData[];
     onAgentClick?: (agentId: string) => void;
+    selectedAgentId?: string | null;
 }
 
-export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProps) {
-    const [trackingData, setTrackingData] = useState<AgentTrackingData[]>(agentData);
-
-    // Update tracking data when props change
-    useEffect(() => {
-        setTrackingData(agentData);
-    }, [agentData]);
-
-    // Subscribe to real-time status updates
-    useEffect(() => {
-        const subscription = subscribeToStatusUpdates((status) => {
-            setTrackingData(prev => prev.map(data =>
-                data.agent.id === status.agentId
-                    ? { ...data, status }
-                    : data
-            ));
-        });
-
-        return () => {
-            subscription.unsubscribe();
-        };
-    }, []);
-
+export function AgentStatusList({ agentData, onAgentClick, selectedAgentId }: AgentStatusListProps) {
     // Format time ago
     const formatTimeAgo = (date: Date) => {
         const diff = new Date().getTime() - date.getTime();
@@ -47,7 +26,7 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
     };
 
     // Sort: active agents first, then by last active time
-    const sortedData = [...trackingData].sort((a, b) => {
+    const sortedData = [...agentData].sort((a, b) => {
         const aActive = a.status?.isActive || false;
         const bActive = b.status?.isActive || false;
 
@@ -59,8 +38,8 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
         return bTime - aTime;
     });
 
-    const activeCount = trackingData.filter(d => d.status?.isActive).length;
-    const inactiveCount = trackingData.length - activeCount;
+    const activeCount = agentData.filter(d => d.status?.isActive).length;
+    const inactiveCount = agentData.length - activeCount;
 
     return (
         <div className="h-full flex flex-col">
@@ -95,16 +74,24 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                 ) : (
                     <div className="divide-y divide-slate-100">
                         {sortedData.map(data => {
-                            const isActive = data.status?.isActive || false;
                             const hasLocation = (!!data.latestLocation && data.latestLocation.latitude !== 0) ||
                                 (data.status?.currentLatitude !== undefined && data.status?.currentLatitude !== null && data.status.currentLatitude !== 0);
+
+                            // Truthful status detection
+                            const isStale = data.status?.lastActiveAt && (new Date().getTime() - data.status.lastActiveAt.getTime()) > 30 * 60 * 1000;
+                            const rawActive = data.status?.isActive || false;
+                            const isActive = rawActive && !isStale && hasLocation;
+
+                            let statusLabel = isActive ? 'Active' : 'Inactive';
+                            if (rawActive && isStale) statusLabel = 'Stale';
+                            else if (rawActive && !hasLocation) statusLabel = 'No GPS';
 
                             return (
                                 <div
                                     key={data.agent.id}
                                     onClick={() => onAgentClick?.(data.agent.id)}
                                     className={`p-4 hover:bg-slate-50 transition-colors ${onAgentClick ? 'cursor-pointer' : ''
-                                        }`}
+                                        } ${selectedAgentId === data.agent.id ? 'bg-emerald-50' : ''}`}
                                 >
                                     <div className="flex items-start justify-between">
                                         <div className="flex-1">
@@ -114,10 +101,12 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                                                     size={12}
                                                     className={`${isActive
                                                         ? 'fill-emerald-500 text-emerald-500'
-                                                        : 'fill-slate-400 text-slate-400'
+                                                        : rawActive && isStale
+                                                            ? 'fill-amber-400 text-amber-400'
+                                                            : 'fill-slate-400 text-slate-400'
                                                         }`}
                                                 />
-                                                <h4 className="font-semibold text-slate-800">{data.agent.name}</h4>
+                                                <h4 className={`font-semibold ${isActive ? 'text-slate-800' : 'text-slate-600'}`}>{data.agent.name}</h4>
                                             </div>
 
                                             {/* Agent details */}
@@ -139,6 +128,7 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                                                         <Clock size={14} className="text-slate-500" />
                                                         <span className={isActive ? "text-emerald-600 font-medium" : "text-slate-500"}>
                                                             {isActive ? 'Live' : formatTimeAgo(data.status.lastActiveAt)}
+                                                            {isStale && rawActive && <span className="ml-1 text-xs font-normal text-slate-400">(Stale)</span>}
                                                         </span>
                                                     </div>
                                                 )}
@@ -168,9 +158,11 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                                         <div>
                                             <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${isActive
                                                 ? 'bg-emerald-100 text-emerald-700'
-                                                : 'bg-slate-100 text-slate-600'
+                                                : rawActive && isStale
+                                                    ? 'bg-amber-100 text-amber-700'
+                                                    : 'bg-slate-100 text-slate-600'
                                                 }`}>
-                                                {isActive ? 'Active' : 'Inactive'}
+                                                {statusLabel}
                                             </span>
                                         </div>
                                     </div>

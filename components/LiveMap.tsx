@@ -38,6 +38,8 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 interface LiveMapProps {
     agentData: AgentTrackingData[];
+    selectedAgentId?: string | null;
+    onAgentClick?: (agentId: string | null) => void;
 }
 
 // Helper component to handle map centering, zooming, and resizing
@@ -73,7 +75,7 @@ function MapController({ trackingData, selectedAgent }: { trackingData: AgentTra
             const latestLoc = selectedData?.latestLocation;
             const statusLoc = (selectedData?.status?.currentLatitude !== undefined && selectedData?.status?.currentLatitude !== null) &&
                 (selectedData?.status?.currentLongitude !== undefined && selectedData?.status?.currentLongitude !== null)
-                ? { latitude: selectedData.status.currentLatitude as number, longitude: selectedData.status.currentLongitude as number }
+                ? { latitude: (selectedData.status.currentLatitude as number), longitude: (selectedData.status.currentLongitude as number) }
                 : null;
             const loc = latestLoc || statusLoc;
 
@@ -84,15 +86,15 @@ function MapController({ trackingData, selectedAgent }: { trackingData: AgentTra
                     { animate: true }
                 );
             }
-        } else if (trackingData.length > 0) {
+        } else {
+            // "Show All" mode
             const locations = trackingData
                 .map(d => {
                     const latestLoc = d.latestLocation;
                     const statusLoc = (d.status?.currentLatitude !== undefined && d.status?.currentLatitude !== null) && (d.status?.currentLongitude !== undefined && d.status?.currentLongitude !== null)
                         ? {
                             latitude: d.status.currentLatitude,
-                            longitude: d.status.currentLongitude,
-                            address: d.status.currentAddress
+                            longitude: d.status.currentLongitude
                         }
                         : null;
                     return latestLoc || statusLoc;
@@ -103,8 +105,16 @@ function MapController({ trackingData, selectedAgent }: { trackingData: AgentTra
             if (locations.length > 0) {
                 const bounds = L.latLngBounds(locations);
                 if (bounds.isValid()) {
-                    map.fitBounds(bounds, { padding: [50, 50] });
+                    // Use a lower maxZoom (e.g., 9) for "Show All" mode to keep it regional
+                    map.fitBounds(bounds, {
+                        padding: [80, 80],
+                        maxZoom: 9,
+                        animate: true
+                    });
                 }
+            } else {
+                // Default view of Coimbatore/Regional area if no agents have locations
+                map.setView([10.6620, 77.0065], 9);
             }
         }
     }, [map, trackingData, selectedAgent]);
@@ -112,58 +122,58 @@ function MapController({ trackingData, selectedAgent }: { trackingData: AgentTra
     return null;
 }
 
-export function LiveMap({ agentData }: LiveMapProps) {
-    const [trackingData, setTrackingData] = useState<AgentTrackingData[]>(agentData);
-    const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+export function LiveMap({ agentData, selectedAgentId, onAgentClick }: LiveMapProps) {
+    const [internalSelectedAgent, setInternalSelectedAgent] = useState<string | null>(null);
+
+    // Use prop if provided, otherwise fallback to internal state
+    const selectedAgent = selectedAgentId !== undefined ? selectedAgentId : internalSelectedAgent;
+    const setSelectedAgent = (id: string | null) => {
+        if (onAgentClick) {
+            onAgentClick(id);
+        } else {
+            setInternalSelectedAgent(id);
+        }
+    };
     const [routeHistory, setRouteHistory] = useState<AgentLocation[]>([]);
     const [showRoute, setShowRoute] = useState(false);
+    const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [isClient, setIsClient] = useState(false);
 
     useEffect(() => {
         setIsClient(true);
     }, []);
 
-    // Update tracking data when props change
-    useEffect(() => {
-        setTrackingData(agentData);
-    }, [agentData]);
-
-    // Subscribe to real-time updates
-    useEffect(() => {
-        const statusSubscription = subscribeToStatusUpdates((status) => {
-            setTrackingData(prev => prev.map(data =>
-                data.agent.id === status.agentId
-                    ? { ...data, status }
-                    : data
-            ));
-        });
-
-        const locationSubscription = subscribeToLocationUpdates((location) => {
-            setTrackingData(prev => prev.map(data =>
-                data.agent.id === location.agentId
-                    ? { ...data, latestLocation: location }
-                    : data
-            ));
-
-            if (selectedAgent === location.agentId) {
-                setRouteHistory(prev => [...prev, location]);
-            }
-        });
-
-        return () => {
-            statusSubscription.unsubscribe();
-            locationSubscription.unsubscribe();
-        };
-    }, [selectedAgent]);
-
-    // Load route history when agent is selected
+    // Load route history when agent is selected or date changes
     useEffect(() => {
         if (selectedAgent && showRoute) {
-            getAgentRoute(selectedAgent, new Date()).then(route => {
+            getAgentRoute(selectedAgent, new Date(selectedDate)).then(route => {
                 setRouteHistory(route);
             });
+        } else if (!selectedAgent) {
+            setRouteHistory([]);
         }
-    }, [selectedAgent, showRoute]);
+    }, [selectedAgent, showRoute, selectedDate]);
+
+    // Live path update: Append new location to history if it belongs to selected agent
+    useEffect(() => {
+        if (!selectedAgent || !showRoute) return;
+
+        const today = new Date().toISOString().split('T')[0];
+        if (selectedDate !== today) return;
+
+        const data = agentData.find(d => d.agent.id === selectedAgent);
+        const loc = data?.latestLocation;
+
+        if (loc) {
+            setRouteHistory(prev => {
+                const last = prev[prev.length - 1];
+                if (!last || last.recordedAt.getTime() !== loc.recordedAt.getTime()) {
+                    return [...prev, loc];
+                }
+                return prev;
+            });
+        }
+    }, [agentData, selectedAgent, showRoute, selectedDate]);
 
     const handleAgentClick = (agentId: string) => {
         setSelectedAgent(agentId);
@@ -187,44 +197,59 @@ export function LiveMap({ agentData }: LiveMapProps) {
 
     return (
         <div className="relative h-full w-full overflow-hidden">
-            <div className="absolute top-4 right-4 z-[1000] bg-white rounded-lg shadow-lg p-2 flex flex-col gap-2">
-                <button
-                    onClick={() => setShowRoute(!showRoute)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${showRoute
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                        }`}
-                    title={showRoute ? 'Hide Route' : 'Show Route'}
-                >
-                    <Navigation size={16} />
-                    <span>Route</span>
-                </button>
-                {selectedAgent && (
+            <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+                <div className="bg-white rounded-lg shadow-lg p-2 flex flex-col gap-2">
+                    <div className="flex flex-col gap-1 px-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">View Path For</label>
+                        <input
+                            type="date"
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
+                            max={new Date().toISOString().split('T')[0]}
+                            className="text-xs border border-slate-200 rounded p-1 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                    </div>
+
+                    <button
+                        onClick={() => setShowRoute(!showRoute)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${showRoute
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                        title={showRoute ? 'Hide Route' : 'Show Route'}
+                    >
+                        <Navigation size={16} />
+                        <span>{showRoute ? 'Hide Path' : 'Show Path'}</span>
+                    </button>
+
                     <button
                         onClick={() => { setSelectedAgent(null); setShowRoute(false); }}
-                        className="flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
-                        title="Reset View"
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!selectedAgent
+                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                        title="Show all agents"
+                        disabled={!selectedAgent}
                     >
                         <Maximize size={16} />
-                        <span>Reset</span>
+                        <span>Show All</span>
                     </button>
-                )}
+                </div>
             </div>
 
             <MapContainer
-                center={[20.5937, 78.9629]}
-                zoom={5}
+                center={[10.6620, 77.0065]}
+                zoom={9}
                 style={{ height: '100%', width: '100%', zIndex: 1 }}
-                zoomControl={false}
+                zoomControl={true}
             >
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
-                <MapController trackingData={trackingData} selectedAgent={selectedAgent} />
+                <MapController trackingData={agentData} selectedAgent={selectedAgent} />
 
-                {trackingData.map(data => {
+                {agentData.map(data => {
                     const latestLoc = data.latestLocation;
                     const statusLoc = (data.status?.currentLatitude !== undefined && data.status?.currentLatitude !== null) && (data.status?.currentLongitude !== undefined && data.status?.currentLongitude !== null)
                         ? {
@@ -239,7 +264,10 @@ export function LiveMap({ agentData }: LiveMapProps) {
 
                     if (!isValidLocation) return null;
 
-                    const isActive = data.status?.isActive || false;
+                    // Truthful isActive for marker color
+                    const isStale = data.status?.lastActiveAt && (new Date().getTime() - data.status.lastActiveAt.getTime()) > 30 * 60 * 1000;
+                    const isActive = (data.status?.isActive || false) && !isStale && isValidLocation;
+
                     const position: [number, number] = [effectiveLoc.latitude, effectiveLoc.longitude];
 
                     return (
@@ -282,7 +310,7 @@ export function LiveMap({ agentData }: LiveMapProps) {
 
             {/* Custom Info Overlay for Selected Agent */}
             {selectedAgent && (() => {
-                const data = trackingData.find(d => d.agent.id === selectedAgent);
+                const data = agentData.find(d => d.agent.id === selectedAgent);
                 if (!data) return null;
                 const isActive = data.status?.isActive || false;
 

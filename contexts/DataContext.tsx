@@ -217,31 +217,49 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .select('*')
                 .order('business_name');
 
-            if (dealersError) throw dealersError;
+            if (dealersError) {
+                console.error('[DataContext] Error fetching dealers:', dealersError);
+                throw dealersError;
+            }
 
-            // Fetch transactions from Supabase with items
-            const { data: transactionsData, error: transactionsError } = await supabase
-                .from('transactions')
-                .select('*, invoice_items(*)')
-                .order('date', { ascending: false });
+            // Fetch transactions and items in parallel but separately to avoid join hangs
+            const [transactionsResult, itemsResult] = await Promise.all([
+                supabase.from('transactions').select('*').order('date', { ascending: false }),
+                supabase.from('invoice_items').select('*')
+            ]);
 
-            if (transactionsError) throw transactionsError;
+            const { data: transactionsData, error: transactionsError } = transactionsResult;
+            const { data: itemsData, error: itemsError } = itemsResult;
+
+            if (transactionsError) {
+                console.error('[DataContext] Error fetching transactions:', transactionsError);
+                throw transactionsError;
+            }
+            if (itemsError) {
+                console.error('[DataContext] Error fetching invoice items:', itemsError);
+                // We can continue if only items fail, but let's log it
+            }
 
             console.log('[DataContext] Fetched transactions:', transactionsData?.length);
-            const invoicesWithItems = transactionsData?.filter(t => t.type === 'INVOICE' && t.invoice_items && t.invoice_items.length > 0) || [];
-            console.log('[DataContext] Invoices with items:', invoicesWithItems.length);
-            if (invoicesWithItems.length > 0) {
-                console.log('[DataContext] Sample invoice items:', invoicesWithItems[0].invoice_items);
-            }
+            console.log('[DataContext] Fetched items:', itemsData?.length);
 
             // Fetch payment allocations separately
             const { data: allocationsData, error: allocationsError } = await supabase
                 .from('payment_allocations')
                 .select('*');
 
-            if (allocationsError) throw allocationsError;
+            if (allocationsError) {
+                console.error('[DataContext] Error fetching allocations:', allocationsError);
+                throw allocationsError;
+            }
 
             const transformedAllocations = allocationsData?.map(transformAllocation) || [];
+
+            // Map items to transactions in JS (more reliable than SQL join for small datasets)
+            const transactionsWithItems = (transactionsData || []).map(row => {
+                const items = (itemsData || []).filter(item => item.transaction_id === row.id);
+                return { ...row, invoice_items: items };
+            });
 
             // Fetch agents from Supabase
             const { data: agentsData, error: agentsError } = await supabase
@@ -249,11 +267,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .select('*')
                 .order('name');
 
-            if (agentsError) throw agentsError;
+            if (agentsError) {
+                console.error('[DataContext] Error fetching agents:', agentsError);
+                throw agentsError;
+            }
 
             // Transform and set data
             setDealers(dealersData?.map(transformDealer) || []);
-            setTransactions(transactionsData?.map(row => transformTransaction(row, transformedAllocations)) || []);
+            setTransactions(transactionsWithItems.map(row => transformTransaction(row, transformedAllocations)));
             setAgents(agentsData?.map(transformAgent) || []);
 
             // Calculate counts for numbering
@@ -263,8 +284,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setReceiptCount(payments.length + 1);
 
         } catch (err: any) {
-            console.error('Error fetching data:', err);
-            setError(err.message || 'Failed to fetch data');
+            console.error('Error fetching data (full details):', {
+                message: err?.message || 'No message',
+                details: err?.details || 'No details',
+                hint: err?.hint || 'No hint',
+                code: err?.code || 'No code',
+                stack: err?.stack || 'No stack'
+            });
+            setError(err?.message || 'Failed to fetch data');
         } finally {
             setIsLoading(false);
         }
@@ -279,7 +306,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoadingTracking(true);
         try {
             const data = await getAllAgentTrackingData();
-            setTrackingData(data);
+            setTrackingData(prev => {
+                // If we already have some data from real-time while this was fetching,
+                // we should merge or at least be careful.
+                // For simplicity, we just use the fresh fetch but we could do more.
+                return data;
+            });
         } catch (err) {
             console.error('Error loading tracking data:', err);
         } finally {
@@ -300,16 +332,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Subscribe to real-time tracking updates
         const statusSub = subscribeToStatusUpdates((status) => {
+            console.log('[DataContext] Status update received:', status.agentId, status.isActive);
             setTrackingData(prev => prev.map(data =>
-                data.agent.id === status.agentId
+                (data.agent.id === status.agentId || data.agent.agentId === status.agentId)
                     ? { ...data, status }
                     : data
             ));
         });
 
         const locationSub = subscribeToLocationUpdates((location) => {
+            console.log('[DataContext] Location update received:', location.agentId);
             setTrackingData(prev => prev.map(data =>
-                data.agent.id === location.agentId
+                (data.agent.id === location.agentId || data.agent.agentId === location.agentId)
                     ? { ...data, latestLocation: location }
                     : data
             ));
@@ -320,7 +354,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             statusSub.unsubscribe();
             locationSub.unsubscribe();
         };
-    }, [fetchData, loadTrackingData]);
+    }, []); // Removed fetchData/loadTrackingData from deps to prevent infinite loops if they change
 
     const updateStock = (productId: string, quantity: number) => {
         const currentProducts = getLocalProducts();
@@ -766,6 +800,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const newAgent = transformAgent(data);
         setAgents(prev => [newAgent, ...prev]);
+
+        // Also add to tracking data so they appear in Live Map immediately
+        setTrackingData(prev => [
+            { agent: newAgent },
+            ...prev
+        ]);
+
         return newAgent.id;
     };
 

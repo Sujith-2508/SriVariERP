@@ -166,21 +166,26 @@ export default function AgentsPage() {
                         <h1 className="text-2xl font-bold text-slate-800">Collection Agents & Expenses</h1>
                         <p className="text-sm text-slate-500">Manage agents, track locations, monitor attendance, and company expenses</p>
                     </div>
-                    {/* Hide Add Agent button in Analysis and Expenses tab to keep it clean, or keep it? 
-                        User didn't specify, but usually analysis/expenses is separate. 
-                        Let's keep it consistent: hide for non-agent-management tabs if desired, 
-                        but 'expenses' is kind of related. 
-                        For 'analysis', definitely doesn't make sense to have 'Add Agent'.
-                    */}
-                    {activeTab !== 'expenses' && activeTab !== 'analysis' && (
+                    <div className="flex items-center gap-3">
                         <button
-                            onClick={() => { resetForm(); setShowAddModal(true); }}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+                            onClick={handleRefresh}
+                            className={`p-2.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all flex items-center gap-2 ${isLoading || loadingTracking ? 'animate-pulse cursor-wait' : ''}`}
+                            title="Refresh Data"
+                            disabled={isLoading || loadingTracking}
                         >
-                            <UserPlus size={18} />
-                            Add Agent
+                            <Navigation2 size={18} className={isLoading || loadingTracking ? 'animate-spin' : ''} />
+                            <span className="font-medium text-sm">Refresh</span>
                         </button>
-                    )}
+                        {activeTab !== 'expenses' && activeTab !== 'analysis' && (
+                            <button
+                                onClick={() => { resetForm(); setShowAddModal(true); }}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+                            >
+                                <UserPlus size={18} />
+                                Add Agent
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Tabs */}
@@ -380,10 +385,29 @@ export default function AgentsPage() {
                                 </div>
                             </div>
                         )}
-                        <LiveMap agentData={trackingData} />
+                        <LiveMap
+                            agentData={trackingData}
+                            selectedAgentId={selectedAgent?.id}
+                            onAgentClick={(id) => {
+                                if (id) {
+                                    const agent = agents.find(a => a.id === id);
+                                    if (agent) setSelectedAgent(agent);
+                                } else {
+                                    setSelectedAgent(null);
+                                }
+                            }}
+                        />
                     </div>
                     <div className="w-80 border-l border-slate-200">
-                        <AgentStatusList agentData={trackingData} />
+                        <AgentStatusList
+                            agentData={trackingData}
+                            selectedAgentId={selectedAgent?.id}
+                            onAgentClick={(id) => {
+                                // Find the agent object to set it as selected
+                                const agent = agents.find(a => a.id === id);
+                                if (agent) setSelectedAgent(agent);
+                            }}
+                        />
                     </div>
                 </div>
 
