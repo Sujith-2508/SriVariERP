@@ -375,153 +375,50 @@ export default function Dashboard() {
                 />
             </div>
 
-            {/* PROFIT & OUTSTANDING DETAILS */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
 
-                {/* 1. Profit Breakdown */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                            <Percent size={18} className="text-emerald-500" />
-                            Profit Breakdown
-                        </h3>
-                        {/* Period Toggle */}
-                        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-                            <button
-                                onClick={() => setProfitPeriod('monthly')}
-                                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${profitPeriod === 'monthly'
-                                    ? 'bg-white text-emerald-600 shadow-sm'
-                                    : 'text-slate-600 hover:text-slate-800'
-                                    }`}
-                            >
-                                Monthly
-                            </button>
-                            <button
-                                onClick={() => setProfitPeriod('yearly')}
-                                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${profitPeriod === 'yearly'
-                                    ? 'bg-white text-emerald-600 shadow-sm'
-                                    : 'text-slate-600 hover:text-slate-800'
-                                    }`}
-                            >
-                                Yearly
-                            </button>
-                        </div>
+
+            {/* 2. Outstanding Aging */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 col-span-1 lg:col-span-2">
+                <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                    <Clock size={18} className="text-red-500" />
+                    Outstanding Balance Aging
+                </h3>
+                <div className="flex gap-6 h-64">
+
+                    {/* Aging Chart */}
+                    <div className="flex-1">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={outstandingData} layout="vertical">
+                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                                <XAxis type="number" hide />
+                                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
+                                <Tooltip
+                                    cursor={{ fill: '#f8fafc' }}
+                                    formatter={(value: number) => [formatCurrency(value), 'Amount']}
+                                />
+                                <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={30}>
+                                    {outstandingData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                    ))}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
                     </div>
 
-                    {/* Month and Year Selectors */}
-                    <div className="mb-3 flex gap-2">
-                        {/* Show month selector only in monthly view */}
-                        {profitPeriod === 'monthly' && (
-                            <div className="flex-1">
-                                <label className="block text-xs text-slate-500 mb-1">Month</label>
-                                <select
-                                    value={selectedMonth}
-                                    onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                                >
-                                    <option value={1}>January</option>
-                                    <option value={2}>February</option>
-                                    <option value={3}>March</option>
-                                    <option value={4}>April</option>
-                                    <option value={5}>May</option>
-                                    <option value={6}>June</option>
-                                    <option value={7}>July</option>
-                                    <option value={8}>August</option>
-                                    <option value={9}>September</option>
-                                    <option value={10}>October</option>
-                                    <option value={11}>November</option>
-                                    <option value={12}>December</option>
-                                </select>
+                    {/* Aging Stats */}
+                    <div className="w-48 flex flex-col justify-center space-y-4">
+                        {outstandingData.map((item, idx) => (
+                            <div key={idx}>
+                                <p className="text-xs text-slate-500">{item.name}</p>
+                                <p className="font-bold text-slate-800" style={{ color: item.color }}>
+                                    {formatCurrency(item.value)}
+                                </p>
                             </div>
-                        )}
-                        <div className={profitPeriod === 'monthly' ? 'flex-1' : 'w-full'}>
-                            <label className="block text-xs text-slate-500 mb-1">Year</label>
-                            <select
-                                value={selectedYear}
-                                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                            >
-                                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(year => (
-                                    <option key={year} value={year}>{year}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
-                    {/* Period Label */}
-                    <div className="mb-3 text-xs text-slate-500 font-medium">
-                        Period: {periodLabel}
-                    </div>
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-                            <span className="text-sm text-slate-600">Total Revenue</span>
-                            <span className="font-bold text-slate-800">{formatCurrency(totalRevenue)}</span>
-                        </div>
-                        <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg border border-red-100">
-                            <span className="text-sm text-red-600">Cost of Goods (COGS)</span>
-                            <span className="font-bold text-red-700">-{formatCurrency(totalCOGS)}</span>
-                        </div>
-                        <div className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100">
-                            <span className="text-sm text-orange-600">Discounts Given</span>
-                            <span className="font-bold text-orange-700">-{formatCurrency(totalDiscounts)}</span>
-                        </div>
-                        <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg border border-purple-100">
-                            <span className="text-sm text-purple-600">Agent Expenses</span>
-                            <span className="font-bold text-purple-700">-{formatCurrency(totalAgentExpenses)}</span>
-                        </div>
-                        <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border border-blue-100">
-                            <span className="text-sm text-blue-600">Company Expenses</span>
-                            <span className="font-bold text-blue-700">-{formatCurrency(totalCompanyExpenses)}</span>
-                        </div>
-                        <div className="border-t border-slate-200 pt-3 flex justify-between items-center">
-                            <span className="font-bold text-slate-800">Net {profitPeriod === 'monthly' ? 'Monthly' : 'Yearly'} Profit</span>
-                            <span className="font-bold text-emerald-600 text-lg">{formatCurrency(totalProfit)}</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 2. Outstanding Aging */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 col-span-1 lg:col-span-2">
-                    <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                        <Clock size={18} className="text-red-500" />
-                        Outstanding Balance Aging
-                    </h3>
-                    <div className="flex gap-6 h-64">
-
-                        {/* Aging Chart */}
-                        <div className="flex-1">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={outstandingData} layout="vertical">
-                                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                                    <XAxis type="number" hide />
-                                    <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
-                                    <Tooltip
-                                        cursor={{ fill: '#f8fafc' }}
-                                        formatter={(value: number) => [formatCurrency(value), 'Amount']}
-                                    />
-                                    <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={30}>
-                                        {outstandingData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-
-                        {/* Aging Stats */}
-                        <div className="w-48 flex flex-col justify-center space-y-4">
-                            {outstandingData.map((item, idx) => (
-                                <div key={idx}>
-                                    <p className="text-xs text-slate-500">{item.name}</p>
-                                    <p className="font-bold text-slate-800" style={{ color: item.color }}>
-                                        {formatCurrency(item.value)}
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
+                        ))}
                     </div>
                 </div>
             </div>
+
 
             {/* FINANCIAL OVERVIEW (NEW) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
@@ -684,6 +581,6 @@ export default function Dashboard() {
                     border-radius: 2px;
                 }
             `}</style>
-        </div>
+        </div >
     );
 }

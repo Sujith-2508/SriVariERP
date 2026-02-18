@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { LayoutDashboard, ShoppingCart, Users, FileText, Wallet, LogOut, Settings, UserCheck, ShoppingBag } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Users, FileText, Wallet, LogOut, Settings, UserCheck, ShoppingBag, RefreshCw } from 'lucide-react';
 import { ViewState } from '@/types';
+import { useData } from '@/contexts/DataContext';
 
 interface SidebarProps {
   currentView: ViewState;
@@ -12,6 +13,9 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
   const router = useRouter();
+  const { refreshData } = useData();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const menuItems = [
     { id: 'DASHBOARD', label: 'Dashboard', icon: LayoutDashboard, href: '/' },
     { id: 'BILLING', label: 'New Invoice', icon: FileText, href: '/billing' },
@@ -56,6 +60,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentView, router, menuItems]);
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      if (refreshData) {
+        await refreshData();
+      }
+    } catch (error) {
+      console.error('Failed to refresh data:', error);
+    } finally {
+      // Minimum loading time for visual feedback
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem('isAuthenticated');
     window.location.href = '/login';
@@ -97,12 +115,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
             <span className="text-xs font-medium">All Systems Active</span>
           </div>
         </div>
+
+        <button
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="w-full flex items-center gap-3 px-4 py-2 text-slate-400 hover:bg-slate-800 hover:text-emerald-400 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={20} className={isRefreshing ? "animate-spin" : ""} />
+          <span className="font-medium">{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
+        </button>
+
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-all"
+          className="w-full flex items-center gap-3 px-4 py-2 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors"
         >
-          <LogOut size={18} />
-          <span className="text-sm font-medium">Sign Out</span>
+          <LogOut size={20} />
+          <span className="font-medium">Sign Out</span>
         </button>
       </div>
     </div>

@@ -31,7 +31,7 @@ interface DataContextType {
     trackingData: AgentTrackingData[];
     loadingTracking: boolean;
     // Methods
-    createInvoice: (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<string>;
+    createInvoice: (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
     updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<void>;
     recordPayment: (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => Promise<string>;
     updateStock: (productId: string, quantity: number) => void;
@@ -193,10 +193,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setError(null);
 
         try {
-            // Fetch products from localStorage
-            const localProducts = getLocalProducts();
-            setProducts(localProducts);
-            setProductCount(localProducts.length + 1);
+            // Fetch products from Supabase (Master Source)
+            const { data: productsData, error: productsError } = await supabase
+                .from('products')
+                .select('*')
+                .order('name');
+
+            if (productsError) {
+                console.error('Error fetching products from DB, falling back to local:', productsError);
+                const localProducts = getLocalProducts();
+                setProducts(localProducts);
+                setProductCount(localProducts.length + 1);
+            } else {
+                const dbProducts = productsData.map(transformProduct);
+                setProducts(dbProducts);
+                setProductCount(dbProducts.length + 1);
+                saveLocalProducts(dbProducts); // Update local cache
+            }
 
             // Fetch dealers from Supabase
             const { data: dealersData, error: dealersError } = await supabase
@@ -540,7 +553,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTransactions(prev => [newTxn, ...prev]);
         setInvoiceCount(prev => prev + 1);
 
-        return invoiceNumber;
+        return { id: txnData.id, refId: invoiceNumber };
     };
 
     const updateInvoice = async (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {

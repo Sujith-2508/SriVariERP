@@ -21,6 +21,8 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
+        show: false, // Don't show until ready
+        backgroundColor: '#f8fafc', // Match app background (slate-50)
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -33,6 +35,11 @@ function createWindow() {
     // Remove default menu
     win = mainWindow; // mapping back to existing names in some handlers if needed
     win.setMenuBarVisibility(false)
+
+    // Show window when ready to prevent white flash
+    win.once('ready-to-show', () => {
+        win.show()
+    })
 
     if (isDev) {
         // Development: Load from Next.js dev server

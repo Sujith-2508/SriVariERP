@@ -9,9 +9,9 @@ import { AgentStatusList } from '@/components/AgentStatusList';
 import { AttendanceCalendar } from '@/components/AttendanceCalendar';
 import AgentSalaryManagement from '@/components/AgentSalaryManagement';
 import CompanyExpenseManagement from '@/components/CompanyExpenseManagement';
+import { ProfitAnalysis } from '@/components/ProfitAnalysis';
 
-
-type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses';
+type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses' | 'analysis';
 
 export default function AgentsPage() {
     const { agents, transactions, addAgent, updateAgent, deleteAgent, isLoading, trackingData, loadingTracking, refreshData } = useData();
@@ -154,6 +154,7 @@ export default function AgentsPage() {
         { id: 'attendance' as TabType, label: 'Attendance', icon: Calendar },
         { id: 'salary' as TabType, label: 'Salary', icon: DollarSign },
         { id: 'expenses' as TabType, label: 'Expenses', icon: Receipt },
+        { id: 'analysis' as TabType, label: 'Analysis', icon: TrendingUp },
     ];
 
     return (
@@ -165,7 +166,13 @@ export default function AgentsPage() {
                         <h1 className="text-2xl font-bold text-slate-800">Collection Agents & Expenses</h1>
                         <p className="text-sm text-slate-500">Manage agents, track locations, monitor attendance, and company expenses</p>
                     </div>
-                    {activeTab !== 'expenses' && (
+                    {/* Hide Add Agent button in Analysis and Expenses tab to keep it clean, or keep it? 
+                        User didn't specify, but usually analysis/expenses is separate. 
+                        Let's keep it consistent: hide for non-agent-management tabs if desired, 
+                        but 'expenses' is kind of related. 
+                        For 'analysis', definitely doesn't make sense to have 'Add Agent'.
+                    */}
+                    {activeTab !== 'expenses' && activeTab !== 'analysis' && (
                         <button
                             onClick={() => { resetForm(); setShowAddModal(true); }}
                             className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
@@ -429,6 +436,13 @@ export default function AgentsPage() {
                 {activeTab === 'expenses' && (
                     <div className="h-full p-6 overflow-y-auto">
                         <CompanyExpenseManagement />
+                    </div>
+                )}
+
+                {/* Analysis Tab */}
+                {activeTab === 'analysis' && (
+                    <div className="h-full">
+                        <ProfitAnalysis />
                     </div>
                 )}
             </div>
