@@ -1,0 +1,20 @@
+Reading file from: d:\Sri Vari Enterprises software\Tally.xlsx
+--- Sheet: Ledger Vouchers ---
+Rows 8-25:
+Row 8: ["Ledger Account","","","","","",""]
+Row 9: ["","","","","","",""]
+Row 10: ["1-Apr-19 to 3-Feb-26","","","","","",""]
+Row 11: ["","","","","","",""]
+Row 12: ["Ledger:","ABIRAMI METAL","1-Apr-19 to 3-Feb-26","","","",""]
+Row 13: ["","MAIN ROAD, SOMANUR, GST.NO:33ASNPS4297C1ZP, CELL:9884867782","","","","",""]
+Row 14: ["Date","Particulars","","Vch Type","Vch No.","Debit","Credit"]
+Row 15: [43689,"To","SALES","","",6410,""]
+Row 16: [43714,"To","SALES","Sales","390",10941,""]
+Row 17: [43715,"By","CHEQUES","Receipt","","",6410]
+Row 18: [43799,"To","SALES","Sales","623",8255,""]
+Row 19: [43815,"By","CHEQUE","Receipt","","",5000]
+Row 20: [43817,"By","CHEQUE","Receipt","","",5000]
+Row 21: [43841,"To","SALES","Sales","723",4505,""]
+Row 22: [43841,"To","SALES","Sales","724",2055,""]
+Row 23: [43881,"By","CHEQUES","Receipt","","",5000]
+Row 24: [43897,"To","SALES","Sales","822",3305,""]

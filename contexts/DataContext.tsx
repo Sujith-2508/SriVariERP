@@ -944,17 +944,65 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const deleteAgent = async (id: string) => {
-        const { error } = await supabase
-            .from('agents')
-            .delete()
-            .eq('id', id);
-
-        if (error) {
-            console.error('Error deleting agent:', error);
-            throw error;
+        // 1. Get the agent details first content
+        const agentToDelete = agents.find(a => a.id === id);
+        if (!agentToDelete) {
+            console.error('Agent not found locally');
+            return;
         }
 
-        setAgents(prev => prev.filter(a => a.id !== id));
+        // 2. "Soft Delete" the agent: Deactivate and rename to free up credentials
+        // We append a timestamp to ensure uniqueness if they delete multiple people with same name/phone
+        const timestamp = new Date().getTime().toString().slice(-6);
+        const newName = `${agentToDelete.name} (Deleted)`;
+        const newPhone = agentToDelete.phone.startsWith('del_') ? agentToDelete.phone : `del_${timestamp}_${agentToDelete.phone}`;
+        const newAgentId = (agentToDelete.agentId && !agentToDelete.agentId.startsWith('del_'))
+            ? `del_${timestamp}_${agentToDelete.agentId}`
+            : agentToDelete.agentId;
+
+        const { error: updateError } = await supabase
+            .from('agents')
+            .update({
+                name: newName,
+                is_active: false,
+                phone: newPhone,
+                agent_id: newAgentId,
+                // We keep the division/area for historical reference
+            })
+            .eq('id', id);
+
+        if (updateError) {
+            console.error('Error soft-deleting agent:', updateError);
+            throw updateError;
+        }
+
+        // 3. "Hard Delete" tracking data (Locations and Status) - As requested for privacy/cleanup
+        // We do this in parallel to save time
+        const [delLoc, delStatus] = await Promise.all([
+            supabase.from('agent_locations').delete().eq('agent_id', id),
+            supabase.from('agent_status').delete().eq('agent_id', id)
+        ]);
+
+        if (delLoc.error) console.error('Error deleting locations:', delLoc.error);
+        if (delStatus.error) console.error('Error deleting status:', delStatus.error);
+
+        // 4. Update local state
+        // We DO NOT filter them out, we update them so they show as "Inactive" in the list
+        setAgents(prev => prev.map(a => {
+            if (a.id === id) {
+                return {
+                    ...a,
+                    name: newName,
+                    isActive: false,
+                    phone: newPhone,
+                    agentId: newAgentId
+                };
+            }
+            return a;
+        }));
+
+        // Also remove from tracking data so they disappear from map immediately
+        setTrackingData(prev => prev.filter(t => t.agent.id !== id));
     };
 
     // Backward compatible aliases

@@ -1,0 +1,19 @@
+Reading file from: d:\Sri Vari Enterprises software\Tally.xlsx
+Sheet Names: [
+  "Ledger Vouchers"
+]
+
+--- Sheet: Ledger Vouchers ---
+Range: A1:G33626
+First 10 rows:
+Row 0: ["SRI VARI ENTERPRISES","","","","","",""]
+Row 1: ["T.S.NO:609","","","","","",""]
+Row 2: ["BLOCK NO:9,PALANIYAPPAN STREET","","","","","",""]
+Row 3: ["POLLACHI 642001","","","","","",""]
+Row 4: ["GST IN:33DIGPM0162N1Z6","","","","","",""]
+Row 5: ["MOB NO:9488075194","","","","","",""]
+Row 6: ["E-Mail : maharajagrouppvtltd@gmail.com","","","","","",""]
+Row 7: ["","","","","","",""]
+Row 8: ["Ledger Account","","","","","",""]
+Row 9: ["","","","","","",""]
+

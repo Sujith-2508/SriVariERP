@@ -1,0 +1,10 @@
+Unique Vch Types:
+Contra
+Credit Note
+Debit Note
+PURSHASE
+Payment
+Receipt
+Sales
+Stock Return
+VOUCHER PURCHASE 18%

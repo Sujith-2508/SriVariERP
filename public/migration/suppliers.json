@@ -1,0 +1,2622 @@
+[
+  {
+    "id": "1888fabb2144e93e58a8abab0e0bb5da",
+    "name": "ABIRAMI METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 41420,
+    "createdAt": "2026-02-18T10:47:04.931Z",
+    "updatedAt": "2026-02-18T10:47:04.939Z"
+  },
+  {
+    "id": "648f40ce8a52fdcf7c1b9710bb743261",
+    "name": "Allowence",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -33000,
+    "createdAt": "2026-02-18T10:47:04.945Z",
+    "updatedAt": "2026-02-18T10:47:04.945Z"
+  },
+  {
+    "id": "cee029e8c1a6eed2225222d54cbde9bb",
+    "name": "AMMAN AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:04.945Z",
+    "updatedAt": "2026-02-18T10:47:04.945Z"
+  },
+  {
+    "id": "cccbfaf2251db7b09312e37a3afe71b8",
+    "name": "AMMU FURNITURE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:04.946Z",
+    "updatedAt": "2026-02-18T10:47:04.946Z"
+  },
+  {
+    "id": "c099cad119de3680b6d85b3f24f93172",
+    "name": "ANANDA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:04.946Z",
+    "updatedAt": "2026-02-18T10:47:04.946Z"
+  },
+  {
+    "id": "f439c79af7acf2a993616b444acfd09f",
+    "name": "ANANTHA METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:04.946Z",
+    "updatedAt": "2026-02-18T10:47:04.946Z"
+  },
+  {
+    "id": "85f91c25755469c23cc665cd6d5e0d62",
+    "name": "Angappan",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -36000,
+    "createdAt": "2026-02-18T10:47:04.946Z",
+    "updatedAt": "2026-02-18T10:47:04.946Z"
+  },
+  {
+    "id": "9ff00612e9333c94e89b26dc72754021",
+    "name": "ANNAI VALAGGANNI METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 8190,
+    "createdAt": "2026-02-18T10:47:04.946Z",
+    "updatedAt": "2026-02-18T10:47:04.946Z"
+  },
+  {
+    "id": "722688564912891edb90f69acf7e9f42",
+    "name": "ANNA PATHIRA ANGADI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 4539,
+    "createdAt": "2026-02-18T10:47:04.950Z",
+    "updatedAt": "2026-02-18T10:47:04.950Z"
+  },
+  {
+    "id": "3dce75f7969b8cdc6594b96421993d3e",
+    "name": "ANNOR MAHALAKSHMI METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 19711,
+    "createdAt": "2026-02-18T10:47:04.951Z",
+    "updatedAt": "2026-02-18T10:47:04.951Z"
+  },
+  {
+    "id": "614e40571f17295be3846d0dbd736e76",
+    "name": "ANNOR TAMIL KUMARAN",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 8000,
+    "createdAt": "2026-02-18T10:47:04.952Z",
+    "updatedAt": "2026-02-18T10:47:04.952Z"
+  },
+  {
+    "id": "56b3337c8e4a43811d231a4d8a237aa8",
+    "name": "ARASU FURNITURE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 10143,
+    "createdAt": "2026-02-18T10:47:04.953Z",
+    "updatedAt": "2026-02-18T10:47:04.953Z"
+  },
+  {
+    "id": "11c2f02f38b1f3ac8e75f9edc137c3b5",
+    "name": "Aravind",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:04.960Z",
+    "updatedAt": "2026-02-18T10:47:04.960Z"
+  },
+  {
+    "id": "f728564618590496187bcc67161a976c",
+    "name": "ARUN RUBBER PRODUCTS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:04.960Z",
+    "updatedAt": "2026-02-18T10:47:04.960Z"
+  },
+  {
+    "id": "2af3d23a58fcacf257f330d302e03246",
+    "name": "ASHMITHA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 2584,
+    "createdAt": "2026-02-18T10:47:04.960Z",
+    "updatedAt": "2026-02-18T10:47:04.960Z"
+  },
+  {
+    "id": "aa55767fa7579570e7ebee3de533a7ce",
+    "name": "ASIRWATHAM STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -3333,
+    "createdAt": "2026-02-18T10:47:04.960Z",
+    "updatedAt": "2026-02-18T10:47:04.960Z"
+  },
+  {
+    "id": "3aaa19cb579eb4e91c11d56cd1426f4b",
+    "name": "ASWINTH",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -13000,
+    "createdAt": "2026-02-18T10:47:04.961Z",
+    "updatedAt": "2026-02-18T10:47:04.961Z"
+  },
+  {
+    "id": "702ccd4c4de96dda2108bed873989158",
+    "name": "BANK",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -3021287,
+    "createdAt": "2026-02-18T10:47:04.961Z",
+    "updatedAt": "2026-02-18T10:47:04.961Z"
+  },
+  {
+    "id": "069b30db06d047a398f9eb0940d3279c",
+    "name": "Cash",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -16291058.14,
+    "createdAt": "2026-02-18T10:47:04.962Z",
+    "updatedAt": "2026-02-18T10:47:04.962Z"
+  },
+  {
+    "id": "058382e4654423002b5971eee2c16cd7",
+    "name": "CASH DISCOUNT",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -392063.17000000004,
+    "createdAt": "2026-02-18T10:47:05.003Z",
+    "updatedAt": "2026-02-18T10:47:05.003Z"
+  },
+  {
+    "id": "6f5f90e7f92a2b97c59de915e8429fbc",
+    "name": "CATHOLIC SYRIAN BANK",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -804500,
+    "createdAt": "2026-02-18T10:47:05.008Z",
+    "updatedAt": "2026-02-18T10:47:05.008Z"
+  },
+  {
+    "id": "ee58ff2a25bcac64e909bdaf1ec48f4a",
+    "name": "CGST",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 2228355.119999995,
+    "createdAt": "2026-02-18T10:47:05.008Z",
+    "updatedAt": "2026-02-18T10:47:05.008Z"
+  },
+  {
+    "id": "b8e1a763a09cb03c6758aed8ea855692",
+    "name": "CHANDHRA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.094Z",
+    "updatedAt": "2026-02-18T10:47:05.094Z"
+  },
+  {
+    "id": "785fffe3b5e57d91086a9e650e66a423",
+    "name": "CHELLA HOME NEEDS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.094Z",
+    "updatedAt": "2026-02-18T10:47:05.094Z"
+  },
+  {
+    "id": "1ea2486dbf80e828029a3200331f01a7",
+    "name": "CHEQUE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -469919.14,
+    "createdAt": "2026-02-18T10:47:05.095Z",
+    "updatedAt": "2026-02-18T10:47:05.095Z"
+  },
+  {
+    "id": "4ac8d93b0e485dd6559f9b191114e125",
+    "name": "CHEQUE RETURN CHARGES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 26893.7,
+    "createdAt": "2026-02-18T10:47:05.095Z",
+    "updatedAt": "2026-02-18T10:47:05.095Z"
+  },
+  {
+    "id": "acdd18019922ce1fdc4cc63a1ab09563",
+    "name": "CHEQUES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -8294263.08,
+    "createdAt": "2026-02-18T10:47:05.095Z",
+    "updatedAt": "2026-02-18T10:47:05.095Z"
+  },
+  {
+    "id": "d0d1d339128dedf62533208a4fdd0ceb",
+    "name": "COONOOR DEVI STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.102Z",
+    "updatedAt": "2026-02-18T10:47:05.102Z"
+  },
+  {
+    "id": "b104a351a9e1929eeabda6c7461e5178",
+    "name": "DEVALA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 1449,
+    "createdAt": "2026-02-18T10:47:05.102Z",
+    "updatedAt": "2026-02-18T10:47:05.102Z"
+  },
+  {
+    "id": "8962d5fb470ae9c8a0cf198d9f68c70a",
+    "name": "DHAKSHAN RUBBER TECHNOLOGIST",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -41891,
+    "createdAt": "2026-02-18T10:47:05.102Z",
+    "updatedAt": "2026-02-18T10:47:05.102Z"
+  },
+  {
+    "id": "382201301eadfdcea3a22111db29c466",
+    "name": "DHANUJA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 27284,
+    "createdAt": "2026-02-18T10:47:05.103Z",
+    "updatedAt": "2026-02-18T10:47:05.103Z"
+  },
+  {
+    "id": "446d6e61f376a6e356c03f5f85e00245",
+    "name": "DINDUGAL APPLIANCES AND SERVICES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 10945,
+    "createdAt": "2026-02-18T10:47:05.104Z",
+    "updatedAt": "2026-02-18T10:47:05.104Z"
+  },
+  {
+    "id": "d377846f1ff3513d96925d32b6f4ed85",
+    "name": "Dindugul Electric Spares",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 9825,
+    "createdAt": "2026-02-18T10:47:05.104Z",
+    "updatedAt": "2026-02-18T10:47:05.104Z"
+  },
+  {
+    "id": "5d9a638b67856dab0483bcc8b418e2cb",
+    "name": "Discount Allowed",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 262040.68999999994,
+    "createdAt": "2026-02-18T10:47:05.104Z",
+    "updatedAt": "2026-02-18T10:47:05.104Z"
+  },
+  {
+    "id": "19fefc87f9061cf6374d424f459c48d3",
+    "name": "DISSCOUNT( ALLOWED)",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 1590302.7200000004,
+    "createdAt": "2026-02-18T10:47:05.105Z",
+    "updatedAt": "2026-02-18T10:47:05.105Z"
+  },
+  {
+    "id": "40024a2d85f4f313240b054c567aaf8a",
+    "name": "ELLORE AMMAN PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.110Z",
+    "updatedAt": "2026-02-18T10:47:05.110Z"
+  },
+  {
+    "id": "d64ccd3c84043a6b53fe748fcf713fe8",
+    "name": "FRIEGHT CHARGES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 181868.6199999998,
+    "createdAt": "2026-02-18T10:47:05.110Z",
+    "updatedAt": "2026-02-18T10:47:05.110Z"
+  },
+  {
+    "id": "e8a32963572e6d843c5a0bcb699b50bb",
+    "name": "GANESH METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.120Z",
+    "updatedAt": "2026-02-18T10:47:05.120Z"
+  },
+  {
+    "id": "1d26e3c5bdaad7b7e16f0af9bbff4cca",
+    "name": "G.G.T. HOME PLANET",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.120Z",
+    "updatedAt": "2026-02-18T10:47:05.120Z"
+  },
+  {
+    "id": "c0a80cea6419d046379f0a3bbc7acfa6",
+    "name": "GIFTS & METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 14626,
+    "createdAt": "2026-02-18T10:47:05.120Z",
+    "updatedAt": "2026-02-18T10:47:05.120Z"
+  },
+  {
+    "id": "c649c8d82f42da8f05db08772f60f6c4",
+    "name": "G KRISH INDUSTRIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -40000,
+    "createdAt": "2026-02-18T10:47:05.121Z",
+    "updatedAt": "2026-02-18T10:47:05.121Z"
+  },
+  {
+    "id": "6e9b8d986705fc4ae125c0aabd72f315",
+    "name": "Gopalakrishnan",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -114000,
+    "createdAt": "2026-02-18T10:47:05.121Z",
+    "updatedAt": "2026-02-18T10:47:05.121Z"
+  },
+  {
+    "id": "b5a30766a346826df610f171f2556e06",
+    "name": "IGST",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 3354.96,
+    "createdAt": "2026-02-18T10:47:05.121Z",
+    "updatedAt": "2026-02-18T10:47:05.121Z"
+  },
+  {
+    "id": "2393a6b9b6aa104e235915f9ed6668f6",
+    "name": "INDIAN METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -50,
+    "createdAt": "2026-02-18T10:47:05.121Z",
+    "updatedAt": "2026-02-18T10:47:05.121Z"
+  },
+  {
+    "id": "ed175e1ffbfacd3e7b88774eed535880",
+    "name": "JAGAN SUPER STORE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 13990,
+    "createdAt": "2026-02-18T10:47:05.122Z",
+    "updatedAt": "2026-02-18T10:47:05.122Z"
+  },
+  {
+    "id": "2363da102bd727e5146036fbef9cff44",
+    "name": "JAIN BROTHERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -23280.44,
+    "createdAt": "2026-02-18T10:47:05.122Z",
+    "updatedAt": "2026-02-18T10:47:05.122Z"
+  },
+  {
+    "id": "d89ed81e14c38ac9c7d9982d826aa3ae",
+    "name": "JAIN METAL STORE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 148794,
+    "createdAt": "2026-02-18T10:47:05.123Z",
+    "updatedAt": "2026-02-18T10:47:05.123Z"
+  },
+  {
+    "id": "eb589408524f2b7de866bdb2627c6b92",
+    "name": "JANATHA METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 19000,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "08cc850ad0c93ec6a6296b1b36269a76",
+    "name": "JAYAM AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "d672617a8eb31f6efcf8c45ba91b8daf",
+    "name": "JAYAM TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 615,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "bf23ec7a797793ebb3b9da13bee7166a",
+    "name": "JEEVA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "560c3e6c0a3cabc24c097ee793a98994",
+    "name": "JEYAM DEPARTMENT",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "07e5692a69ed7ab5303dddd841e9563d",
+    "name": "Jeyam Furnitures",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "0f1ba86aa034e14db6d6407961a81c9e",
+    "name": "JEYARATHNA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "afae3ecf2efefd39bcfb67f9586eb7fe",
+    "name": "KAABA FURNITUES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "11b3312a5c24b88e8d06db0c05a779fc",
+    "name": "Kaja Mydeen",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -78500,
+    "createdAt": "2026-02-18T10:47:05.124Z",
+    "updatedAt": "2026-02-18T10:47:05.124Z"
+  },
+  {
+    "id": "6a772602d0be9c368c5d1c3b84b60a26",
+    "name": "KAJA STEELS & FURNITURE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.125Z",
+    "updatedAt": "2026-02-18T10:47:05.125Z"
+  },
+  {
+    "id": "94b66e2a1adb3f87a09e1bbf30c969f5",
+    "name": "KALAVATHI METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.125Z",
+    "updatedAt": "2026-02-18T10:47:05.125Z"
+  },
+  {
+    "id": "d526b5922173b88ae56fc3beda4d8fd2",
+    "name": "Kaliappan",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -717000,
+    "createdAt": "2026-02-18T10:47:05.125Z",
+    "updatedAt": "2026-02-18T10:47:05.125Z"
+  },
+  {
+    "id": "634bc663508f228b720b529d6c6fc999",
+    "name": "KAMATCHI METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 220,
+    "createdAt": "2026-02-18T10:47:05.125Z",
+    "updatedAt": "2026-02-18T10:47:05.125Z"
+  },
+  {
+    "id": "04fc44a745b1856bcdd69c4286f74faf",
+    "name": "Kamatchi Steel House",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.125Z",
+    "updatedAt": "2026-02-18T10:47:05.125Z"
+  },
+  {
+    "id": "539b9e8cfdd74c088e9b2c68bf6101ea",
+    "name": "KANI STORES & METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 37320,
+    "createdAt": "2026-02-18T10:47:05.126Z",
+    "updatedAt": "2026-02-18T10:47:05.126Z"
+  },
+  {
+    "id": "b865a09a39caff99d78a19ad5f3f200c",
+    "name": "KARTHIKEYAN STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 1880,
+    "createdAt": "2026-02-18T10:47:05.126Z",
+    "updatedAt": "2026-02-18T10:47:05.126Z"
+  },
+  {
+    "id": "07795c6793bdc37a0baec419a27e395d",
+    "name": "KAVI TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 27833,
+    "createdAt": "2026-02-18T10:47:05.126Z",
+    "updatedAt": "2026-02-18T10:47:05.126Z"
+  },
+  {
+    "id": "4b4333e350349d7a2d9fd66522eac04d",
+    "name": "K.K.THIRUKAIVEL METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 52504,
+    "createdAt": "2026-02-18T10:47:05.128Z",
+    "updatedAt": "2026-02-18T10:47:05.128Z"
+  },
+  {
+    "id": "7da3f64718466c8dd5372f2864c45760",
+    "name": "KUMARAN PATTIRA MALIGAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.130Z",
+    "updatedAt": "2026-02-18T10:47:05.130Z"
+  },
+  {
+    "id": "4b71f3b265c06acd747ff428005e673b",
+    "name": "Kumbakonam Pathirakadai",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.130Z",
+    "updatedAt": "2026-02-18T10:47:05.130Z"
+  },
+  {
+    "id": "5399b6385e15d3c2f1796912e6d94d5c",
+    "name": "LAKSHMI COOKWARE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -26386696.82,
+    "createdAt": "2026-02-18T10:47:05.130Z",
+    "updatedAt": "2026-02-18T10:47:05.130Z"
+  },
+  {
+    "id": "392f11666e3be598d8a4934684d394c4",
+    "name": "LAKSHMI METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 6961,
+    "createdAt": "2026-02-18T10:47:05.133Z",
+    "updatedAt": "2026-02-18T10:47:05.133Z"
+  },
+  {
+    "id": "fb9be5520cd2286f46cb75f85e518b96",
+    "name": "LAKSHMI METAL CORPORATION",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.133Z",
+    "updatedAt": "2026-02-18T10:47:05.133Z"
+  },
+  {
+    "id": "28572c95b70898ab14f9cd2d90205478",
+    "name": "LAKSHMI METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.134Z",
+    "updatedAt": "2026-02-18T10:47:05.134Z"
+  },
+  {
+    "id": "317771ce3ca322d61207ff133f3624e8",
+    "name": "LATHA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.134Z",
+    "updatedAt": "2026-02-18T10:47:05.134Z"
+  },
+  {
+    "id": "0d37d8f2f655be177874c65f2538c979",
+    "name": "LAXMI METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 815770.2,
+    "createdAt": "2026-02-18T10:47:05.134Z",
+    "updatedAt": "2026-02-18T10:47:05.134Z"
+  },
+  {
+    "id": "c49419a33e13769622fba9728d85a54e",
+    "name": "LOTUS DEPARTMENT",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.134Z",
+    "updatedAt": "2026-02-18T10:47:05.134Z"
+  },
+  {
+    "id": "27e53f7adf53904c7886296d62956f01",
+    "name": "LUCKY METAL PLAZA",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 3090,
+    "createdAt": "2026-02-18T10:47:05.134Z",
+    "updatedAt": "2026-02-18T10:47:05.134Z"
+  },
+  {
+    "id": "4fa147d8b751a05d5428951eb5fe264d",
+    "name": "LULU SUPER MARKET",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.136Z",
+    "updatedAt": "2026-02-18T10:47:05.136Z"
+  },
+  {
+    "id": "9dd25ac1450dfb392d0ba8a859824bbb",
+    "name": "MADAN METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.136Z",
+    "updatedAt": "2026-02-18T10:47:05.136Z"
+  },
+  {
+    "id": "9edc27bfdc887ea1b3b87d4decbfe07e",
+    "name": "MADHENA METAL STORE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.136Z",
+    "updatedAt": "2026-02-18T10:47:05.136Z"
+  },
+  {
+    "id": "cd8732237c7b78a8e25ede2f57893cc9",
+    "name": "MADRAS METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 467,
+    "createdAt": "2026-02-18T10:47:05.136Z",
+    "updatedAt": "2026-02-18T10:47:05.136Z"
+  },
+  {
+    "id": "55add592747e56cfeb8c686885eb23ce",
+    "name": "MAGESH GAS SERVICE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.136Z",
+    "updatedAt": "2026-02-18T10:47:05.136Z"
+  },
+  {
+    "id": "f9eb094b28596afd7c0679c2f0f6e599",
+    "name": "Mahaboob",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -1395200,
+    "createdAt": "2026-02-18T10:47:05.136Z",
+    "updatedAt": "2026-02-18T10:47:05.136Z"
+  },
+  {
+    "id": "c71332e8430b2dfe6283bbfb2bdf3659",
+    "name": "Mahalakshmi Metals Stores",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.136Z",
+    "updatedAt": "2026-02-18T10:47:05.136Z"
+  },
+  {
+    "id": "c4a21f113616aeb1a2fd0eb28cee8319",
+    "name": "MAHA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.137Z",
+    "updatedAt": "2026-02-18T10:47:05.137Z"
+  },
+  {
+    "id": "1a9913ca90b6ff40f133adfcb780bdc3",
+    "name": "MAHARAJA STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.137Z",
+    "updatedAt": "2026-02-18T10:47:05.137Z"
+  },
+  {
+    "id": "95c2d66072184435b9dba7dd23cef8b6",
+    "name": "MAHARASI METAL MART AND FURNITURES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.137Z",
+    "updatedAt": "2026-02-18T10:47:05.137Z"
+  },
+  {
+    "id": "2672d5e284067866fa7ac3de15e515c7",
+    "name": "MANGAL & MANGAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.137Z",
+    "updatedAt": "2026-02-18T10:47:05.137Z"
+  },
+  {
+    "id": "2c7224d0a1dbae3710524e7111b7ebb9",
+    "name": "MANI  PLASTIC",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.137Z",
+    "updatedAt": "2026-02-18T10:47:05.137Z"
+  },
+  {
+    "id": "b62be4facf7b87feb5ffddc89349bab6",
+    "name": "MARUTHI STEELS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 2590,
+    "createdAt": "2026-02-18T10:47:05.137Z",
+    "updatedAt": "2026-02-18T10:47:05.137Z"
+  },
+  {
+    "id": "7b7f1b1735ea8546d4854178ae2b1c53",
+    "name": "MAYURA AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.137Z",
+    "updatedAt": "2026-02-18T10:47:05.137Z"
+  },
+  {
+    "id": "feb6644f781c8a062f5357b826c2d7cc",
+    "name": "M DEALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -7622.8,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "898cedcb5bafd8238d5959cb1a59b8d7",
+    "name": "MEEN MARK METAL CORPORATION",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "f22709600ec74529e87d222664183640",
+    "name": "MEGA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 6600,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "a7971306c07043b13b668baa66c80c51",
+    "name": "M/S.CHERAN METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "62eb77571bbb6af4e99f9b9f3229141d",
+    "name": "M/S.GEETHAM AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 9200,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "248813c17df7745f8d93632ac5a2e648",
+    "name": "M.S.HARI FURNITURES & ELECTRONICS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "a211387e3229f8b81bd61908c9c46f01",
+    "name": "MUKESK ELECTRICALS AND HOME APPLIANCES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "cb9924bf18f898361a7cbb1083ed546b",
+    "name": "MUTHU METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 7988771.940000001,
+    "createdAt": "2026-02-18T10:47:05.138Z",
+    "updatedAt": "2026-02-18T10:47:05.138Z"
+  },
+  {
+    "id": "17e498a28cfc5967c9ce3e86d1d14a27",
+    "name": "MUTHU METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 3795,
+    "createdAt": "2026-02-18T10:47:05.140Z",
+    "updatedAt": "2026-02-18T10:47:05.140Z"
+  },
+  {
+    "id": "668b4923a7b77b568068577f65af0d5f",
+    "name": "NARAYANA PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.141Z",
+    "updatedAt": "2026-02-18T10:47:05.141Z"
+  },
+  {
+    "id": "5a97a26ccd3efa2c9c78c7a5ff7c33f1",
+    "name": "Nataraj Metal",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 133578,
+    "createdAt": "2026-02-18T10:47:05.141Z",
+    "updatedAt": "2026-02-18T10:47:05.141Z"
+  },
+  {
+    "id": "9fd71a717f09b73f4744bc78fcf12215",
+    "name": "NATIONAL ERUMAD",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.142Z",
+    "updatedAt": "2026-02-18T10:47:05.142Z"
+  },
+  {
+    "id": "0188040713429de14fca267d1fd73b31",
+    "name": "National Metal Industries",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.142Z",
+    "updatedAt": "2026-02-18T10:47:05.142Z"
+  },
+  {
+    "id": "8fc3587638d0af6178ad72f925ba02fd",
+    "name": "NEFT",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -13863429.66,
+    "createdAt": "2026-02-18T10:47:05.142Z",
+    "updatedAt": "2026-02-18T10:47:05.142Z"
+  },
+  {
+    "id": "58a5b2c74e2df6da95ff70f79dec07b0",
+    "name": "NEW AYSHA TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 186570.33999999985,
+    "createdAt": "2026-02-18T10:47:05.145Z",
+    "updatedAt": "2026-02-18T10:47:05.145Z"
+  },
+  {
+    "id": "6d9767e1c7d0cd3cae8e3dd678b3c4cb",
+    "name": "New Aysha Traders (Branch)",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 62605,
+    "createdAt": "2026-02-18T10:47:05.148Z",
+    "updatedAt": "2026-02-18T10:47:05.148Z"
+  },
+  {
+    "id": "2324940d76f9aae36e958a810807ba0a",
+    "name": "NEW LUCKY METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 3591,
+    "createdAt": "2026-02-18T10:47:05.157Z",
+    "updatedAt": "2026-02-18T10:47:05.157Z"
+  },
+  {
+    "id": "2c7baba3ec645ce6aa9355948e1294b4",
+    "name": "NEW PREMIER STEELS AND GIFTS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.157Z",
+    "updatedAt": "2026-02-18T10:47:05.157Z"
+  },
+  {
+    "id": "e0782d727e72686dfe7e94adcef12920",
+    "name": "NRG METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.157Z",
+    "updatedAt": "2026-02-18T10:47:05.157Z"
+  },
+  {
+    "id": "7e3f9fc6396f41ac7ce6b3c6e1efeabd",
+    "name": "O.N.K.TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 88651,
+    "createdAt": "2026-02-18T10:47:05.157Z",
+    "updatedAt": "2026-02-18T10:47:05.157Z"
+  },
+  {
+    "id": "b5b994eea5051c05f0b840131c9bf4fa",
+    "name": "PALANIYAPPA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 18916,
+    "createdAt": "2026-02-18T10:47:05.158Z",
+    "updatedAt": "2026-02-18T10:47:05.158Z"
+  },
+  {
+    "id": "818e48c470f35ad9ce6a8e5e7cfb2209",
+    "name": "P.K.S. SILKS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.159Z",
+    "updatedAt": "2026-02-18T10:47:05.159Z"
+  },
+  {
+    "id": "ef53e5a4f9dd86d329d8eb4d0e2dfd00",
+    "name": "PNB KITCHENMATE LIMITED",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -450000,
+    "createdAt": "2026-02-18T10:47:05.159Z",
+    "updatedAt": "2026-02-18T10:47:05.159Z"
+  },
+  {
+    "id": "32315114213bdf8aa036228a50df1e0e",
+    "name": "PONMANI STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.159Z",
+    "updatedAt": "2026-02-18T10:47:05.159Z"
+  },
+  {
+    "id": "b342b453ee2080ca3673763fa1f31357",
+    "name": "PONNU CORPORATION",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 352,
+    "createdAt": "2026-02-18T10:47:05.159Z",
+    "updatedAt": "2026-02-18T10:47:05.159Z"
+  },
+  {
+    "id": "0ad1fe916511f33d433280c6e8973afb",
+    "name": "PRABHA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.160Z",
+    "updatedAt": "2026-02-18T10:47:05.160Z"
+  },
+  {
+    "id": "0b7a37db6b078cf29a46849de2c8e074",
+    "name": "PRABU METAL STORE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.160Z",
+    "updatedAt": "2026-02-18T10:47:05.160Z"
+  },
+  {
+    "id": "67456481592b91409ae8adacd5829fb7",
+    "name": "PRAKESH STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.160Z",
+    "updatedAt": "2026-02-18T10:47:05.160Z"
+  },
+  {
+    "id": "355d0ecbfaa0c7cf9e7b35bd467a0dbb",
+    "name": "Priyadarshini Metal",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 6383.440000000002,
+    "createdAt": "2026-02-18T10:47:05.160Z",
+    "updatedAt": "2026-02-18T10:47:05.160Z"
+  },
+  {
+    "id": "a694dd944328e898ffd38cbb797814eb",
+    "name": "PRIYADARSHINI METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.161Z",
+    "updatedAt": "2026-02-18T10:47:05.161Z"
+  },
+  {
+    "id": "1894beb0e110efe8534c4aa37b71ed71",
+    "name": "PRIYA HOME CENTER",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.161Z",
+    "updatedAt": "2026-02-18T10:47:05.161Z"
+  },
+  {
+    "id": "71c4fbd1b8c2535d84667b3dfe285fe0",
+    "name": "Priya Shopping Centre",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.161Z",
+    "updatedAt": "2026-02-18T10:47:05.161Z"
+  },
+  {
+    "id": "80cc3d0743cc1230c3c35791b1a91b27",
+    "name": "Puli Godown",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -563000,
+    "createdAt": "2026-02-18T10:47:05.162Z",
+    "updatedAt": "2026-02-18T10:47:05.162Z"
+  },
+  {
+    "id": "76b6a47a02685d51794b9fdb095512e5",
+    "name": "Purchase",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -222276.40999999995,
+    "createdAt": "2026-02-18T10:47:05.162Z",
+    "updatedAt": "2026-02-18T10:47:05.162Z"
+  },
+  {
+    "id": "c191a50cf87ad031ee5ee32e6c156c17",
+    "name": "PUSHPAM METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 9903,
+    "createdAt": "2026-02-18T10:47:05.163Z",
+    "updatedAt": "2026-02-18T10:47:05.163Z"
+  },
+  {
+    "id": "d0252658db48d9f11b2943d40712ce01",
+    "name": "PUSHPAVALLI STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 27712,
+    "createdAt": "2026-02-18T10:47:05.163Z",
+    "updatedAt": "2026-02-18T10:47:05.163Z"
+  },
+  {
+    "id": "22752e0721f893c42bf1c74f8b883d3f",
+    "name": "QUEETA STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 24471,
+    "createdAt": "2026-02-18T10:47:05.165Z",
+    "updatedAt": "2026-02-18T10:47:05.165Z"
+  },
+  {
+    "id": "37e59b458d9c0f5fd90d18c287711bb9",
+    "name": "RAJA FURNITURES & ELECTRONICS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 21700,
+    "createdAt": "2026-02-18T10:47:05.166Z",
+    "updatedAt": "2026-02-18T10:47:05.166Z"
+  },
+  {
+    "id": "8fb86f58b5c22d1e96a2c4fd6b621c9f",
+    "name": "RAJALAKSHMI  ENTERPRISES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.166Z",
+    "updatedAt": "2026-02-18T10:47:05.166Z"
+  },
+  {
+    "id": "093da86226737f686acc8cf10fff850b",
+    "name": "RAO RUBBER INDUSTRIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -28320,
+    "createdAt": "2026-02-18T10:47:05.166Z",
+    "updatedAt": "2026-02-18T10:47:05.166Z"
+  },
+  {
+    "id": "ba28aa6d209b4bd9dd0cc7b70e614f1f",
+    "name": "REKHA METAL STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 3850,
+    "createdAt": "2026-02-18T10:47:05.166Z",
+    "updatedAt": "2026-02-18T10:47:05.166Z"
+  },
+  {
+    "id": "7207eb716a64f4e64076af50d9a6f8a2",
+    "name": "RENGAA STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 140,
+    "createdAt": "2026-02-18T10:47:05.166Z",
+    "updatedAt": "2026-02-18T10:47:05.166Z"
+  },
+  {
+    "id": "489bed2b60c5ce558b32f0a933ac75e6",
+    "name": "RENUGA ENTERPRISES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -288920,
+    "createdAt": "2026-02-18T10:47:05.167Z",
+    "updatedAt": "2026-02-18T10:47:05.167Z"
+  },
+  {
+    "id": "28c541e2e0c01c42e43384bf7cb4ff62",
+    "name": "Rex Ooty",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.167Z",
+    "updatedAt": "2026-02-18T10:47:05.167Z"
+  },
+  {
+    "id": "ad2cbd1a4416366bef89dffb1d4ec70a",
+    "name": "ROUND OFF",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 14428.730000000016,
+    "createdAt": "2026-02-18T10:47:05.167Z",
+    "updatedAt": "2026-02-18T10:47:05.167Z"
+  },
+  {
+    "id": "7676c5755aedd06c118f819b9886f80f",
+    "name": "ROYAL FURNITURES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.179Z",
+    "updatedAt": "2026-02-18T10:47:05.179Z"
+  },
+  {
+    "id": "e9a1250127ce7e45887f28c14dac6668",
+    "name": "R.VINAYAGAN STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.179Z",
+    "updatedAt": "2026-02-18T10:47:05.179Z"
+  },
+  {
+    "id": "519302fdf8cfb255c61fde5b4df8e698",
+    "name": "S.A.B.MEGA MALL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 20530,
+    "createdAt": "2026-02-18T10:47:05.180Z",
+    "updatedAt": "2026-02-18T10:47:05.180Z"
+  },
+  {
+    "id": "da7c1b2519415d312411f058c3c72e86",
+    "name": "SALES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 42592600.35000006,
+    "createdAt": "2026-02-18T10:47:05.180Z",
+    "updatedAt": "2026-02-18T10:47:05.180Z"
+  },
+  {
+    "id": "27ec79e881a43e802d431f7eb37c85ab",
+    "name": "Sales Return",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.216Z",
+    "updatedAt": "2026-02-18T10:47:05.216Z"
+  },
+  {
+    "id": "bd5c111c66e222d9e87083a99d85c12e",
+    "name": "Sales Returns",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -142837.18,
+    "createdAt": "2026-02-18T10:47:05.216Z",
+    "updatedAt": "2026-02-18T10:47:05.216Z"
+  },
+  {
+    "id": "c8cba3a92b61ba14937b890058ddf8c2",
+    "name": "SANMUGA AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.216Z",
+    "updatedAt": "2026-02-18T10:47:05.216Z"
+  },
+  {
+    "id": "55a1a29ee4d664f14c50c50fbf97c2af",
+    "name": "SARAVANA METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.217Z",
+    "updatedAt": "2026-02-18T10:47:05.217Z"
+  },
+  {
+    "id": "9b608cbc64ccac55c34644ba6acfbaf4",
+    "name": "SARAVANA STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.217Z",
+    "updatedAt": "2026-02-18T10:47:05.217Z"
+  },
+  {
+    "id": "500aeebcc2e248793decde0c103ae11b",
+    "name": "SATHI SIVAN METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.217Z",
+    "updatedAt": "2026-02-18T10:47:05.217Z"
+  },
+  {
+    "id": "d271b7ac2f7a6de4b42f2e3680b0ce8e",
+    "name": "Sawan",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -8600.02,
+    "createdAt": "2026-02-18T10:47:05.217Z",
+    "updatedAt": "2026-02-18T10:47:05.217Z"
+  },
+  {
+    "id": "dae056464ac70ea19f38f3c9dbfd3142",
+    "name": "SCRAB",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -2981613,
+    "createdAt": "2026-02-18T10:47:05.217Z",
+    "updatedAt": "2026-02-18T10:47:05.217Z"
+  },
+  {
+    "id": "c84f7964d26733770757f473b32308ac",
+    "name": "SELVAKUMAR METAL  MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 5599,
+    "createdAt": "2026-02-18T10:47:05.219Z",
+    "updatedAt": "2026-02-18T10:47:05.220Z"
+  },
+  {
+    "id": "55c0592ab03cfe7e16d7b4123f75c29b",
+    "name": "SELVAM METAL STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.220Z",
+    "updatedAt": "2026-02-18T10:47:05.221Z"
+  },
+  {
+    "id": "9529ceb4b40001a422508afe99fea299",
+    "name": "SELVAM VESSEL STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.221Z",
+    "updatedAt": "2026-02-18T10:47:05.221Z"
+  },
+  {
+    "id": "669a2f986a6d04714c0fe6378b1b7613",
+    "name": "SGST",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 2224024.3699999955,
+    "createdAt": "2026-02-18T10:47:05.221Z",
+    "updatedAt": "2026-02-18T10:47:05.221Z"
+  },
+  {
+    "id": "2ec90da01fd93637752ee49c40985ee2",
+    "name": "SHANTHINATH  STEELS & HOME APPLIANCES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.251Z",
+    "updatedAt": "2026-02-18T10:47:05.251Z"
+  },
+  {
+    "id": "4bb68a14670b052b257df707b2b05c34",
+    "name": "SHRI BALAMURUGAN STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 5098,
+    "createdAt": "2026-02-18T10:47:05.251Z",
+    "updatedAt": "2026-02-18T10:47:05.251Z"
+  },
+  {
+    "id": "cdc76dba904156f93f50524fcef6e2a0",
+    "name": "Shri Krishna Metals",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 411,
+    "createdAt": "2026-02-18T10:47:05.253Z",
+    "updatedAt": "2026-02-18T10:47:05.253Z"
+  },
+  {
+    "id": "7c3e2df05665b88460376eec88e6879a",
+    "name": "SHRI LAKSHMI SUPER MARKET",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.253Z",
+    "updatedAt": "2026-02-18T10:47:05.253Z"
+  },
+  {
+    "id": "f740167ca02beb605d225926f9484b03",
+    "name": "SHRISARAVANA STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.253Z",
+    "updatedAt": "2026-02-18T10:47:05.253Z"
+  },
+  {
+    "id": "b4bd8af876dcb899d003247e59f62dd3",
+    "name": "SINGARAVELAN METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 13416,
+    "createdAt": "2026-02-18T10:47:05.253Z",
+    "updatedAt": "2026-02-18T10:47:05.253Z"
+  },
+  {
+    "id": "7a091e6b906d0ce10e64299cd723a692",
+    "name": "SITHARA FURNITURE & HOME APPLIANCES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 790,
+    "createdAt": "2026-02-18T10:47:05.254Z",
+    "updatedAt": "2026-02-18T10:47:05.254Z"
+  },
+  {
+    "id": "748df003805bd3cd954a43f1c4f4ece8",
+    "name": "SIVAM STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.255Z",
+    "updatedAt": "2026-02-18T10:47:05.255Z"
+  },
+  {
+    "id": "1adb8af4ba94266b83c39dd76e7dcdb2",
+    "name": "SIVA PLASTICS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.255Z",
+    "updatedAt": "2026-02-18T10:47:05.255Z"
+  },
+  {
+    "id": "272b8d4756d3135397d2156122be9de5",
+    "name": "SIVASATHI AGENCY",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.255Z",
+    "updatedAt": "2026-02-18T10:47:05.255Z"
+  },
+  {
+    "id": "382ff3abab6b850847ef6925ff9c7b91",
+    "name": "SIVA SATHI STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.255Z",
+    "updatedAt": "2026-02-18T10:47:05.255Z"
+  },
+  {
+    "id": "33cdc32424187a16a7046ad7a8831cdb",
+    "name": "S.J STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.255Z",
+    "updatedAt": "2026-02-18T10:47:05.255Z"
+  },
+  {
+    "id": "60c597d3e1d2dc049a44f0f89ab3562e",
+    "name": "S.K.ENTERPRISE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 16358,
+    "createdAt": "2026-02-18T10:47:05.255Z",
+    "updatedAt": "2026-02-18T10:47:05.255Z"
+  },
+  {
+    "id": "ad26c91e173e299af7784c9de03168a9",
+    "name": "S.K. ENTERPRISES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.257Z",
+    "updatedAt": "2026-02-18T10:47:05.257Z"
+  },
+  {
+    "id": "de2d23c270627810cfba17985d53ac52",
+    "name": "SOWBAKYA FURNITURE AND T.V MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.257Z",
+    "updatedAt": "2026-02-18T10:47:05.257Z"
+  },
+  {
+    "id": "e82dee5428d9e37f29248c3e732102ca",
+    "name": "S.P.METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.257Z",
+    "updatedAt": "2026-02-18T10:47:05.257Z"
+  },
+  {
+    "id": "d8a6d983dd90d0a5ef46e5fe36328d3b",
+    "name": "S.P.S. STEELS&GIFTS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.258Z",
+    "updatedAt": "2026-02-18T10:47:05.258Z"
+  },
+  {
+    "id": "b23a8739af3096b9b48caba3b78788f0",
+    "name": "SREE LAKSHMI VILAS PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.258Z",
+    "updatedAt": "2026-02-18T10:47:05.258Z"
+  },
+  {
+    "id": "f8db59a72d1d65d140509d9c1331e561",
+    "name": "SREERAJALAKSHMI PATHIRA ANGADI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 49434,
+    "createdAt": "2026-02-18T10:47:05.258Z",
+    "updatedAt": "2026-02-18T10:47:05.258Z"
+  },
+  {
+    "id": "546f2a1b9a3687ec23d8469b6200f95f",
+    "name": "SREE RAMNATH AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.258Z",
+    "updatedAt": "2026-02-18T10:47:05.258Z"
+  },
+  {
+    "id": "e2848f26b08c4f8135d1261eed1805ca",
+    "name": "SREE RASALAKSHMI METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -1426,
+    "createdAt": "2026-02-18T10:47:05.259Z",
+    "updatedAt": "2026-02-18T10:47:05.259Z"
+  },
+  {
+    "id": "e735cdf7cf440934dbac654f8bb6b2d2",
+    "name": "SREE RASALAKSHMI  METAL MARTS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 24081,
+    "createdAt": "2026-02-18T10:47:05.259Z",
+    "updatedAt": "2026-02-18T10:47:05.259Z"
+  },
+  {
+    "id": "80c966636af8b9fbe638c62e951ed877",
+    "name": "SREE SATHI METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 162345.3999999999,
+    "createdAt": "2026-02-18T10:47:05.260Z",
+    "updatedAt": "2026-02-18T10:47:05.260Z"
+  },
+  {
+    "id": "a65add8a7ee3185a0a6cf8fabcd72fcc",
+    "name": "SRI AANUR TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.261Z",
+    "updatedAt": "2026-02-18T10:47:05.261Z"
+  },
+  {
+    "id": "449ef1b1d5e0f0a2b8c98d0a18410b1f",
+    "name": "SRI ABIRAMI METAL STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.261Z",
+    "updatedAt": "2026-02-18T10:47:05.261Z"
+  },
+  {
+    "id": "cfae889280eb18ac06860d272e60b436",
+    "name": "SRI AMBIKA METALS AND TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.261Z",
+    "updatedAt": "2026-02-18T10:47:05.261Z"
+  },
+  {
+    "id": "3abf9fa2fd293506fa276063f46f9062",
+    "name": "SRI ANNAI PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.261Z",
+    "updatedAt": "2026-02-18T10:47:05.261Z"
+  },
+  {
+    "id": "9f96b92005ff3424aa449ba29c5a5836",
+    "name": "SRI GANAPATHY STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 49837,
+    "createdAt": "2026-02-18T10:47:05.261Z",
+    "updatedAt": "2026-02-18T10:47:05.261Z"
+  },
+  {
+    "id": "96265747cac175102097335fcd544f09",
+    "name": "SRI GOKULAM ENTERPRISES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -1.4551915228366852e-11,
+    "createdAt": "2026-02-18T10:47:05.262Z",
+    "updatedAt": "2026-02-18T10:47:05.262Z"
+  },
+  {
+    "id": "f8d283f95ebee7d77df80b7e0ecb9668",
+    "name": "SRI KRISHNA FURNITURES&HOME APPLIANCES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 2337,
+    "createdAt": "2026-02-18T10:47:05.262Z",
+    "updatedAt": "2026-02-18T10:47:05.262Z"
+  },
+  {
+    "id": "4fdf81a8ad26127f03fbdd7cfdfd8d5c",
+    "name": "SRI KRISHNA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.263Z",
+    "updatedAt": "2026-02-18T10:47:05.263Z"
+  },
+  {
+    "id": "09c5f7f8efe63d8110823c7976051648",
+    "name": "SRI KUMARAN METAL MART&STROES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.263Z",
+    "updatedAt": "2026-02-18T10:47:05.263Z"
+  },
+  {
+    "id": "1b3045deaceed346d272efd16df7d918",
+    "name": "SRI KUMARAN STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.263Z",
+    "updatedAt": "2026-02-18T10:47:05.263Z"
+  },
+  {
+    "id": "494dce2a54c37ef29108df874e5faaab",
+    "name": "SRI LAKSHIMI STEEL HOUSE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.263Z",
+    "updatedAt": "2026-02-18T10:47:05.263Z"
+  },
+  {
+    "id": "e9f2ef66eb76bd683aa98accdd95d76c",
+    "name": "SRI LAKSHMI STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.263Z",
+    "updatedAt": "2026-02-18T10:47:05.263Z"
+  },
+  {
+    "id": "13911008ad0e4e41371bc965bee6a55d",
+    "name": "SRI LAKSHMI VILAS METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 769,
+    "createdAt": "2026-02-18T10:47:05.263Z",
+    "updatedAt": "2026-02-18T10:47:05.263Z"
+  },
+  {
+    "id": "5b3fd83a8ab9820b26e3607195c302f7",
+    "name": "SRI MAHAA GANAPATHI TEXTILES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.264Z",
+    "updatedAt": "2026-02-18T10:47:05.264Z"
+  },
+  {
+    "id": "6de8a2e755fc5c6617b2e3a25067d769",
+    "name": "SRI MAHALAKSHMI FURNITURE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.264Z",
+    "updatedAt": "2026-02-18T10:47:05.264Z"
+  },
+  {
+    "id": "f95634ab5e8cabed18c218fde3f3c3dc",
+    "name": "SRI MARUTHI ELECTRONICS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 2101,
+    "createdAt": "2026-02-18T10:47:05.264Z",
+    "updatedAt": "2026-02-18T10:47:05.264Z"
+  },
+  {
+    "id": "9eb14c91a084b5145eef63189c60fde3",
+    "name": "SRI MEENMARK EVERSILVER SHOWROOM",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.264Z",
+    "updatedAt": "2026-02-18T10:47:05.264Z"
+  },
+  {
+    "id": "35e8083de3bcd8f89581a6d44444eb43",
+    "name": "SRI MURUGAN AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.265Z",
+    "updatedAt": "2026-02-18T10:47:05.265Z"
+  },
+  {
+    "id": "39cd068b81f24d45ef811478aa85552c",
+    "name": "SRI MURUGAN METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 13311,
+    "createdAt": "2026-02-18T10:47:05.265Z",
+    "updatedAt": "2026-02-18T10:47:05.265Z"
+  },
+  {
+    "id": "4830a878427b711808e0f6c293f99db9",
+    "name": "SRI MURUGAN METAL MART KODUMUDI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.267Z",
+    "updatedAt": "2026-02-18T10:47:05.267Z"
+  },
+  {
+    "id": "9af330131457722ed0c152dd9dc62401",
+    "name": "SRI MURUGAN METAL MARTS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.267Z",
+    "updatedAt": "2026-02-18T10:47:05.267Z"
+  },
+  {
+    "id": "309a645630120acf827aee1dbf21e1f8",
+    "name": "SRI MURUGAN PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.267Z",
+    "updatedAt": "2026-02-18T10:47:05.267Z"
+  },
+  {
+    "id": "3bf447d4f833e78a5799a83a33448fc1",
+    "name": "SRI MURUGAN STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.267Z",
+    "updatedAt": "2026-02-18T10:47:05.267Z"
+  },
+  {
+    "id": "2d03be22205741a2b59173fc6fe04829",
+    "name": "Sri Murugan Super Stores",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.268Z",
+    "updatedAt": "2026-02-18T10:47:05.268Z"
+  },
+  {
+    "id": "f9b1980e1440100e1db60fc2d8707f84",
+    "name": "SRI MUTHARAMMAN PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.268Z",
+    "updatedAt": "2026-02-18T10:47:05.268Z"
+  },
+  {
+    "id": "afc40dc501907bccbcba37c96a4d06f6",
+    "name": "SRI NEELAGANDAN METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.268Z",
+    "updatedAt": "2026-02-18T10:47:05.268Z"
+  },
+  {
+    "id": "5ce1432787f52c798e5cb901d61d7b30",
+    "name": "SRI NEW MARKANDAVILAS PATHIRA KADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.268Z",
+    "updatedAt": "2026-02-18T10:47:05.268Z"
+  },
+  {
+    "id": "0640afc8c15efe7d0f044897028c6678",
+    "name": "SRI PONNUNADAR CORPORATION",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 43221,
+    "createdAt": "2026-02-18T10:47:05.268Z",
+    "updatedAt": "2026-02-18T10:47:05.268Z"
+  },
+  {
+    "id": "ea86fad73f11b3335da14857d9ba4c93",
+    "name": "SRI RAGAVENDRASTEELS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.269Z",
+    "updatedAt": "2026-02-18T10:47:05.269Z"
+  },
+  {
+    "id": "d4bd675dddb4a7ee58eeda37bb92a7ed",
+    "name": "SRI RAJALAKSHMI METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.269Z",
+    "updatedAt": "2026-02-18T10:47:05.269Z"
+  },
+  {
+    "id": "7de7b9bceda47f949c65c3f4c5a31b25",
+    "name": "SRIRAM AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.269Z",
+    "updatedAt": "2026-02-18T10:47:05.269Z"
+  },
+  {
+    "id": "d8126a81f77e5c68877544bb5dc41910",
+    "name": "SRI RAMA METAL STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 21719,
+    "createdAt": "2026-02-18T10:47:05.269Z",
+    "updatedAt": "2026-02-18T10:47:05.269Z"
+  },
+  {
+    "id": "5a6d29b90c5333c6a379ad8643dd98d1",
+    "name": "Sri Renuga Furnitures & Electronics",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.270Z",
+    "updatedAt": "2026-02-18T10:47:05.270Z"
+  },
+  {
+    "id": "46c911ed6aace66799cd51c47b57fb32",
+    "name": "SRI SABARI STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.270Z",
+    "updatedAt": "2026-02-18T10:47:05.270Z"
+  },
+  {
+    "id": "bdbf8798ee5126ef06c9b09982dbf720",
+    "name": "SRI SARAVANA STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 3757,
+    "createdAt": "2026-02-18T10:47:05.271Z",
+    "updatedAt": "2026-02-18T10:47:05.271Z"
+  },
+  {
+    "id": "516d085a57de03f5aee28deebb0cb995",
+    "name": "SRI SENTHILKUMARAN FURNITURES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 67050.80000000005,
+    "createdAt": "2026-02-18T10:47:05.272Z",
+    "updatedAt": "2026-02-18T10:47:05.272Z"
+  },
+  {
+    "id": "2cb45becd0bfd00f1624d5df7d956575",
+    "name": "SRI SENTHUR MURUGAN METALS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.274Z",
+    "updatedAt": "2026-02-18T10:47:05.274Z"
+  },
+  {
+    "id": "66e256fb5b4a8045beae8b33fb680e45",
+    "name": "SRI SIVASATHI STEELS HOUSE & GIFTS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.274Z",
+    "updatedAt": "2026-02-18T10:47:05.274Z"
+  },
+  {
+    "id": "936ee1e1f48e144c1e4af979360f460c",
+    "name": "SRI SRI GANAPATHY FURNITURE AND HOME APPLIANCES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.274Z",
+    "updatedAt": "2026-02-18T10:47:05.274Z"
+  },
+  {
+    "id": "52919eb73affb0763787f5bd814258f5",
+    "name": "SRI THARMA METAL STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.274Z",
+    "updatedAt": "2026-02-18T10:47:05.274Z"
+  },
+  {
+    "id": "5c65b0bf76f0b1c704cb9d8717ddcf2a",
+    "name": "SRI THENU METAL STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.274Z",
+    "updatedAt": "2026-02-18T10:47:05.274Z"
+  },
+  {
+    "id": "2a05ba314b9e3299d5f0ab1f0429d5fe",
+    "name": "SRI TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.274Z",
+    "updatedAt": "2026-02-18T10:47:05.274Z"
+  },
+  {
+    "id": "1d6a1ffd651530550cc29eb285b353f1",
+    "name": "SRI VALLI METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.274Z",
+    "updatedAt": "2026-02-18T10:47:05.274Z"
+  },
+  {
+    "id": "58cad6066baddfb0d9589cd4cc56554b",
+    "name": "SRI VASAVI EVERSILVER MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.275Z",
+    "updatedAt": "2026-02-18T10:47:05.275Z"
+  },
+  {
+    "id": "07b4bd6b02621c1e5aab5e33164bda29",
+    "name": "SRI VENKADESHWARA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 10636,
+    "createdAt": "2026-02-18T10:47:05.275Z",
+    "updatedAt": "2026-02-18T10:47:05.275Z"
+  },
+  {
+    "id": "609eb8a834adb2e1960b59aff427ff5a",
+    "name": "SRI VENKATESHWARA PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.277Z",
+    "updatedAt": "2026-02-18T10:47:05.277Z"
+  },
+  {
+    "id": "22cbc584c7b692b1dd9125dd31f948c5",
+    "name": "SRI VIGNESHWARRA RADIOS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 21426,
+    "createdAt": "2026-02-18T10:47:05.277Z",
+    "updatedAt": "2026-02-18T10:47:05.277Z"
+  },
+  {
+    "id": "fbb6b63a4f8f63a04c5b959a9116e698",
+    "name": "SRI VINAYAGA AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 88743,
+    "createdAt": "2026-02-18T10:47:05.277Z",
+    "updatedAt": "2026-02-18T10:47:05.277Z"
+  },
+  {
+    "id": "f41ae398eb5e98d13f9b81a99edbb50e",
+    "name": "SRI VINAYAGA METALS & HOME NEEDS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 3334,
+    "createdAt": "2026-02-18T10:47:05.279Z",
+    "updatedAt": "2026-02-18T10:47:05.279Z"
+  },
+  {
+    "id": "781241e76fadb0a5ee0b732b8f562db6",
+    "name": "SRI VINAYAGA TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.289Z",
+    "updatedAt": "2026-02-18T10:47:05.289Z"
+  },
+  {
+    "id": "951521ec03fdca2719dec35170fc57d8",
+    "name": "SRI VISALATCHI VILAS P.R.A.ATHMALINGAM &SONS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.289Z",
+    "updatedAt": "2026-02-18T10:47:05.289Z"
+  },
+  {
+    "id": "80327ac7b308eb2943120e8df1119776",
+    "name": "S.R.STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.290Z",
+    "updatedAt": "2026-02-18T10:47:05.290Z"
+  },
+  {
+    "id": "e677737789de88bc72c20e3ef471dfbe",
+    "name": "STAR  AGENCY",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.290Z",
+    "updatedAt": "2026-02-18T10:47:05.290Z"
+  },
+  {
+    "id": "304206cc7d25e7c6e5824303f6833e8d",
+    "name": "Star Electronics",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.290Z",
+    "updatedAt": "2026-02-18T10:47:05.290Z"
+  },
+  {
+    "id": "cdf9b80c10bcd12134e1c42f3b6d4180",
+    "name": "STOCK RETURN",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 22800,
+    "createdAt": "2026-02-18T10:47:05.290Z",
+    "updatedAt": "2026-02-18T10:47:05.290Z"
+  },
+  {
+    "id": "bb1ac3f9597f43f4bdcc35e2a242fccd",
+    "name": "SUBA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.291Z",
+    "updatedAt": "2026-02-18T10:47:05.291Z"
+  },
+  {
+    "id": "de5e3f59a65500633d49dbb35b6cbb63",
+    "name": "SUBAM FURNITURES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 9381,
+    "createdAt": "2026-02-18T10:47:05.291Z",
+    "updatedAt": "2026-02-18T10:47:05.291Z"
+  },
+  {
+    "id": "5d50f873091ebf15dbe7114d25834304",
+    "name": "SUPER METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.291Z",
+    "updatedAt": "2026-02-18T10:47:05.291Z"
+  },
+  {
+    "id": "9144865fc485ed9cf626f19d1858dfa2",
+    "name": "SURYA FURNITURE",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 14700,
+    "createdAt": "2026-02-18T10:47:05.291Z",
+    "updatedAt": "2026-02-18T10:47:05.291Z"
+  },
+  {
+    "id": "3f3c32cded45612a0563764ff31fd29a",
+    "name": "Suyambu Enterprises",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -192558.78,
+    "createdAt": "2026-02-18T10:47:05.294Z",
+    "updatedAt": "2026-02-18T10:47:05.294Z"
+  },
+  {
+    "id": "48f97317ac9a42d9c08d6cd8d605794c",
+    "name": "S.V.&CO",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.294Z",
+    "updatedAt": "2026-02-18T10:47:05.294Z"
+  },
+  {
+    "id": "30935a0ef6d896aafb387a6d7f69b80a",
+    "name": "SVM METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.294Z",
+    "updatedAt": "2026-02-18T10:47:05.294Z"
+  },
+  {
+    "id": "e52e9877a30d30c690b7e8d8bc50abb5",
+    "name": "S.V.S. METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.294Z",
+    "updatedAt": "2026-02-18T10:47:05.294Z"
+  },
+  {
+    "id": "9e0cc4a78849f4b9129ed4d7e1cf07bf",
+    "name": "SWETA TRADING",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -67793.14,
+    "createdAt": "2026-02-18T10:47:05.294Z",
+    "updatedAt": "2026-02-18T10:47:05.294Z"
+  },
+  {
+    "id": "cc15d37ddb9fe486e7c2049df8fe3381",
+    "name": "THAMARAI SELVI TRADERS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.294Z",
+    "updatedAt": "2026-02-18T10:47:05.294Z"
+  },
+  {
+    "id": "f2b59873e021565e742a731e17d8cb91",
+    "name": "THE CHEANNI & CO",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.295Z",
+    "updatedAt": "2026-02-18T10:47:05.295Z"
+  },
+  {
+    "id": "e7c333b2da5228326a12d9ad6b3e8a5a",
+    "name": "THIRUMAGAL METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.295Z",
+    "updatedAt": "2026-02-18T10:47:05.295Z"
+  },
+  {
+    "id": "824931a6936c69936d27c80a1c16518a",
+    "name": "THIRUPATHI COIRS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.295Z",
+    "updatedAt": "2026-02-18T10:47:05.295Z"
+  },
+  {
+    "id": "7a57091752fb152ff0223024aa5a3f12",
+    "name": "TIP TOP FURNITURES& HOME APPLIANCES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 2774,
+    "createdAt": "2026-02-18T10:47:05.295Z",
+    "updatedAt": "2026-02-18T10:47:05.295Z"
+  },
+  {
+    "id": "83b2bf3c43f2c191ab0c5a66b8756215",
+    "name": "TIRUPUR PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.295Z",
+    "updatedAt": "2026-02-18T10:47:05.295Z"
+  },
+  {
+    "id": "7c5ccd9c2f9b6ff11f47f55b0d13a75b",
+    "name": "TMB BANK",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.295Z",
+    "updatedAt": "2026-02-18T10:47:05.295Z"
+  },
+  {
+    "id": "1b498f5e8ce01ee4a9520ae53addb47b",
+    "name": "TMB OD",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -27138220.48,
+    "createdAt": "2026-02-18T10:47:05.295Z",
+    "updatedAt": "2026-02-18T10:47:05.295Z"
+  },
+  {
+    "id": "6bb8ebc9e151e2212ac826d5e35b7e4c",
+    "name": "Transport Charges",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -36732.84,
+    "createdAt": "2026-02-18T10:47:05.320Z",
+    "updatedAt": "2026-02-18T10:47:05.320Z"
+  },
+  {
+    "id": "167c8503454932b60c8bab12294013d0",
+    "name": "UDHYAM AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.320Z",
+    "updatedAt": "2026-02-18T10:47:05.320Z"
+  },
+  {
+    "id": "71f829578e56a0d03b7bb8d69bbaf7b7",
+    "name": "UTTAM AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -11094.36,
+    "createdAt": "2026-02-18T10:47:05.320Z",
+    "updatedAt": "2026-02-18T10:47:05.320Z"
+  },
+  {
+    "id": "f16f85fc607b923a11f44d093c1aa686",
+    "name": "VADIVEL PATHIRAKADAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.320Z",
+    "updatedAt": "2026-02-18T10:47:05.320Z"
+  },
+  {
+    "id": "362b24f2ac836660a61f17c36b5a98a6",
+    "name": "VALLI ELECTRONICS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 20371,
+    "createdAt": "2026-02-18T10:47:05.321Z",
+    "updatedAt": "2026-02-18T10:47:05.321Z"
+  },
+  {
+    "id": "0ec542ad114c75ce13732e7df2569e8d",
+    "name": "VARDHAMAN INTERNATIONAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -105645.36,
+    "createdAt": "2026-02-18T10:47:05.321Z",
+    "updatedAt": "2026-02-18T10:47:05.321Z"
+  },
+  {
+    "id": "324d62c28db5fb94ea62db37e26e0844",
+    "name": "VASANTHA MALIGAI",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.321Z",
+    "updatedAt": "2026-02-18T10:47:05.321Z"
+  },
+  {
+    "id": "813af9c55c35c66c31c55c736798e4a3",
+    "name": "Velmurugan",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": -52000,
+    "createdAt": "2026-02-18T10:47:05.322Z",
+    "updatedAt": "2026-02-18T10:47:05.322Z"
+  },
+  {
+    "id": "ab971a5ddac32cdeecfafd8cf18b8911",
+    "name": "VELMURUGAN FURNITURE SHOWROOM",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.322Z",
+    "updatedAt": "2026-02-18T10:47:05.322Z"
+  },
+  {
+    "id": "c436f4c2d5989238bd8cf21948274e3a",
+    "name": "VENKATESHWARA METAL MART",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.322Z",
+    "updatedAt": "2026-02-18T10:47:05.322Z"
+  },
+  {
+    "id": "f468d546a519718629c8aa0d6d6f5624",
+    "name": "VENKATESHWARA METAL WORKS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.322Z",
+    "updatedAt": "2026-02-18T10:47:05.322Z"
+  },
+  {
+    "id": "428628609872197d8751d4de42a3d467",
+    "name": "VENKATESWARA METAL",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.322Z",
+    "updatedAt": "2026-02-18T10:47:05.322Z"
+  },
+  {
+    "id": "31111c5e9e4d95f781e0de6ee32ce4b1",
+    "name": "VIGNESH AGENCY",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.322Z",
+    "updatedAt": "2026-02-18T10:47:05.322Z"
+  },
+  {
+    "id": "f83aa3dbcdbe00e6578a4c6ccd30aa28",
+    "name": "VIMALNATH AGENCIES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 1499.9999999999418,
+    "createdAt": "2026-02-18T10:47:05.322Z",
+    "updatedAt": "2026-02-18T10:47:05.322Z"
+  },
+  {
+    "id": "a5c8f519bdd4e631e9a47c467ed53ad2",
+    "name": "V.M.SILKS",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.323Z",
+    "updatedAt": "2026-02-18T10:47:05.323Z"
+  },
+  {
+    "id": "ceedf8e38033bc9e05e63ad95ac65a98",
+    "name": "V.V.G.STORES",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 0,
+    "createdAt": "2026-02-18T10:47:05.323Z",
+    "updatedAt": "2026-02-18T10:47:05.323Z"
+  },
+  {
+    "id": "43d3b8a6573b14e9b586d8a4b978da48",
+    "name": "V.V. Metal",
+    "address": "",
+    "gstNumber": "",
+    "email": "",
+    "balance": 21710,
+    "createdAt": "2026-02-18T10:47:05.323Z",
+    "updatedAt": "2026-02-18T10:47:05.323Z"
+  }
+]

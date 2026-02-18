@@ -1,0 +1,271 @@
+Reading file: D:\Sri Vari Enterprises software\Tally.xlsx
+Starting row processing... Total rows: 33626
+Processing Ledger: ABIRAMI METAL
+Processing Ledger: 
+Processing Ledger: Allowence
+Processing Ledger: AMMAN AGENCIES
+Processing Ledger: AMMU FURNITURE
+Processing Ledger: ANANDA METAL
+Processing Ledger: ANANTHA METALS
+Processing Ledger: Angappan
+Processing Ledger: ANNAI VALAGGANNI METALS
+Processing Ledger: ANNA PATHIRA ANGADI
+Processing Ledger: ANNOR MAHALAKSHMI METALS
+Processing Ledger: ANNOR TAMIL KUMARAN
+Processing Ledger: 
+Processing Ledger: ARASU FURNITURE
+Processing Ledger: Aravind
+Processing Ledger: ARUN RUBBER PRODUCTS
+Processing Ledger: ASHMITHA METAL MART
+Processing Ledger: ASIRWATHAM STEEL HOUSE
+Processing Ledger: ASWINTH
+Processing Ledger: BANK
+Processing Ledger: Cash
+Processing Ledger: CASH DISCOUNT
+Processing Ledger: CATHOLIC SYRIAN BANK
+Processing Ledger: CGST
+Processing Ledger: CHANDHRA METAL MART
+Processing Ledger: CHELLA HOME NEEDS
+Processing Ledger: CHEQUE
+Processing Ledger: CHEQUE RETURN CHARGES
+Processing Ledger: CHEQUES
+Processing Ledger: COONOOR DEVI STORES
+Processing Ledger: DEVALA METAL
+Processing Ledger: DHAKSHAN RUBBER TECHNOLOGIST
+Processing Ledger: DHANUJA METAL MART
+Processing Ledger: DINDUGAL APPLIANCES AND SERVICES
+Processing Ledger: Dindugul Electric Spares
+Processing Ledger: Discount Allowed
+Processing Ledger: DISSCOUNT( ALLOWED)
+Processing Ledger: ELLORE AMMAN PATHIRAKADAI
+Processing Ledger: FRIEGHT CHARGES
+Processing Ledger: GANESH METAL MART
+Processing Ledger: G.G.T. HOME PLANET
+Processing Ledger: GIFTS & METAL
+Processing Ledger: G KRISH INDUSTRIES
+Processing Ledger: Gopalakrishnan
+Processing Ledger: IGST
+Processing Ledger: INDIAN METAL MART
+Processing Ledger: JAGAN SUPER STORE
+Processing Ledger: JAIN BROTHERS
+Processing Ledger: JAIN METAL STORE
+Processing Ledger: JANATHA METALS
+Processing Ledger: JAYAM AGENCIES
+Processing Ledger: JAYAM TRADERS
+Processing Ledger: JEEVA METAL
+Processing Ledger: JEYAM DEPARTMENT
+Processing Ledger: Jeyam Furnitures
+Processing Ledger: JEYARATHNA METAL MART
+Processing Ledger: KAABA FURNITUES
+Processing Ledger: Kaja Mydeen
+Processing Ledger: KAJA STEELS & FURNITURE
+Processing Ledger: KALAVATHI METAL
+Processing Ledger: Kaliappan
+Processing Ledger: KAMATCHI METAL
+Processing Ledger: Kamatchi Steel House
+Processing Ledger: KANI STORES & METAL
+Processing Ledger: KARTHIKEYAN STEEL HOUSE
+Processing Ledger: KAVI TRADERS
+Processing Ledger: K.K.THIRUKAIVEL METAL
+Processing Ledger: KUMARAN PATTIRA MALIGAI
+Processing Ledger: Kumbakonam Pathirakadai
+Processing Ledger: LAKSHMI COOKWARE
+Processing Ledger: LAKSHMI METAL
+Processing Ledger: LAKSHMI METAL CORPORATION
+Processing Ledger: LAKSHMI METAL MART
+Processing Ledger: LATHA METAL
+Processing Ledger: LAXMI METALS
+Processing Ledger: LOTUS DEPARTMENT
+Processing Ledger: LUCKY METAL PLAZA
+Processing Ledger: LULU SUPER MARKET
+Processing Ledger: MADAN METAL
+Processing Ledger: MADHENA METAL STORE
+Processing Ledger: MADRAS METAL
+Processing Ledger: MAGESH GAS SERVICE
+Processing Ledger: Mahaboob
+Processing Ledger: Mahalakshmi Metals Stores
+Processing Ledger: MAHA METAL MART
+Processing Ledger: MAHARAJA STORES
+Processing Ledger: MAHARASI METAL MART AND FURNITURES
+Processing Ledger: MANGAL & MANGAL
+Processing Ledger: MANI  PLASTIC
+Processing Ledger: MARUTHI STEELS
+Processing Ledger: MAYURA AGENCIES
+Processing Ledger: M DEALS
+Processing Ledger: MEEN MARK METAL CORPORATION
+Processing Ledger: MEGA METAL
+Processing Ledger: MKV CAPITAL
+Processing Ledger: M/S.CHERAN METALS
+Processing Ledger: M/S.GEETHAM AGENCIES
+Processing Ledger: M.S.HARI FURNITURES & ELECTRONICS
+Processing Ledger: MUKESK ELECTRICALS AND HOME APPLIANCES
+Processing Ledger: MUTHU METAL
+Processing Ledger: MUTHU METAL MART
+Processing Ledger: NARAYANA PATHIRAKADAI
+Processing Ledger: Nataraj Metal
+Processing Ledger: NATIONAL ERUMAD
+Processing Ledger: National Metal Industries
+Processing Ledger: NEFT
+Processing Ledger: NEW AYSHA TRADERS
+Processing Ledger: New Aysha Traders (Branch)
+Processing Ledger: NEW LUCKY METAL
+Processing Ledger: NEW PREMIER STEELS AND GIFTS
+Processing Ledger: NRG METAL MART
+Processing Ledger: O.N.K.TRADERS
+Processing Ledger: PALANIYAPPA METAL MART
+Processing Ledger: P.K.S. SILKS
+Processing Ledger: PNB KITCHENMATE LIMITED
+Processing Ledger: PONMANI STEEL HOUSE
+Processing Ledger: PONNU CORPORATION
+Processing Ledger: PRABHA METAL MART
+Processing Ledger: PRABU METAL STORE
+Processing Ledger: PRAKESH STEEL HOUSE
+Processing Ledger: Priyadarshini Metal
+Processing Ledger: PRIYADARSHINI METAL MART
+Processing Ledger: PRIYA HOME CENTER
+Processing Ledger: Priya Shopping Centre
+Processing Ledger: Puli Godown
+Processing Ledger: Purchase
+Processing Ledger: PUSHPAM METALS
+Processing Ledger: PUSHPAVALLI STORES
+Processing Ledger: QUEETA STORES
+Processing Ledger: RAJA FURNITURES & ELECTRONICS
+Processing Ledger: RAJALAKSHMI  ENTERPRISES
+Processing Ledger: RAO RUBBER INDUSTRIES
+Processing Ledger: REKHA METAL STORES
+Processing Ledger: RENGAA STORES
+Processing Ledger: RENUGA ENTERPRISES
+Processing Ledger: Rex Ooty
+Processing Ledger: ROUND OFF
+Processing Ledger: ROYAL FURNITURES
+Processing Ledger: R.VINAYAGAN STORES
+Processing Ledger: S.A.B.MEGA MALL
+Processing Ledger: SALES
+Processing Ledger: Sales Return
+Processing Ledger: Sales Returns
+Processing Ledger: SANMUGA AGENCIES
+Processing Ledger: SARAVANA METALS
+Processing Ledger: SARAVANA STORES
+Processing Ledger: SATHI SIVAN METAL MART
+Processing Ledger: Sawan
+Processing Ledger: SCRAB
+Processing Ledger: SELVAKUMAR METAL  MART
+Processing Ledger: SELVAM METAL STORES
+Processing Ledger: SELVAM VESSEL STORES
+Processing Ledger: SGST
+Processing Ledger: SHANTHINATH  STEELS & HOME APPLIANCES
+Processing Ledger: SHRI BALAMURUGAN STORES
+Processing Ledger: Shri Krishna Metals
+Processing Ledger: SHRI LAKSHMI SUPER MARKET
+Processing Ledger: SHRISARAVANA STORES
+Processing Ledger: SINGARAVELAN METAL MART
+Processing Ledger: SITHARA FURNITURE & HOME APPLIANCES
+Processing Ledger: SIVAM STEEL HOUSE
+Processing Ledger: SIVA PLASTICS
+Processing Ledger: SIVASATHI AGENCY
+Processing Ledger: SIVA SATHI STEEL HOUSE
+Processing Ledger: S.J STEEL HOUSE
+Processing Ledger: S.K.ENTERPRISE
+Processing Ledger: S.K. ENTERPRISES
+Processing Ledger: SOWBAKYA FURNITURE AND T.V MART
+Processing Ledger: S.P.METAL MART
+Processing Ledger: S.P.S. STEELS&GIFTS
+Processing Ledger: SREE LAKSHMI VILAS PATHIRAKADAI
+Processing Ledger: SREERAJALAKSHMI PATHIRA ANGADI
+Processing Ledger: SREE RAMNATH AGENCIES
+Processing Ledger: SREE RASALAKSHMI METAL MART
+Processing Ledger: SREE RASALAKSHMI  METAL MARTS
+Processing Ledger: SREE SATHI METAL MART
+Processing Ledger: SRI AANUR TRADERS
+Processing Ledger: SRI ABIRAMI METAL STORES
+Processing Ledger: SRI AMBIKA METALS AND TRADERS
+Processing Ledger: SRI ANNAI PATHIRAKADAI
+Processing Ledger: SRI GANAPATHY STORES
+Processing Ledger: SRI GOKULAM ENTERPRISES
+Processing Ledger: SRI KRISHNA FURNITURES&HOME APPLIANCES
+Processing Ledger: SRI KRISHNA METAL
+Processing Ledger: SRI KUMARAN METAL MART&STROES
+Processing Ledger: SRI KUMARAN STORES
+Processing Ledger: SRI LAKSHIMI STEEL HOUSE
+Processing Ledger: SRI LAKSHMI STORES
+Processing Ledger: SRI LAKSHMI VILAS METAL
+Processing Ledger: SRI MAHAA GANAPATHI TEXTILES
+Processing Ledger: SRI MAHALAKSHMI FURNITURE
+Processing Ledger: SRI MARUTHI ELECTRONICS
+Processing Ledger: SRI MEENMARK EVERSILVER SHOWROOM
+Processing Ledger: SRI MURUGAN AGENCIES
+Processing Ledger: SRI MURUGAN METAL MART
+Processing Ledger: SRI MURUGAN METAL MART KODUMUDI
+Processing Ledger: SRI MURUGAN METAL MARTS
+Processing Ledger: SRI MURUGAN PATHIRAKADAI
+Processing Ledger: SRI MURUGAN STORES
+Processing Ledger: Sri Murugan Super Stores
+Processing Ledger: SRI MUTHARAMMAN PATHIRAKADAI
+Processing Ledger: SRI NEELAGANDAN METAL MART
+Processing Ledger: SRI NEW MARKANDAVILAS PATHIRA KADAI
+Processing Ledger: SRI PONNUNADAR CORPORATION
+Processing Ledger: SRI RAGAVENDRASTEELS
+Processing Ledger: SRI RAJALAKSHMI METALS
+Processing Ledger: SRIRAM AGENCIES
+Processing Ledger: SRI RAMA METAL STORES
+Processing Ledger: Sri Renuga Furnitures & Electronics
+Processing Ledger: SRI SABARI STORES
+Processing Ledger: SRI SARAVANA STORES
+Processing Ledger: SRI SENTHILKUMARAN FURNITURES
+Processing Ledger: SRI SENTHUR MURUGAN METALS
+Processing Ledger: SRI SIVASATHI STEELS HOUSE & GIFTS
+Processing Ledger: SRI SRI GANAPATHY FURNITURE AND HOME APPLIANCES
+Processing Ledger: SRI THARMA METAL STORES
+Processing Ledger: SRI THENU METAL STORES
+Processing Ledger: SRI TRADERS
+Processing Ledger: SRI VALLI METAL
+Processing Ledger: SRI VASAVI EVERSILVER MART
+Processing Ledger: SRI VENKADESHWARA METAL MART
+Processing Ledger: SRI VENKATESHWARA PATHIRAKADAI
+Processing Ledger: SRI VIGNESHWARRA RADIOS
+Processing Ledger: SRI VINAYAGA AGENCIES
+Processing Ledger: SRI VINAYAGA METALS & HOME NEEDS
+Processing Ledger: SRI VINAYAGA TRADERS
+Processing Ledger: SRI VISALATCHI VILAS P.R.A.ATHMALINGAM &SONS
+Processing Ledger: S.R.STORES
+Processing Ledger: STAR  AGENCY
+Processing Ledger: Star Electronics
+Processing Ledger: STOCK RETURN
+Processing Ledger: SUBA METAL
+Processing Ledger: SUBAM FURNITURES
+Processing Ledger: SUPER METAL MART
+Processing Ledger: SURYA FURNITURE
+Processing Ledger: Suyambu Enterprises
+Processing Ledger: S.V.&CO
+Processing Ledger: SVM METAL
+Processing Ledger: S.V.S. METAL
+Processing Ledger: SWETA TRADING
+Processing Ledger: THAMARAI SELVI TRADERS
+Processing Ledger: THE CHEANNI & CO
+Processing Ledger: THIRUMAGAL METAL
+Processing Ledger: THIRUPATHI COIRS
+Processing Ledger: TIP TOP FURNITURES& HOME APPLIANCES
+Processing Ledger: TIRUPUR PATHIRAKADAI
+Processing Ledger: TMB BANK
+Processing Ledger: TMB OD
+Processing Ledger: Transport Charges
+Processing Ledger: UDHYAM AGENCIES
+Processing Ledger: UTTAM AGENCIES
+Processing Ledger: VADIVEL PATHIRAKADAI
+Processing Ledger: VALLI ELECTRONICS
+Processing Ledger: VARDHAMAN INTERNATIONAL
+Processing Ledger: VASANTHA MALIGAI
+Processing Ledger: Velmurugan
+Processing Ledger: VELMURUGAN FURNITURE SHOWROOM
+Processing Ledger: VENKATESHWARA METAL MART
+Processing Ledger: VENKATESHWARA METAL WORKS
+Processing Ledger: VENKATESWARA METAL
+Processing Ledger: VIGNESH AGENCY
+Processing Ledger: VIMALNATH AGENCIES
+Processing Ledger: V.M.SILKS
+Processing Ledger: V.V.G.STORES
+Processing Ledger: V.V. Metal
+Extracted 262 suppliers.
+Extracted 15751 bills.
+Extracted 14559 payments.
+Migration files created.

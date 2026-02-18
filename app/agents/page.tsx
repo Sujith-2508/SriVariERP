@@ -36,6 +36,10 @@ export default function AgentsPage() {
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
 
+    // Filter for active agents for Overview and Tracking tabs
+    const activeAgents = agents.filter(a => a.isActive);
+    const activeTrackingData = trackingData.filter(d => d.agent.isActive);
+
     const getAgentCollections = (agentName: string) => {
         return transactions
             .filter(t => {
@@ -223,7 +227,7 @@ export default function AgentsPage() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-slate-500">Total Agents</p>
-                                        <p className="text-2xl font-bold text-slate-800">{agents.length}</p>
+                                        <p className="text-2xl font-bold text-slate-800">{activeAgents.length}</p>
                                     </div>
                                 </div>
                             </div>
@@ -235,7 +239,7 @@ export default function AgentsPage() {
                                     <div>
                                         <p className="text-sm text-slate-500">Total Target</p>
                                         <p className="text-2xl font-bold text-slate-800">
-                                            ₹{agents.reduce((acc, a) => acc + (a.collectionTarget || 100000), 0).toLocaleString()}
+                                            ₹{activeAgents.reduce((acc, a) => acc + (a.collectionTarget || 100000), 0).toLocaleString()}
                                         </p>
                                     </div>
                                 </div>
@@ -248,7 +252,7 @@ export default function AgentsPage() {
                                     <div>
                                         <p className="text-sm text-slate-500">This Month Collected</p>
                                         <p className="text-2xl font-bold text-slate-800">
-                                            ₹{agents.reduce((acc, a) => acc + getAgentCollections(a.name), 0).toLocaleString()}
+                                            ₹{activeAgents.reduce((acc, a) => acc + getAgentCollections(a.name), 0).toLocaleString()}
                                         </p>
                                     </div>
                                 </div>
@@ -277,15 +281,15 @@ export default function AgentsPage() {
                                                 Loading agents...
                                             </td>
                                         </tr>
-                                    ) : agents.length === 0 ? (
+                                    ) : activeAgents.length === 0 ? (
                                         <tr>
                                             <td colSpan={8} className="text-center py-12 text-slate-400">
                                                 <Users size={48} className="mx-auto mb-3 opacity-50" />
-                                                <p>No agents yet. Add your first agent!</p>
+                                                <p>No active agents. Add your first agent!</p>
                                             </td>
                                         </tr>
                                     ) : (
-                                        agents.map(agent => {
+                                        activeAgents.map(agent => {
                                             const collected = getAgentCollections(agent.name);
                                             const target = agent.collectionTarget || 100000;
                                             const percentage = Math.round((collected / target) * 100);
@@ -386,7 +390,7 @@ export default function AgentsPage() {
                             </div>
                         )}
                         <LiveMap
-                            agentData={trackingData}
+                            agentData={activeTrackingData}
                             selectedAgentId={selectedAgent?.id}
                             onAgentClick={(id) => {
                                 if (id) {
@@ -400,7 +404,7 @@ export default function AgentsPage() {
                     </div>
                     <div className="w-80 border-l border-slate-200">
                         <AgentStatusList
-                            agentData={trackingData}
+                            agentData={activeTrackingData}
                             selectedAgentId={selectedAgent?.id}
                             onAgentClick={(id) => {
                                 // Find the agent object to set it as selected

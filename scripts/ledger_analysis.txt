@@ -1,0 +1,149 @@
+Total Ledgers Found: 265
+Potential Suppliers (Creditors): 36
+Potential Customers (Debtors): 236
+
+--- POTENTIAL SUPPLIERS ---
+Name: Allowence
+Address: Particulars
+Counts - Purchase: 0, Payment: 4, Sales: 0, Receipt: 0
+
+Name: Angappan
+Address: Particulars
+Counts - Purchase: 0, Payment: 4, Sales: 0, Receipt: 0
+
+Name: Aravind
+Address: Particulars
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: ASWINTH
+Address: Particulars
+Counts - Purchase: 0, Payment: 3, Sales: 0, Receipt: 0
+
+Name: BANK
+Address: Particulars
+Counts - Purchase: 0, Payment: 29, Sales: 0, Receipt: 15
+
+Name: Cash
+Address: Particulars
+Counts - Purchase: 16, Payment: 102, Sales: 23, Receipt: 2182
+
+Name: CASH DISCOUNT
+Address: Particulars
+Counts - Purchase: 0, Payment: 3, Sales: 7, Receipt: 397
+
+Name: CATHOLIC SYRIAN BANK
+Address: COIMBATORE ROAD, CNRB0000079 - 642001
+Counts - Purchase: 0, Payment: 5, Sales: 0, Receipt: 1
+
+Name: CGST
+Address: Particulars
+Counts - Purchase: 17, Payment: 0, Sales: 2967, Receipt: 0
+
+Name: DHAKSHAN RUBBER TECHNOLOGIST
+Address: 102,SIDCO INDUSTRIAL ESTATE, KAPPALUR, MADURAI-625008, GST.NO:33BUPPB3957D1ZQ, CELL:6380809963
+Counts - Purchase: 0, Payment: 2, Sales: 0, Receipt: 0
+
+Name: G KRISH INDUSTRIES
+Address: NO.186/10,SOWRASTRA 1ST STREET, ILLUPUR TALUK, PUDUKKOTTAI, GST.NO:33APXPY7028Q1ZL
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: Gopalakrishnan
+Address: Particulars
+Counts - Purchase: 0, Payment: 6, Sales: 0, Receipt: 0
+
+Name: JAIN BROTHERS
+Address: KESHAR GANJ MANDI LAKKAR BAZAR, NEAR GOVT HIGH SCHOOL, GST.NO:03AEWPJ0840B1ZW
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: Kaja Mydeen
+Address: Particulars
+Counts - Purchase: 0, Payment: 6, Sales: 0, Receipt: 0
+
+Name: Kaliappan
+Address: Particulars
+Counts - Purchase: 0, Payment: 23, Sales: 0, Receipt: 0
+
+Name: LAKSHMI COOKWARE
+Address: NO.28,SIDCO INDUSTRIAL ESTATE, TIRUNELVELI, CELL:9487211000, GST.NO:33ADYPR9635D1ZY
+Counts - Purchase: 0, Payment: 308, Sales: 1, Receipt: 1
+
+Name: Mahaboob
+Address: Particulars
+Counts - Purchase: 0, Payment: 53, Sales: 0, Receipt: 0
+
+Name: M DEALS
+Address: 34  1&2ND FLOOR  KHB  COLONY, GANDHI NAGAR YELAHANKA OLD TOWN, BANGALORE, GST.NO:29ATRPK3679F1Z0
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: MUTHU METAL
+Address: 297,MARKET ROAD POLLACHI, GST.NO:33ABTPT3174G1Z9, CELL:9487685194  7904733162
+Counts - Purchase: 1, Payment: 1, Sales: 153, Receipt: 1
+
+Name: NEFT
+Address: Particulars
+Counts - Purchase: 0, Payment: 81, Sales: 0, Receipt: 301
+
+Name: PNB KITCHENMATE LIMITED
+Address: NO,118 H,PHASE -V HSIIDC,SECTOR-56, INDUSTRIAL ESTATE,KUNDLI, HARYANA -131028, GST.NO: 06AADCS9633D1ZE - 131028
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: Puli Godown
+Address: Particulars
+Counts - Purchase: 0, Payment: 55, Sales: 0, Receipt: 0
+
+Name: Purchase
+Address: Particulars
+Counts - Purchase: 17, Payment: 0, Sales: 0, Receipt: 0
+
+Name: PUSHPAM METALS
+Address: 87C,KAMARAJ BAZZAR THEVARSILAI NEAR, BODINAYAKANUR, THENI, GSTIN:33DESPK5657A1ZE
+Counts - Purchase: 0, Payment: 1, Sales: 8, Receipt: 12
+
+Name: RAO RUBBER INDUSTRIES
+Address: K-2/57.DDA MARKET JAHANGIR PURI, DELHI 110033, INDIA, CELL:8700038958, GST.NO:07ABYPY5337K1ZK
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: RENUGA ENTERPRISES
+Address: MUTHUR ROAD SINNIYAMPALAYAM, GST.NO:33APAPS7617G1ZW
+Counts - Purchase: 0, Payment: 1, Sales: 3, Receipt: 3
+
+Name: Sawan
+Address: 21 Snehlataganj, Near Bhandari Bridge, GST.NO:23ACPPK3918A1ZX
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: SCRAB
+Address: Particulars
+Counts - Purchase: 0, Payment: 13, Sales: 0, Receipt: 300
+
+Name: SGST
+Address: Particulars
+Counts - Purchase: 17, Payment: 0, Sales: 2964, Receipt: 0
+
+Name: Suyambu Enterprises
+Address: Shed No.8&9, Y.K.Reddybprorerty, Pampa Nagar<near Byeramma Kaiayana Mantapa, Yeshwanthpur <banglaiore, Cell:6361756951, Gst.No:29bcdpk9463m1zv
+Counts - Purchase: 0, Payment: 2, Sales: 0, Receipt: 0
+
+Name: SWETA TRADING
+Address: BILASPUR PATAUDI ROAD  GURUGRAM, GST.NO:06AIMPT2367D1Z3
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: TMB OD
+Address: Particulars
+Counts - Purchase: 0, Payment: 238, Sales: 0, Receipt: 2699
+
+Name: Transport Charges
+Address: Particulars
+Counts - Purchase: 0, Payment: 2, Sales: 4, Receipt: 0
+
+Name: UTTAM AGENCIES
+Address: 13/7 ,12TH CROSS 4TH MAIN, SAMPANGIRAM NAGAR, BANGALORE, PHONE:08041530047   22243616, GST.NO:29ADIPJ5372K1Z2
+Counts - Purchase: 0, Payment: 1, Sales: 0, Receipt: 0
+
+Name: VARDHAMAN INTERNATIONAL
+Address: NO.155,1ST FLOOR ,RANGA CHAMBER, RV ROAD VV PURAM,BANGALORE, CELL:9538590681, GST.NO:29ANBPK6241K1ZT - 560004
+Counts - Purchase: 0, Payment: 2, Sales: 0, Receipt: 0
+
+Name: Velmurugan
+Address: Particulars
+Counts - Purchase: 0, Payment: 4, Sales: 0, Receipt: 0
+
