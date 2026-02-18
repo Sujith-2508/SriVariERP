@@ -15,7 +15,9 @@
     "@react-google-maps/api": "^2.20.8",
     "@supabase/supabase-js": "^2.93.3",
     "@types/leaflet": "^1.9.21",
+    "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "framer-motion": "^12.34.1",
     "jspdf": "^4.1.0",
     "jspdf-autotable": "^5.0.7",
     "leaflet": "^1.9.4",
@@ -26,6 +28,7 @@
     "react-dom": "^19.0.0",
     "react-leaflet": "^5.0.0",
     "recharts": "^2.15.0",
+    "tailwind-merge": "^3.4.1",
     "whatsapp-web.js": "^1.34.6"
   },
   "devDependencies": {

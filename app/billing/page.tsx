@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Dealer, InvoiceItem, Product, CompanySettings, TransactionType } from '@/types';
-import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2 } from 'lucide-react';
+import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2, Edit } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -23,6 +23,7 @@ export default function Billing() {
     const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
+    const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
     const [generatedRef, setGeneratedRef] = useState<string>('');
     const [showPrintPreview, setShowPrintPreview] = useState(false);
     const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
@@ -117,6 +118,7 @@ export default function Billing() {
     // Product Selection State
     const [itemProduct, setItemProduct] = useState<Product | null>(null);
     const [itemQty, setItemQty] = useState<string>('1');
+    const [qtyError, setQtyError] = useState<string | null>(null);
 
     // Transport & Invoice Details
     const [vehicleName, setVehicleName] = useState('');
@@ -162,11 +164,14 @@ export default function Billing() {
     };
 
     // Initialize Manual Invoice Number
+    const isInvoiceInitialized = useRef(false);
     useEffect(() => {
-        if (!editInvoiceId && !manualInvoiceNo) {
+        if (!editInvoiceId && !isInvoiceInitialized.current && transactions.length > 0) {
             setManualInvoiceNo(String(transactions.filter(t => t.type === 'INVOICE').length + 1).padStart(3, '0'));
+            isInvoiceInitialized.current = true;
         }
-    }, [transactions, editInvoiceId, manualInvoiceNo]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [transactions, editInvoiceId]);
 
     // Load Company Settings
     // Load Company Settings
@@ -244,6 +249,30 @@ export default function Billing() {
                 setInvoiceDate(new Date(txn.date).toISOString().split('T')[0]);
             }
 
+            // Parse Notes for additional fields
+            if (txn.notes) {
+                try {
+                    const notes = JSON.parse(txn.notes);
+                    setBuyerOrderNo(notes.buyerOrderNo || '');
+                    setBuyerOrderDate(notes.buyerOrderDate || '');
+                    setDispatchDocNo(notes.dispatchDocNo || '');
+                    setDispatchDate(notes.dispatchDate || '');
+                    setDispatchThrough(notes.dispatchThrough || '');
+                    setTermsOfDelivery(notes.termsOfDelivery || '');
+                    setRoundOff(notes.roundOff || '0');
+                    setGlobalCGST(notes.globalCGST || '0');
+                    setGlobalSGST(notes.globalSGST || '0');
+                    setGlobalIGST(notes.globalIGST || '0');
+
+                    if (notes.manualInvoiceNo) {
+                        setManualInvoiceNo(notes.manualInvoiceNo);
+                        isInvoiceInitialized.current = true;
+                    }
+                } catch (e) {
+                    console.error('Failed to parse invoice notes', e);
+                }
+            }
+
             // Fetch Items
             const { data: items, error } = await supabase
                 .from('invoice_items')
@@ -265,7 +294,15 @@ export default function Billing() {
                     discount: item.discount,
                     discountAmount: item.discount_amount,
                     total: item.total,
-                    gstAmount: item.gst_amount
+                    discountAmount: item.discount_amount,
+                    total: item.total,
+                    // gstAmount might be missing/null in DB if not inserted, so calculate it
+                    gstAmount: item.gst_amount || (item.cgst_amount + item.sgst_amount + item.igst_amount),
+                    hsnCode: item.hsn_code,
+                    unit: item.unit,
+                    // Store GST Rate if available, or derive it. 
+                    // Products usually have gstRate. item.cgst + item.sgst + item.igst gives the rate.
+                    gstRate: (item.cgst + item.sgst + item.igst)
                 }));
                 setInvoiceItems(loadedItems);
             }
@@ -320,9 +357,13 @@ export default function Billing() {
 
         // Check Stock
         if (qty > itemProduct.stock) {
-            alert(`Insufficient stock! Only ${itemProduct.stock} available.`);
+            setQtyError(`Only ${itemProduct.stock} available`);
+            // Keep focus on quantity input without triggering alert loop
+            itemQtyRef.current?.focus();
+            itemQtyRef.current?.select();
             return;
         }
+        setQtyError(null);
 
         // State Detection for GST calculation
         // - Kerala dealers: CGST + IGST (split by 2)
@@ -372,6 +413,9 @@ export default function Billing() {
         setInvoiceItems([...invoiceItems, newItem]);
         setItemProduct(null);
         setItemQty('1');
+
+        // Focus back to product select for next entry
+        setTimeout(() => productSelectRef.current?.focus(), 100);
     };
 
 
@@ -449,8 +493,9 @@ export default function Billing() {
             // For update, we might want to just show success and then redirect back or stay
             // Here reusing generatedRef as the existing ID
             setGeneratedRef(transactions.find(t => t.id === editInvoiceId)?.referenceId || 'UPDATED');
+            setCreatedInvoiceId(editInvoiceId);
         } else {
-            const refId = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
+            const { id, refId } = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
                 vehicleName,
                 vehicleNumber,
                 destination,
@@ -480,6 +525,7 @@ export default function Billing() {
                 })
             });
             setGeneratedRef((manualInvoiceNo ? `INV${manualInvoiceNo}` : refId));
+            setCreatedInvoiceId(id);
         }
 
         setIsSubmitting(false);
@@ -879,16 +925,21 @@ export default function Billing() {
                                         onChange={(e) => {
                                             const val = e.target.value.replace(/[^0-9]/g, '');
                                             setItemQty(val);
+                                            setQtyError(null);
                                         }}
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter' && itemQty && itemProduct) {
                                                 e.preventDefault();
                                                 addItemButtonRef.current?.click();
-                                                setTimeout(() => productSelectRef.current?.focus(), 100);
                                             }
                                         }}
                                         onFocus={(e) => e.target.select()}
                                     />
+                                    {qtyError && (
+                                        <div className="absolute top-full left-0 right-0 text-[10px] text-red-500 font-bold bg-red-50 p-1 rounded border border-red-200 z-10 text-center">
+                                            {qtyError}
+                                        </div>
+                                    )}
                                 </div>
                                 <button
                                     ref={addItemButtonRef}
@@ -1558,7 +1609,13 @@ export default function Billing() {
                                 <div className="flex flex-col gap-3 pt-4">
                                     <div className="flex gap-3">
                                         <button
-                                            onClick={handlePrint}
+                                            onClick={() => {
+                                                if (invoiceTotal <= 0.01) {
+                                                    alert("Cannot print invoice with 0 amount.");
+                                                    return;
+                                                }
+                                                handlePrint();
+                                            }}
                                             className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
                                         >
                                             <Printer size={20} />
@@ -1569,15 +1626,39 @@ export default function Billing() {
                                                 resetForm();
                                                 router.push('/billing');
                                             }}
-                                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors"
+                                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
                                         >
+                                            <Plus size={20} />
                                             New Invoice
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                const idToEdit = createdInvoiceId || editInvoiceId;
+                                                if (idToEdit) {
+                                                    // Set URL param to allow refresh persistence
+                                                    router.push(`/billing?edit=${idToEdit}`);
+                                                }
+                                                // If just closing modal, ensure we have the ID set in state
+                                                // But usually handling URL param change in useEffect is better. 
+                                                // Since we are already on the page with data, just hiding success might be checking url?
+                                                // Actually, editInvoiceId comes from searchParams. 
+                                                // So pushing router is the correct way to trigger 'edit mode'.
+                                                setShowSuccess(false);
+                                            }}
+                                            className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                        >
+                                            <Edit size={20} />
+                                            Edit
                                         </button>
                                     </div>
 
                                     {/* WhatsApp Action - Trigger Preview */}
                                     <button
                                         onClick={() => {
+                                            if (invoiceTotal <= 0.01) {
+                                                alert("Cannot send invoice with 0 amount.");
+                                                return;
+                                            }
                                             const invoiceData = {
                                                 id: editInvoiceId || '',
                                                 customerId: selectedDealer.id,
