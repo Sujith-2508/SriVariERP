@@ -35,7 +35,8 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
 
     // Format time ago
     const formatTimeAgo = (date: Date) => {
-        const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+        const diff = new Date().getTime() - date.getTime();
+        const seconds = Math.floor(Math.max(0, diff) / 1000);
         if (seconds < 60) return `${seconds}s ago`;
         const minutes = Math.floor(seconds / 60);
         if (minutes < 60) return `${minutes}m ago`;
@@ -95,7 +96,8 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                     <div className="divide-y divide-slate-100">
                         {sortedData.map(data => {
                             const isActive = data.status?.isActive || false;
-                            const hasLocation = !!data.latestLocation;
+                            const hasLocation = (!!data.latestLocation && data.latestLocation.latitude !== 0) ||
+                                (data.status?.currentLatitude !== undefined && data.status?.currentLatitude !== null && data.status.currentLatitude !== 0);
 
                             return (
                                 <div
@@ -133,9 +135,23 @@ export function AgentStatusList({ agentData, onAgentClick }: AgentStatusListProp
                                                 </div>
 
                                                 {data.status?.lastActiveAt && (
-                                                    <div className="flex items-center gap-2 text-sm text-slate-500">
-                                                        <Clock size={14} />
-                                                        <span>{formatTimeAgo(data.status.lastActiveAt)}</span>
+                                                    <div className="flex items-center gap-2 text-sm">
+                                                        <Clock size={14} className="text-slate-500" />
+                                                        <span className={isActive ? "text-emerald-600 font-medium" : "text-slate-500"}>
+                                                            {isActive ? 'Live' : formatTimeAgo(data.status.lastActiveAt)}
+                                                        </span>
+                                                    </div>
+                                                )}
+
+                                                {isActive && data.status?.currentAddress && (
+                                                    <div className="flex flex-col gap-1 mt-1">
+                                                        <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 p-1.5 rounded border border-slate-100">
+                                                            <MapPin size={12} className="mt-0.5 shrink-0" />
+                                                            <span className="italic">{data.status.currentAddress}</span>
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-400 ml-5">
+                                                            {data.status.currentLatitude?.toFixed(4)}, {data.status.currentLongitude?.toFixed(4)}
+                                                        </div>
                                                     </div>
                                                 )}
 

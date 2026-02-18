@@ -182,6 +182,7 @@ export interface AgentStatus {
   lastActiveAt: Date;
   currentLatitude?: number;
   currentLongitude?: number;
+  currentAddress?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -207,6 +208,7 @@ export interface AgentLocation {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  address?: string;
   recordedAt: Date;
   createdAt: Date;
 }

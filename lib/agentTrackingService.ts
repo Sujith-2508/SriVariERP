@@ -333,9 +333,10 @@ function mapAgentStatus(data: any): AgentStatus {
         id: data.id,
         agentId: data.agent_id,
         isActive: data.is_active,
-        lastActiveAt: new Date(data.last_active_at),
+        lastActiveAt: data.last_active_at ? new Date(data.last_active_at) : new Date(),
         currentLatitude: data.current_latitude,
         currentLongitude: data.current_longitude,
+        currentAddress: data.current_address,
         createdAt: new Date(data.created_at),
         updatedAt: new Date(data.updated_at),
     };
@@ -363,6 +364,7 @@ function mapAgentLocation(data: any): AgentLocation {
         latitude: parseFloat(data.latitude),
         longitude: parseFloat(data.longitude),
         accuracy: data.accuracy,
+        address: data.address,
         recordedAt: new Date(data.recorded_at),
         createdAt: new Date(data.created_at),
     };

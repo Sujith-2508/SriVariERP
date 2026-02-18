@@ -70,9 +70,16 @@ function MapController({ trackingData, selectedAgent }: { trackingData: AgentTra
     useEffect(() => {
         if (selectedAgent) {
             const selectedData = trackingData.find(d => d.agent.id === selectedAgent);
-            if (selectedData?.latestLocation) {
+            const latestLoc = selectedData?.latestLocation;
+            const statusLoc = (selectedData?.status?.currentLatitude !== undefined && selectedData?.status?.currentLatitude !== null) &&
+                (selectedData?.status?.currentLongitude !== undefined && selectedData?.status?.currentLongitude !== null)
+                ? { latitude: selectedData.status.currentLatitude as number, longitude: selectedData.status.currentLongitude as number }
+                : null;
+            const loc = latestLoc || statusLoc;
+
+            if (loc && loc.latitude !== 0 && loc.longitude !== 0) {
                 map.setView(
-                    [selectedData.latestLocation.latitude, selectedData.latestLocation.longitude],
+                    [loc.latitude, loc.longitude],
                     16,
                     { animate: true }
                 );
@@ -81,12 +88,16 @@ function MapController({ trackingData, selectedAgent }: { trackingData: AgentTra
             const locations = trackingData
                 .map(d => {
                     const latestLoc = d.latestLocation;
-                    const statusLoc = d.status?.currentLatitude && d.status?.currentLongitude
-                        ? { latitude: d.status.currentLatitude, longitude: d.status.currentLongitude }
+                    const statusLoc = (d.status?.currentLatitude !== undefined && d.status?.currentLatitude !== null) && (d.status?.currentLongitude !== undefined && d.status?.currentLongitude !== null)
+                        ? {
+                            latitude: d.status.currentLatitude,
+                            longitude: d.status.currentLongitude,
+                            address: d.status.currentAddress
+                        }
                         : null;
                     return latestLoc || statusLoc;
                 })
-                .filter((loc): loc is NonNullable<typeof loc> => !!loc)
+                .filter((loc): loc is NonNullable<typeof loc> => !!loc && loc.latitude !== 0 && loc.longitude !== 0)
                 .map(loc => [loc.latitude, loc.longitude] as [number, number]);
 
             if (locations.length > 0) {
@@ -161,7 +172,8 @@ export function LiveMap({ agentData }: LiveMapProps) {
 
     // Format time ago
     const formatTimeAgo = (date: Date) => {
-        const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+        const diff = new Date().getTime() - date.getTime();
+        const seconds = Math.floor(Math.max(0, diff) / 1000);
         if (seconds < 60) return `${seconds}s ago`;
         const minutes = Math.floor(seconds / 60);
         if (minutes < 60) return `${minutes}m ago`;
@@ -214,13 +226,18 @@ export function LiveMap({ agentData }: LiveMapProps) {
 
                 {trackingData.map(data => {
                     const latestLoc = data.latestLocation;
-                    const statusLoc = data.status?.currentLatitude && data.status?.currentLongitude
-                        ? { latitude: data.status.currentLatitude, longitude: data.status.currentLongitude }
+                    const statusLoc = (data.status?.currentLatitude !== undefined && data.status?.currentLatitude !== null) && (data.status?.currentLongitude !== undefined && data.status?.currentLongitude !== null)
+                        ? {
+                            latitude: data.status.currentLatitude,
+                            longitude: data.status.currentLongitude,
+                            address: data.status.currentAddress
+                        }
                         : null;
 
                     const effectiveLoc = latestLoc || statusLoc;
+                    const isValidLocation = effectiveLoc && effectiveLoc.latitude !== 0 && effectiveLoc.longitude !== 0;
 
-                    if (!effectiveLoc) return null;
+                    if (!isValidLocation) return null;
 
                     const isActive = data.status?.isActive || false;
                     const position: [number, number] = [effectiveLoc.latitude, effectiveLoc.longitude];
@@ -240,6 +257,11 @@ export function LiveMap({ agentData }: LiveMapProps) {
                                     <p className="text-xs text-slate-500 mt-1">
                                         {isActive ? 'Active' : 'Inactive'} • {data.agent.area || 'No Area'}
                                     </p>
+                                    {effectiveLoc.address && (
+                                        <p className="text-xs text-slate-600 mt-1 font-medium border-t border-slate-100 pt-1">
+                                            📍 {effectiveLoc.address}
+                                        </p>
+                                    )}
                                 </div>
                             </Popup>
                         </Marker>
