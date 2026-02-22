@@ -1,0 +1,8 @@
+Row 842: ["Date","Particulars","","Vch Type","Vch No.","Debit","Credit"]
+Row 843: ["21-Jul-23","By","Purchase","PURSHASE","233","","27435.00"]
+Row 844: ["30-Sep-23","","","","","","18585.00"]
+Row 845: ["16-Dec-23","By","Purchase","PURSHASE","","","19036.36"]
+Row 846: ["18-Dec-23","","","","","","23266.66"]
+Row 847: ["25-Jan-24","By","Purchase","PURSHASE","269","","13275.00"]
+Row 848: ["13-Mar-24","By","Purchase"]
+Row 851: ["114873.02","","","","","","114873.02"]

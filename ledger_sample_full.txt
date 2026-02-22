@@ -1,0 +1,30 @@
+Row 221: 
+Row 222: [0]Ledger: | [1]AMMU FURNITURE | [2]1-Apr-19 to 3-Feb-26
+Row 223: [0] | [1]COIMBATORE ROAD, PALLADAM
+Row 224: [0]Date | [1]Particulars | [2] | [3]Vch Type | [4]Vch No. | [5]Debit | [6]Credit
+Row 225: [0]11-Feb-25 | [1]To | [2]SALES | [3]Sales | [4]2893 | [5]8410.00
+Row 226: [0]6-Mar-25 | [1]By | [2]NEFT | [3]Receipt | [4]0 | [5] | [6]8410.00
+Row 227: [0]8410.00 | [1] | [2] | [3] | [4] | [5] | [6]8410.00
+Row 228: 
+Row 229: [0]Ledger: | [1]ANANDA METAL | [2]1-Apr-19 to 3-Feb-26
+Row 230: [0] | [1]250, GANDHI ROAD, ANNUPARPALAYAM TIRUPUR, GST.NO.33AAPFA0526L1ZI, Cell:7010110319
+Row 231: [0]Date | [1]Particulars | [2] | [3]Vch Type | [4]Vch No. | [5]Debit | [6]Credit
+Row 232: [0]23-Sep-19 | [1]To | [2]SALES | [3]Sales | [4]441 | [5]9997.00
+Row 233: [0]10-Oct-19 | [1]By | [2]Cash | [3]Receipt | [4] | [5] | [6]9997.00
+Row 234: [0]9997.00 | [1] | [2] | [3] | [4] | [5] | [6]9997.00
+Row 235: 
+Row 236: [0]Ledger: | [1]ANANTHA METALS | [2]1-Apr-19 to 3-Feb-26
+Row 237: [0] | [1]MARKET VIEW,, MUNNAR., GST.NO:32ACFFA2290K1ZJ, CELL:7907404451
+Row 238: [0]Date | [1]Particulars | [2] | [3]Vch Type | [4]Vch No. | [5]Debit | [6]Credit
+Row 239: [0]10-Oct-25 | [1]By | [2]NEFT | [3]Receipt | [4]0 | [5] | [6]28300.00
+Row 240: [0]11-Oct-25 | [1]To | [2]SALES | [3]Sales | [4]3082 | [5]28300.00
+Row 241: [0]3-Jan-26 | [1]To | [2]SALES | [3]Sales | [4]3124 | [5]17000.00
+Row 242: [0]3-Jan-26 | [1]By | [2]CASH DISCOUNT | [3]Receipt | [4]5654 | [5] | [6]850.00
+Row 243: [0]3-Jan-26 | [1]By | [2]NEFT | [3]Receipt | [4]5655 | [5] | [6]16150.00
+Row 244: [0]45300.00 | [1] | [2] | [3] | [4] | [5] | [6]45300.00
+Row 245: 
+Row 246: [0]Ledger: | [1]Angappan | [2]1-Apr-19 to 3-Feb-26
+Row 247: [0]Date | [1]Particulars | [2] | [3]Vch Type | [4]Vch No. | [5]Debit | [6]Credit
+Row 248: [0]1-May-19 | [1]To | [2]Cash | [3]Payment | [4]32 | [5]10000.00
+Row 249: [0]1-Jul-19 | [1]To | [2]Cash | [3]Payment | [4]36 | [5]11000.00
+Row 250: [0]1-Aug-19 | [1]To | [2]Cash | [3]Payment | [4]40 | [5]5000.00

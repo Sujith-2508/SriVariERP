@@ -79,17 +79,27 @@ export function calculateDealerStatement(transactions: Transaction[]) {
         let remainingPayment = payment.remaining;
 
         for (const invoice of invoices) {
-            if (remainingPayment <= 0) break;
-            if (invoice.balance <= 0) continue; // Already paid
+            if (remainingPayment <= 0.001) break; // Use epsilon for float comparison
+            if (invoice.balance <= 0.001) continue; // Already paid
 
-            const amountToApply = Math.min(remainingPayment, invoice.balance);
+            // Calculate amount to apply with precision
+            let amountToApply = Math.min(remainingPayment, invoice.balance);
+
+            // Fix precision
+            amountToApply = Math.round(amountToApply * 100) / 100;
 
             invoice.paid += amountToApply;
             invoice.balance -= amountToApply;
             remainingPayment -= amountToApply;
 
-            // If invoice is fully paid by this payment
-            if (invoice.balance <= 0.01 && invoice.paidDate === null) { // epsilon for float
+            // Fix precision after subtraction
+            invoice.paid = Math.round(invoice.paid * 100) / 100;
+            invoice.balance = Math.round(invoice.balance * 100) / 100;
+            remainingPayment = Math.round(remainingPayment * 100) / 100;
+
+            // If invoice is fully paid by this payment (allowing for small float error)
+            if (invoice.balance <= 0.01 && invoice.paidDate === null) {
+                invoice.balance = 0; // Force to 0 if very close
                 invoice.paidDate = payment.date;
                 invoice.daysToPay = Math.ceil((payment.date.getTime() - invoice.date.getTime()) / (1000 * 60 * 60 * 24));
                 invoice.isOverdue = false;
@@ -97,14 +107,18 @@ export function calculateDealerStatement(transactions: Transaction[]) {
         }
     });
 
-    // 3. Return structured data
+    // 3. Return structured data with summary precision fixed
+    const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.amount, 0);
+    const totalPaid = invoices.reduce((sum, inv) => sum + inv.paid, 0);
+    const totalOutstanding = invoices.reduce((sum, inv) => sum + inv.balance, 0);
+
     return {
         invoices,
         payments,
         summary: {
-            totalInvoiced: invoices.reduce((sum, inv) => sum + inv.amount, 0),
-            totalPaid: invoices.reduce((sum, inv) => sum + inv.paid, 0),
-            totalOutstanding: invoices.reduce((sum, inv) => sum + inv.balance, 0),
+            totalInvoiced: Math.round(totalInvoiced * 100) / 100,
+            totalPaid: Math.round(totalPaid * 100) / 100,
+            totalOutstanding: Math.round(totalOutstanding * 100) / 100,
             overdueCount: invoices.filter(inv => inv.isOverdue && inv.balance > 0).length
         }
     };

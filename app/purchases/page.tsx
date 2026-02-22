@@ -18,12 +18,15 @@ import {
     getPurchaseBills,
     deletePurchaseBill,
     createPurchasePayment,
+    updatePurchasePayment,
+    deletePurchasePayment,
     getPurchasePayments,
     getSupplierStatement,
     SupplierStatementEntry,
     recalculateSupplierBalance,
     getBillAllocations
 } from '@/lib/purchaseService';
+import { syncAllStatements } from '@/lib/folderSyncService';
 import {
     Search,
     Plus,
@@ -48,6 +51,7 @@ export default function PurchasesPage() {
     const [activeTab, setActiveTab] = useState<TabType>('bills');
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(true);
+    const [isSyncing, setIsSyncing] = useState(false);
 
     // Data states
     const [suppliers, setSuppliers] = useState<SupplierData[]>([]);
@@ -62,6 +66,7 @@ export default function PurchasesPage() {
     const [isViewBillModalOpen, setIsViewBillModalOpen] = useState(false);
 
     const [editingSupplier, setEditingSupplier] = useState<SupplierData | null>(null);
+    const [editingPayment, setEditingPayment] = useState<PurchasePaymentData | null>(null);
     const [selectedSupplier, setSelectedSupplier] = useState<SupplierData | null>(null);
     const [selectedBill, setSelectedBill] = useState<PurchaseBillData | null>(null);
     const [statementData, setStatementData] = useState<SupplierStatementEntry[]>([]);
@@ -200,7 +205,18 @@ export default function PurchasesPage() {
     };
 
     useEffect(() => {
-        loadData();
+        const autoSync = async () => {
+            setIsSyncing(true);
+            try {
+                await syncAllStatements();
+            } catch (error) {
+                console.error('Auto-sync failed:', error);
+            } finally {
+                setIsSyncing(false);
+                loadData();
+            }
+        };
+        autoSync();
     }, []);
 
     const handleSupplierSubmit = async (e: React.FormEvent) => {
@@ -314,21 +330,53 @@ export default function PurchasesPage() {
 
     const handlePaymentSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        await createPurchasePayment({
-            supplierId: paymentForm.supplierId,
-            paymentNumber: paymentForm.paymentNumber,
-            paymentDate: new Date(paymentForm.paymentDate),
-            amount: paymentForm.amount,
-            paymentMode: paymentForm.paymentMode,
-            referenceNumber: paymentForm.referenceNumber,
-            notes: paymentForm.notes
-        });
+        if (editingPayment) {
+            await updatePurchasePayment(editingPayment.id, {
+                paymentNumber: paymentForm.paymentNumber,
+                paymentDate: new Date(paymentForm.paymentDate),
+                amount: paymentForm.amount,
+                paymentMode: paymentForm.paymentMode,
+                referenceNumber: paymentForm.referenceNumber,
+                notes: paymentForm.notes
+            });
+        } else {
+            await createPurchasePayment({
+                supplierId: paymentForm.supplierId,
+                paymentNumber: paymentForm.paymentNumber,
+                paymentDate: new Date(paymentForm.paymentDate),
+                amount: paymentForm.amount,
+                paymentMode: paymentForm.paymentMode,
+                referenceNumber: paymentForm.referenceNumber,
+                notes: paymentForm.notes
+            });
+        }
         setIsPaymentModalOpen(false);
         resetPaymentForm();
         loadData();
     };
 
+    const handleDeletePayment = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this payment? This will revert allocations and update supplier balance.')) return;
+        await deletePurchasePayment(id);
+        loadData();
+    };
+
+    const openEditPayment = (payment: PurchasePaymentData) => {
+        setEditingPayment(payment);
+        setPaymentForm({
+            supplierId: payment.supplierId,
+            paymentNumber: payment.paymentNumber,
+            paymentDate: new Date(payment.paymentDate).toISOString().split('T')[0],
+            amount: payment.amount,
+            paymentMode: payment.paymentMode as any,
+            referenceNumber: payment.referenceNumber || '',
+            notes: payment.notes || ''
+        });
+        setIsPaymentModalOpen(true);
+    };
+
     const resetPaymentForm = () => {
+        setEditingPayment(null);
         setPaymentForm({
             supplierId: '',
             paymentNumber: '',
@@ -433,8 +481,8 @@ export default function PurchasesPage() {
             doc.text(`Rs. ${bill.paidAmount.toLocaleString()}`, 170, finalY + 6);
             doc.setTextColor(0, 0, 0);
             doc.text(`Balance:`, 140, finalY + 12);
-            if (bill.balance > 0) doc.setTextColor(220, 38, 38);
-            doc.text(`Rs. ${bill.balance.toLocaleString()}`, 170, finalY + 12);
+            if ((bill.balance || 0) > 0) doc.setTextColor(220, 38, 38);
+            doc.text(`Rs. ${(bill.balance || 0).toLocaleString()}`, 170, finalY + 12);
             doc.save(`bill_${bill.billNumber}.pdf`);
         } catch (error) {
             console.error('Error generating PDF:', error);
@@ -474,11 +522,12 @@ export default function PurchasesPage() {
             if (finalBalance > 0) doc.setTextColor(220, 38, 38);
             doc.text(`Rs. ${finalBalance.toLocaleString()}`, 140, 48);
             doc.setTextColor(0, 0, 0);
-            const tableColumn = ["Date", "Type", "Reference", "Debit (+)", "Credit (-)", "Balance"];
+            const tableColumn = ["Date", "Type", "Reference", "Particulars", "Debit (+)", "Credit (-)", "Balance"];
             const tableRows = statementData.map(entry => [
                 new Date(entry.date).toLocaleDateString(),
                 entry.type === 'BILL' ? 'Pur. Bill' : 'Payment',
                 entry.reference,
+                entry.notes || '-',
                 entry.debit > 0 ? entry.debit.toLocaleString() : '-',
                 entry.credit > 0 ? entry.credit.toLocaleString() : '-',
                 entry.balance.toLocaleString()
@@ -533,24 +582,26 @@ export default function PurchasesPage() {
                     <h1 className="text-2xl font-bold text-slate-800">Purchase Management</h1>
                     <p className="text-sm text-slate-500">Track suppliers, bills, and payments</p>
                 </div>
-                <button
-                    onClick={() => {
-                        if (activeTab === 'suppliers') {
-                            resetSupplierForm();
-                            setIsSupplierModalOpen(true);
-                        } else if (activeTab === 'bills') {
-                            resetBillForm();
-                            setIsBillModalOpen(true);
-                        } else {
-                            resetPaymentForm();
-                            setIsPaymentModalOpen(true);
-                        }
-                    }}
-                    className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg"
-                >
-                    <Plus size={16} />
-                    {activeTab === 'suppliers' ? 'Add Supplier' : activeTab === 'bills' ? 'New Bill' : 'New Payment'}
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => {
+                            if (activeTab === 'suppliers') {
+                                resetSupplierForm();
+                                setIsSupplierModalOpen(true);
+                            } else if (activeTab === 'bills') {
+                                resetBillForm();
+                                setIsBillModalOpen(true);
+                            } else {
+                                resetPaymentForm();
+                                setIsPaymentModalOpen(true);
+                            }
+                        }}
+                        className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg"
+                    >
+                        <Plus size={16} />
+                        {activeTab === 'suppliers' ? 'Add Supplier' : activeTab === 'bills' ? 'New Bill' : 'New Payment'}
+                    </button>
+                </div>
             </div>
 
             <div className="flex gap-2 mb-6">
@@ -597,6 +648,7 @@ export default function PurchasesPage() {
                     <div className="relative flex-1 max-w-sm">
                         <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
                         <input
+                            id="purchases-search"
                             type="text"
                             placeholder="Search..."
                             className="pl-10 pr-4 py-2 border rounded-lg w-full outline-none focus:ring-2 focus:ring-emerald-500"
@@ -618,23 +670,11 @@ export default function PurchasesPage() {
                                     <th className="p-4">Phone</th>
                                     <th className="p-4">City</th>
                                     <th className="p-4 text-right">Balance</th>
-                                    <th className="p-4 text-right pr-8">Stock Value (COGS)</th>
                                     <th className="p-4 text-center">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredSuppliers.map(s => {
-                                    // Calculate Stock Value for this supplier
-                                    // Logic: Find all products bought from this supplier and sum (stock * costPrice)
-                                    const supplierProductIds = new Set(
-                                        bills
-                                            .filter(b => b.supplierId === s.id)
-                                            .flatMap(b => (b.items || []).map((item: any) => item.productId))
-                                    );
-                                    const stockValue = products
-                                        .filter(p => supplierProductIds.has(p.id) || supplierProductIds.has(p.productId))
-                                        .reduce((sum, p) => sum + ((p.stock || 0) * (p.costPrice || 0)), 0);
-
                                     return (
                                         <tr key={s.id} className="hover:bg-slate-50">
                                             <td className="p-4 font-medium text-slate-800">{s.name}</td>
@@ -642,7 +682,6 @@ export default function PurchasesPage() {
                                             <td className="p-4 text-slate-600">{s.phone || '-'}</td>
                                             <td className="p-4 text-slate-600">{s.city || '-'}</td>
                                             <td className="p-4 text-right font-bold text-red-600">₹{(s.balance || 0).toLocaleString()}</td>
-                                            <td className="p-4 text-right font-bold text-emerald-600 pr-8">₹{stockValue.toLocaleString()}</td>
                                             <td className="p-4">
                                                 <div className="flex items-center justify-center gap-1">
                                                     <button
@@ -701,9 +740,9 @@ export default function PurchasesPage() {
                                             <td className="p-4 font-mono font-bold text-slate-800">{b.billNumber}</td>
                                             <td className="p-4 font-medium text-slate-700">{supplier?.name}</td>
                                             <td className="p-4 text-slate-600">{b.billDate.toLocaleDateString()}</td>
-                                            <td className="p-4 text-right font-medium">₹{b.amount.toLocaleString()}</td>
-                                            <td className="p-4 text-right text-green-600">₹{b.paidAmount.toLocaleString()}</td>
-                                            <td className="p-4 text-right font-bold text-red-600">₹{b.balance.toLocaleString()}</td>
+                                            <td className="p-4 text-right font-medium">₹{(b.amount || 0).toLocaleString()}</td>
+                                            <td className="p-4 text-right text-green-600">₹{(b.paidAmount || 0).toLocaleString()}</td>
+                                            <td className="p-4 text-right font-bold text-red-600">₹{(b.balance || 0).toLocaleString()}</td>
                                             <td className="p-4 text-center">
                                                 <div className="flex items-center justify-center gap-1">
                                                     <button
@@ -738,6 +777,7 @@ export default function PurchasesPage() {
                                     <th className="p-4">Date</th>
                                     <th className="p-4">Mode</th>
                                     <th className="p-4 text-right">Amount</th>
+                                    <th className="p-4 text-center">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -750,6 +790,24 @@ export default function PurchasesPage() {
                                             <td className="p-4 text-slate-600">{p.paymentDate.toLocaleDateString()}</td>
                                             <td className="p-4 text-slate-600">{p.paymentMode}</td>
                                             <td className="p-4 text-right font-bold text-green-600">₹{p.amount.toLocaleString()}</td>
+                                            <td className="p-4 text-center">
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <button
+                                                        onClick={() => openEditPayment(p)}
+                                                        className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                                        title="Edit Payment"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeletePayment(p.id)}
+                                                        className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                                        title="Delete Payment"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </td>
                                         </tr>
                                     );
                                 })}
@@ -761,658 +819,672 @@ export default function PurchasesPage() {
             {/* END PART 1 */}
 
             {/* Supplier Modal */}
-            {isSupplierModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        onClick={() => setIsSupplierModalOpen(false)}
-                    />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden z-10">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h2 className="text-xl font-bold text-slate-800">
-                                {editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
-                            </h2>
-                            <button onClick={() => setIsSupplierModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                                <X size={24} />
-                            </button>
+            {
+                isSupplierModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div
+                            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                            onClick={() => setIsSupplierModalOpen(false)}
+                        />
+                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden z-10">
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                <h2 className="text-xl font-bold text-slate-800">
+                                    {editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
+                                </h2>
+                                <button onClick={() => setIsSupplierModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleSupplierSubmit} className="p-6 space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Supplier Name *</label>
+                                        <input
+                                            ref={supplierNameRef}
+                                            autoFocus
+                                            onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                            type="text"
+                                            required
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={supplierForm.name}
+                                            onChange={e => setSupplierForm({ ...supplierForm, name: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
+                                        <input
+                                            ref={contactPersonRef}
+                                            onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                            type="text"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={supplierForm.contactPerson}
+                                            onChange={e => setSupplierForm({ ...supplierForm, contactPerson: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                        <input
+                                            ref={supplierPhoneRef}
+                                            onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                            type="text"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={supplierForm.phone}
+                                            onChange={e => setSupplierForm({ ...supplierForm, phone: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                        <input
+                                            ref={supplierCityRef}
+                                            onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                            type="text"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={supplierForm.city}
+                                            onChange={e => setSupplierForm({ ...supplierForm, city: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
+                                        <input
+                                            ref={supplierGstRef}
+                                            onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                            type="text"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={supplierForm.gstNumber}
+                                            onChange={e => setSupplierForm({ ...supplierForm, gstNumber: e.target.value.toUpperCase() })}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                    <textarea
+                                        ref={supplierAddressRef}
+                                        onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        rows={3}
+                                        value={supplierForm.address}
+                                        onChange={e => setSupplierForm({ ...supplierForm, address: e.target.value })}
+                                    />
+                                </div>
+                                <div className="pt-4 flex gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsSupplierModalOpen(false)}
+                                        className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg border border-slate-200"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-lg"
+                                    >
+                                        {editingSupplier ? 'Update Supplier' : 'Save Supplier'}
+                                    </button>
+                                </div>
+                            </form>
                         </div>
-                        <form onSubmit={handleSupplierSubmit} className="p-6 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Supplier Name *</label>
-                                    <input
-                                        ref={supplierNameRef}
-                                        autoFocus
-                                        onKeyDown={(e) => handleSupplierKeyDown(e)}
-                                        type="text"
-                                        required
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={supplierForm.name}
-                                        onChange={e => setSupplierForm({ ...supplierForm, name: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
-                                    <input
-                                        ref={contactPersonRef}
-                                        onKeyDown={(e) => handleSupplierKeyDown(e)}
-                                        type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={supplierForm.contactPerson}
-                                        onChange={e => setSupplierForm({ ...supplierForm, contactPerson: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
-                                    <input
-                                        ref={supplierPhoneRef}
-                                        onKeyDown={(e) => handleSupplierKeyDown(e)}
-                                        type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={supplierForm.phone}
-                                        onChange={e => setSupplierForm({ ...supplierForm, phone: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
-                                    <input
-                                        ref={supplierCityRef}
-                                        onKeyDown={(e) => handleSupplierKeyDown(e)}
-                                        type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={supplierForm.city}
-                                        onChange={e => setSupplierForm({ ...supplierForm, city: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
-                                    <input
-                                        ref={supplierGstRef}
-                                        onKeyDown={(e) => handleSupplierKeyDown(e)}
-                                        type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={supplierForm.gstNumber}
-                                        onChange={e => setSupplierForm({ ...supplierForm, gstNumber: e.target.value.toUpperCase() })}
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
-                                <textarea
-                                    ref={supplierAddressRef}
-                                    onKeyDown={(e) => handleSupplierKeyDown(e)}
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                    rows={3}
-                                    value={supplierForm.address}
-                                    onChange={e => setSupplierForm({ ...supplierForm, address: e.target.value })}
-                                />
-                            </div>
-                            <div className="pt-4 flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsSupplierModalOpen(false)}
-                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg border border-slate-200"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-lg"
-                                >
-                                    {editingSupplier ? 'Update Supplier' : 'Save Supplier'}
-                                </button>
-                            </div>
-                        </form>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Bill Modal */}
-            {isBillModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        onClick={() => setIsBillModalOpen(false)}
-                    />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h2 className="text-xl font-bold text-slate-800">New Purchase Bill</h2>
-                            <button onClick={() => setIsBillModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                                <X size={24} />
-                            </button>
+            {
+                isBillModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div
+                            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                            onClick={() => setIsBillModalOpen(false)}
+                        />
+                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                <h2 className="text-xl font-bold text-slate-800">New Purchase Bill</h2>
+                                <button onClick={() => setIsBillModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleBillSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
+                                        <SearchableSelect
+                                            options={suppliers}
+                                            value={billForm.supplierId}
+                                            onChange={(val) => setBillForm({ ...billForm, supplierId: val })}
+                                            placeholder="Search Supplier"
+                                            className="w-full"
+                                            ref={billSupplierRef}
+                                            onKeyDown={(e) => handleBillKeyDown(e)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Bill Number *</label>
+                                        <input
+                                            ref={billNumberRef}
+                                            onKeyDown={(e) => handleBillKeyDown(e)}
+                                            type="text"
+                                            required
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={billForm.billNumber}
+                                            onChange={e => setBillForm({ ...billForm, billNumber: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Bill Date *</label>
+                                        <input
+                                            ref={billDateRef}
+                                            onKeyDown={(e) => handleBillKeyDown(e)}
+                                            type="date"
+                                            required
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={billForm.billDate}
+                                            onChange={e => setBillForm({ ...billForm, billDate: e.target.value })}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                    <h3 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">Add Items</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                        <div className="md:col-span-5">
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Product</label>
+                                            <SearchableSelect
+                                                options={products}
+                                                value={currentBillItem.productId}
+                                                onChange={(val: string) => {
+                                                    const prod = products.find(p => p.id === val);
+                                                    setCurrentBillItem({
+                                                        ...currentBillItem,
+                                                        productId: val,
+                                                        productName: prod?.name || '',
+                                                        unitPrice: prod?.costPrice || prod?.price || 0
+                                                    });
+                                                }}
+                                                placeholder="Search Product"
+                                                className="w-full"
+                                                ref={billProductRef}
+                                                onKeyDown={(e: React.KeyboardEvent) => handleProductEntryKeyDown(e, 'product')}
+                                            />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Quantity</label>
+                                            <input
+                                                ref={billQtyRef}
+                                                onKeyDown={(e) => handleProductEntryKeyDown(e, 'qty')}
+                                                type="number"
+                                                min="1"
+                                                className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                                value={currentBillItem.quantity || ''}
+                                                onChange={e => setCurrentBillItem({ ...currentBillItem, quantity: parseFloat(e.target.value) || 0 })}
+                                            />
+                                        </div>
+                                        <div className="md:col-span-3">
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Unit Cost</label>
+                                            <input
+                                                ref={billCostRef}
+                                                onKeyDown={(e) => handleProductEntryKeyDown(e, 'cost')}
+                                                type="number"
+                                                className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                                value={currentBillItem.unitPrice || ''}
+                                                onChange={e => setCurrentBillItem({ ...currentBillItem, unitPrice: parseFloat(e.target.value) || 0 })}
+                                            />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <button
+                                                ref={billAddBtnRef}
+                                                type="button"
+                                                onClick={handleAddBillItem}
+                                                className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold hover:bg-slate-700 transition-colors"
+                                            >
+                                                Add
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {billItems.length > 0 && (
+                                        <div className="mt-4 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                            <table className="w-full text-xs">
+                                                <thead className="bg-slate-100 text-slate-600 font-bold">
+                                                    <tr>
+                                                        <th className="p-2 text-left">Product</th>
+                                                        <th className="p-2 text-center">Qty</th>
+                                                        <th className="p-2 text-right">Cost</th>
+                                                        <th className="p-2 text-right">Total</th>
+                                                        <th className="p-2 text-center">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {billItems.map((item, idx) => (
+                                                        <tr key={idx}>
+                                                            <td className="p-2">{item.productName}</td>
+                                                            <td className="p-2 text-center">{item.quantity}</td>
+                                                            <td className="p-2 text-right">₹{item.unitPrice.toLocaleString()}</td>
+                                                            <td className="p-2 text-right font-bold">₹{item.total.toLocaleString()}</td>
+                                                            <td className="p-2 text-center">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const newItems = billItems.filter((_, i) => i !== idx);
+                                                                        setBillItems(newItems);
+                                                                        setBillForm(prev => ({ ...prev, amount: newItems.reduce((sum, item) => sum + item.total, 0) }));
+                                                                    }}
+                                                                    className="text-red-500 hover:text-red-700 p-1"
+                                                                >
+                                                                    <X size={14} />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Total Bill Amount *</label>
+                                            <input
+                                                ref={billTotalRef}
+                                                onKeyDown={(e) => handleBillKeyDown(e)}
+                                                type="number"
+                                                required
+                                                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-emerald-500 outline-none text-2xl font-bold text-emerald-600"
+                                                value={billForm.amount || ''}
+                                                onChange={e => setBillForm({ ...billForm, amount: parseFloat(e.target.value) || 0 })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Due Date</label>
+                                            <input
+                                                ref={billDueDateRef}
+                                                onKeyDown={(e) => handleBillKeyDown(e)}
+                                                type="date"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                value={billForm.dueDate}
+                                                onChange={e => setBillForm({ ...billForm, dueDate: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Notes / Remarks</label>
+                                        <textarea
+                                            ref={billNotesRef}
+                                            onKeyDown={(e) => handleBillKeyDown(e)}
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none h-[118px]"
+                                            placeholder="Add any additional details..."
+                                            value={billForm.notes}
+                                            onChange={e => setBillForm({ ...billForm, notes: e.target.value })}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="pt-6 border-t border-slate-100 flex gap-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsBillModalOpen(false)}
+                                        className="flex-1 py-4 text-slate-700 font-bold hover:bg-slate-50 rounded-xl border-2 border-slate-200 transition-all"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 py-4 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 transition-all"
+                                    >
+                                        Save Purchase Bill
+                                    </button>
+                                </div>
+                            </form>
                         </div>
-                        <form onSubmit={handleBillSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    </div>
+                )
+            }
+
+            {/* View Bill Modal */}
+            {
+                isViewBillModalOpen && selectedBill && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div
+                            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                            onClick={() => setIsViewBillModalOpen(false)}
+                        />
+                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
-                                    <SearchableSelect
-                                        options={suppliers}
-                                        value={billForm.supplierId}
-                                        onChange={(val) => setBillForm({ ...billForm, supplierId: val })}
-                                        placeholder="Search Supplier"
-                                        className="w-full"
-                                        ref={billSupplierRef}
-                                        onKeyDown={(e) => handleBillKeyDown(e)}
-                                    />
+                                    <h1 className="text-xl font-bold text-slate-800">
+                                        Bill Details: {selectedBill.billNumber}
+                                    </h1>
+                                    <p className="text-sm text-slate-500">
+                                        Supplier: {suppliers.find(s => s.id === selectedBill.supplierId)?.name}
+                                    </p>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Bill Number *</label>
-                                    <input
-                                        ref={billNumberRef}
-                                        onKeyDown={(e) => handleBillKeyDown(e)}
-                                        type="text"
-                                        required
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={billForm.billNumber}
-                                        onChange={e => setBillForm({ ...billForm, billNumber: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Bill Date *</label>
-                                    <input
-                                        ref={billDateRef}
-                                        onKeyDown={(e) => handleBillKeyDown(e)}
-                                        type="date"
-                                        required
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={billForm.billDate}
-                                        onChange={e => setBillForm({ ...billForm, billDate: e.target.value })}
-                                    />
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => downloadBillPdf(selectedBill)}
+                                        disabled={isGeneratingPdf}
+                                        className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-md disabled:bg-emerald-400"
+                                    >
+                                        {isGeneratingPdf ? 'Generating...' : <><Download size={16} /> Export PDF</>}
+                                    </button>
+                                    <button onClick={() => setIsViewBillModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
+                                        <X size={24} />
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                <h3 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">Add Items</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                                    <div className="md:col-span-5">
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Product</label>
-                                        <SearchableSelect
-                                            options={products}
-                                            value={currentBillItem.productId}
-                                            onChange={(val: string) => {
-                                                const prod = products.find(p => p.id === val);
-                                                setCurrentBillItem({
-                                                    ...currentBillItem,
-                                                    productId: val,
-                                                    productName: prod?.name || '',
-                                                    unitPrice: prod?.costPrice || prod?.price || 0
-                                                });
-                                            }}
-                                            placeholder="Search Product"
-                                            className="w-full"
-                                            ref={billProductRef}
-                                            onKeyDown={(e: React.KeyboardEvent) => handleProductEntryKeyDown(e, 'product')}
-                                        />
+                            <div className="p-6 overflow-y-auto space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Bill Date</p>
+                                        <p className="font-medium text-slate-800">{selectedBill.billDate.toLocaleDateString()}</p>
                                     </div>
-                                    <div className="md:col-span-2">
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Quantity</label>
-                                        <input
-                                            ref={billQtyRef}
-                                            onKeyDown={(e) => handleProductEntryKeyDown(e, 'qty')}
-                                            type="number"
-                                            min="1"
-                                            className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={currentBillItem.quantity || ''}
-                                            onChange={e => setCurrentBillItem({ ...currentBillItem, quantity: parseFloat(e.target.value) || 0 })}
-                                        />
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Total Amount</p>
+                                        <p className="font-bold text-slate-800">₹{selectedBill.amount.toLocaleString()}</p>
                                     </div>
-                                    <div className="md:col-span-3">
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Unit Cost</label>
-                                        <input
-                                            ref={billCostRef}
-                                            onKeyDown={(e) => handleProductEntryKeyDown(e, 'cost')}
-                                            type="number"
-                                            className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={currentBillItem.unitPrice || ''}
-                                            onChange={e => setCurrentBillItem({ ...currentBillItem, unitPrice: parseFloat(e.target.value) || 0 })}
-                                        />
+                                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                                        <p className="text-[10px] text-emerald-600 uppercase font-bold mb-1">Paid Amount</p>
+                                        <p className="font-bold text-emerald-700">₹{selectedBill.paidAmount.toLocaleString()}</p>
                                     </div>
-                                    <div className="md:col-span-2">
-                                        <button
-                                            ref={billAddBtnRef}
-                                            type="button"
-                                            onClick={handleAddBillItem}
-                                            className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold hover:bg-slate-700 transition-colors"
-                                        >
-                                            Add
-                                        </button>
+                                    <div className={`${selectedBill.balance > 0 ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-200'} p-4 rounded-xl border`}>
+                                        <p className={`text-[10px] ${selectedBill.balance > 0 ? 'text-red-500' : 'text-slate-500'} uppercase font-bold mb-1`}>Balance</p>
+                                        <p className={`font-bold ${selectedBill.balance > 0 ? 'text-red-600' : 'text-slate-800'}`}>₹{selectedBill.balance.toLocaleString()}</p>
                                     </div>
                                 </div>
 
-                                {billItems.length > 0 && (
-                                    <div className="mt-4 border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                        <table className="w-full text-xs">
-                                            <thead className="bg-slate-100 text-slate-600 font-bold">
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Bill Items</h3>
+                                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-slate-50 text-slate-600 font-medium">
                                                 <tr>
-                                                    <th className="p-2 text-left">Product</th>
-                                                    <th className="p-2 text-center">Qty</th>
-                                                    <th className="p-2 text-right">Cost</th>
-                                                    <th className="p-2 text-right">Total</th>
-                                                    <th className="p-2 text-center">Action</th>
+                                                    <th className="p-3 text-left">Product</th>
+                                                    <th className="p-3 text-center">Quantity</th>
+                                                    <th className="p-3 text-right">Unit Price</th>
+                                                    <th className="p-3 text-right">Total</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100">
-                                                {billItems.map((item, idx) => (
-                                                    <tr key={idx}>
-                                                        <td className="p-2">{item.productName}</td>
-                                                        <td className="p-2 text-center">{item.quantity}</td>
-                                                        <td className="p-2 text-right">₹{item.unitPrice.toLocaleString()}</td>
-                                                        <td className="p-2 text-right font-bold">₹{item.total.toLocaleString()}</td>
-                                                        <td className="p-2 text-center">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const newItems = billItems.filter((_, i) => i !== idx);
-                                                                    setBillItems(newItems);
-                                                                    setBillForm(prev => ({ ...prev, amount: newItems.reduce((sum, item) => sum + item.total, 0) }));
-                                                                }}
-                                                                className="text-red-500 hover:text-red-700 p-1"
-                                                            >
-                                                                <X size={14} />
-                                                            </button>
-                                                        </td>
+                                                {selectedBill.items?.map((item: any, idx: number) => (
+                                                    <tr key={idx} className="hover:bg-slate-50/50">
+                                                        <td className="p-3 font-medium text-slate-800">{item.productName}</td>
+                                                        <td className="p-3 text-center">{item.quantity}</td>
+                                                        <td className="p-3 text-right text-slate-600">₹{item.unitPrice.toLocaleString()}</td>
+                                                        <td className="p-3 text-right font-bold text-slate-800">₹{item.total.toLocaleString()}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
                                     </div>
+                                </div>
+
+                                {billAllocations.length > 0 && (
+                                    <div className="space-y-3">
+                                        <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Payments History</h3>
+                                        <div className="space-y-2">
+                                            {billAllocations.map((alloc, idx) => {
+                                                const payment = payments.find(p => p.id === alloc.paymentId);
+                                                return (
+                                                    <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="bg-white p-2 rounded-md shadow-sm border border-slate-100">
+                                                                <Wallet size={16} className="text-emerald-600" />
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-bold text-slate-800">
+                                                                    {payment?.paymentNumber || 'Initial Adjustment'}
+                                                                </p>
+                                                                <p className="text-[10px] text-slate-500">
+                                                                    {payment ? new Date(payment.paymentDate).toLocaleDateString() : 'N/A'} • {payment?.paymentMode || '-'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <p className="font-bold text-emerald-600">₹{alloc.amount.toLocaleString()}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {selectedBill.notes && (
+                                    <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl">
+                                        <p className="text-[10px] text-orange-500 uppercase font-bold mb-1">Notes</p>
+                                        <p className="text-sm text-slate-700">{selectedBill.notes}</p>
+                                    </div>
                                 )}
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Total Bill Amount *</label>
-                                        <input
-                                            ref={billTotalRef}
-                                            onKeyDown={(e) => handleBillKeyDown(e)}
-                                            type="number"
-                                            required
-                                            className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-emerald-500 outline-none text-2xl font-bold text-emerald-600"
-                                            value={billForm.amount || ''}
-                                            onChange={e => setBillForm({ ...billForm, amount: parseFloat(e.target.value) || 0 })}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Due Date</label>
-                                        <input
-                                            ref={billDueDateRef}
-                                            onKeyDown={(e) => handleBillKeyDown(e)}
-                                            type="date"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={billForm.dueDate}
-                                            onChange={e => setBillForm({ ...billForm, dueDate: e.target.value })}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Notes / Remarks</label>
-                                    <textarea
-                                        ref={billNotesRef}
-                                        onKeyDown={(e) => handleBillKeyDown(e)}
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none h-[118px]"
-                                        placeholder="Add any additional details..."
-                                        value={billForm.notes}
-                                        onChange={e => setBillForm({ ...billForm, notes: e.target.value })}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="pt-6 border-t border-slate-100 flex gap-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsBillModalOpen(false)}
-                                    className="flex-1 py-4 text-slate-700 font-bold hover:bg-slate-50 rounded-xl border-2 border-slate-200 transition-all"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="flex-1 py-4 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 transition-all"
-                                >
-                                    Save Purchase Bill
-                                </button>
-                            </div>
-                        </form>
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
+            {/* END PART 2 */}
 
-            {/* View Bill Modal */}
-            {isViewBillModalOpen && selectedBill && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        onClick={() => setIsViewBillModalOpen(false)}
-                    />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <div>
-                                <h1 className="text-xl font-bold text-slate-800">
-                                    Bill Details: {selectedBill.billNumber}
-                                </h1>
-                                <p className="text-sm text-slate-500">
-                                    Supplier: {suppliers.find(s => s.id === selectedBill.supplierId)?.name}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => downloadBillPdf(selectedBill)}
-                                    disabled={isGeneratingPdf}
-                                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-md disabled:bg-emerald-400"
-                                >
-                                    {isGeneratingPdf ? 'Generating...' : <><Download size={16} /> Export PDF</>}
-                                </button>
-                                <button onClick={() => setIsViewBillModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
+            {/* Payment Modal */}
+            {
+                isPaymentModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div
+                            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                            onClick={() => setIsPaymentModalOpen(false)}
+                        />
+                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden z-10">
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                <h2 className="text-xl font-bold text-slate-800">
+                                    {editingPayment ? 'Edit Payment' : 'Record Payment'}
+                                </h2>
+                                <button onClick={() => setIsPaymentModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                                     <X size={24} />
                                 </button>
                             </div>
+                            <form onSubmit={handlePaymentSubmit} className="p-6 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
+                                    <SearchableSelect
+                                        options={suppliers.map(s => ({ ...s, name: `${s.name} (Bal: ₹${s.balance.toLocaleString()})` }))}
+                                        value={paymentForm.supplierId}
+                                        onChange={(val: string) => setPaymentForm({ ...paymentForm, supplierId: val })}
+                                        placeholder="Search Supplier"
+                                        className="w-full"
+                                        ref={paymentSupplierRef}
+                                        onKeyDown={(e: React.KeyboardEvent) => handlePaymentKeyDown(e)}
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Payment Number *</label>
+                                        <input
+                                            ref={paymentNumberRef}
+                                            onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                            type="text"
+                                            required
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={paymentForm.paymentNumber}
+                                            onChange={e => setPaymentForm({ ...paymentForm, paymentNumber: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Amount *</label>
+                                        <input
+                                            ref={paymentAmountRef}
+                                            onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                            type="number"
+                                            required
+                                            min="0"
+                                            step="0.01"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-emerald-600"
+                                            value={paymentForm.amount || ''}
+                                            onChange={e => setPaymentForm({ ...paymentForm, amount: parseFloat(e.target.value) || 0 })}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Payment Date *</label>
+                                        <input
+                                            ref={paymentDateRef}
+                                            onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                            type="date"
+                                            required
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={paymentForm.paymentDate}
+                                            onChange={e => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Mode</label>
+                                        <select
+                                            ref={paymentModeRef}
+                                            onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium"
+                                            value={paymentForm.paymentMode}
+                                            onChange={e => setPaymentForm({ ...paymentForm, paymentMode: e.target.value as any })}
+                                        >
+                                            <option value="CASH">CASH</option>
+                                            <option value="BANK_TRANSFER">BANK TRANSFER</option>
+                                            <option value="UPI">UPI</option>
+                                            <option value="CHEQUE">CHEQUE</option>
+                                            <option value="OTHER">OTHER</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Reference Number</label>
+                                    <input
+                                        ref={paymentReferenceRef}
+                                        onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                        type="text"
+                                        placeholder="Txn ID / Cheque No"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        value={paymentForm.referenceNumber}
+                                        onChange={e => setPaymentForm({ ...paymentForm, referenceNumber: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                                    <textarea
+                                        ref={paymentNotesRef}
+                                        onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        rows={2}
+                                        value={paymentForm.notes}
+                                        onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                                    />
+                                </div>
+                                <div className="pt-4 flex gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsPaymentModalOpen(false)}
+                                        className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg border border-slate-200"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-lg"
+                                    >
+                                        {editingPayment ? 'Update Payment' : 'Record Payment'}
+                                    </button>
+                                </div>
+                            </form>
                         </div>
+                    </div>
+                )
+            }
 
-                        <div className="p-6 overflow-y-auto space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Bill Date</p>
-                                    <p className="font-medium text-slate-800">{selectedBill.billDate.toLocaleDateString()}</p>
+            {/* Statement Modal */}
+            {
+                isStatementModalOpen && selectedSupplier && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div
+                            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                            onClick={() => setIsStatementModalOpen(false)}
+                        />
+                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10">
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                <div>
+                                    <h1 className="text-xl font-bold text-slate-800">
+                                        Supplier Statement: {selectedSupplier.name}
+                                    </h1>
+                                    <p className="text-sm text-slate-500">History of bills and payments</p>
                                 </div>
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Total Amount</p>
-                                    <p className="font-bold text-slate-800">₹{selectedBill.amount.toLocaleString()}</p>
-                                </div>
-                                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                                    <p className="text-[10px] text-emerald-600 uppercase font-bold mb-1">Paid Amount</p>
-                                    <p className="font-bold text-emerald-700">₹{selectedBill.paidAmount.toLocaleString()}</p>
-                                </div>
-                                <div className={`${selectedBill.balance > 0 ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-200'} p-4 rounded-xl border`}>
-                                    <p className={`text-[10px] ${selectedBill.balance > 0 ? 'text-red-500' : 'text-slate-500'} uppercase font-bold mb-1`}>Balance</p>
-                                    <p className={`font-bold ${selectedBill.balance > 0 ? 'text-red-600' : 'text-slate-800'}`}>₹{selectedBill.balance.toLocaleString()}</p>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={downloadStatementPdf}
+                                        disabled={isGeneratingPdf}
+                                        className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-md disabled:bg-emerald-400"
+                                    >
+                                        {isGeneratingPdf ? 'Generating...' : <><Download size={16} /> Export PDF</>}
+                                    </button>
+                                    <button onClick={() => setIsStatementModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
+                                        <X size={24} />
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="space-y-3">
-                                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Bill Items</h3>
-                                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-                                    <table className="w-full text-sm">
+                            <div className="p-6 overflow-y-auto max-h-[70vh]">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <p className="text-xs text-slate-500 uppercase font-semibold">Total Purchases</p>
+                                        <p className="text-lg font-bold text-slate-800">
+                                            ₹{statementData.reduce((sum, e) => sum + e.debit, 0).toLocaleString()}
+                                        </p>
+                                    </div>
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <p className="text-xs text-slate-500 uppercase font-semibold">Total Paid</p>
+                                        <p className="text-lg font-bold text-emerald-600">
+                                            ₹{statementData.reduce((sum, e) => sum + e.credit, 0).toLocaleString()}
+                                        </p>
+                                    </div>
+                                    <div className="bg-red-50 p-4 rounded-xl border border-red-100">
+                                        <p className="text-xs text-red-500 uppercase font-semibold">Current Balance</p>
+                                        <p className="text-lg font-bold text-red-600">₹{(selectedSupplier.balance || 0).toLocaleString()}</p>
+                                    </div>
+                                </div>
+
+                                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                                    <table className="w-full text-sm text-left">
                                         <thead className="bg-slate-50 text-slate-600 font-medium">
                                             <tr>
-                                                <th className="p-3 text-left">Product</th>
-                                                <th className="p-3 text-center">Quantity</th>
-                                                <th className="p-3 text-right">Unit Price</th>
-                                                <th className="p-3 text-right">Total</th>
+                                                <th className="p-4 border-b">Date</th>
+                                                <th className="p-4 border-b">Type</th>
+                                                <th className="p-4 border-b">Reference</th>
+                                                <th className="p-4 border-b text-left">Particulars</th>
+                                                <th className="p-4 border-b text-right">Debit (+)</th>
+                                                <th className="p-4 border-b text-right">Credit (-)</th>
+                                                <th className="p-4 border-b text-right bg-slate-100/50">Balance</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {selectedBill.items?.map((item: any, idx: number) => (
-                                                <tr key={idx} className="hover:bg-slate-50/50">
-                                                    <td className="p-3 font-medium text-slate-800">{item.productName}</td>
-                                                    <td className="p-3 text-center">{item.quantity}</td>
-                                                    <td className="p-3 text-right text-slate-600">₹{item.unitPrice.toLocaleString()}</td>
-                                                    <td className="p-3 text-right font-bold text-slate-800">₹{item.total.toLocaleString()}</td>
+                                            {statementData.map((entry, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                                    <td className="p-4 text-slate-600">{new Date(entry.date).toLocaleDateString()}</td>
+                                                    <td className="p-4">
+                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${entry.type === 'BILL' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
+                                                            {entry.type === 'BILL' ? 'BILL' : 'PAYMENT'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-4 font-mono text-xs">{entry.reference}</td>
+                                                    <td className="p-4 text-slate-500 max-w-[200px] truncate" title={entry.notes}>{entry.notes || '-'}</td>
+                                                    <td className="p-4 text-right text-slate-800">
+                                                        {entry.debit > 0 ? `₹${entry.debit.toLocaleString()}` : '-'}
+                                                    </td>
+                                                    <td className="p-4 text-right text-emerald-600">
+                                                        {entry.credit > 0 ? `₹${entry.credit.toLocaleString()}` : '-'}
+                                                    </td>
+                                                    <td className="p-4 text-right font-bold bg-slate-50 text-slate-900 border-l border-slate-100">
+                                                        ₹{(entry.balance || 0).toLocaleString()}
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
                                 </div>
                             </div>
-
-                            {billAllocations.length > 0 && (
-                                <div className="space-y-3">
-                                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Payments History</h3>
-                                    <div className="space-y-2">
-                                        {billAllocations.map((alloc, idx) => {
-                                            const payment = payments.find(p => p.id === alloc.paymentId);
-                                            return (
-                                                <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="bg-white p-2 rounded-md shadow-sm border border-slate-100">
-                                                            <Wallet size={16} className="text-emerald-600" />
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-sm font-bold text-slate-800">
-                                                                {payment?.paymentNumber || 'Initial Adjustment'}
-                                                            </p>
-                                                            <p className="text-[10px] text-slate-500">
-                                                                {payment ? new Date(payment.paymentDate).toLocaleDateString() : 'N/A'} • {payment?.paymentMode || '-'}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <p className="font-bold text-emerald-600">₹{alloc.amount.toLocaleString()}</p>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {selectedBill.notes && (
-                                <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl">
-                                    <p className="text-[10px] text-orange-500 uppercase font-bold mb-1">Notes</p>
-                                    <p className="text-sm text-slate-700">{selectedBill.notes}</p>
-                                </div>
-                            )}
                         </div>
                     </div>
-                </div>
-            )}
-            {/* END PART 2 */}
-
-            {/* Payment Modal */}
-            {isPaymentModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        onClick={() => setIsPaymentModalOpen(false)}
-                    />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden z-10">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h2 className="text-xl font-bold text-slate-800">Record Payment</h2>
-                            <button onClick={() => setIsPaymentModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                                <X size={24} />
-                            </button>
-                        </div>
-                        <form onSubmit={handlePaymentSubmit} className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
-                                <SearchableSelect
-                                    options={suppliers.map(s => ({ ...s, name: `${s.name} (Bal: ₹${s.balance.toLocaleString()})` }))}
-                                    value={paymentForm.supplierId}
-                                    onChange={(val: string) => setPaymentForm({ ...paymentForm, supplierId: val })}
-                                    placeholder="Search Supplier"
-                                    className="w-full"
-                                    ref={paymentSupplierRef}
-                                    onKeyDown={(e: React.KeyboardEvent) => handlePaymentKeyDown(e)}
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Payment Number *</label>
-                                    <input
-                                        ref={paymentNumberRef}
-                                        onKeyDown={(e) => handlePaymentKeyDown(e)}
-                                        type="text"
-                                        required
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={paymentForm.paymentNumber}
-                                        onChange={e => setPaymentForm({ ...paymentForm, paymentNumber: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Amount *</label>
-                                    <input
-                                        ref={paymentAmountRef}
-                                        onKeyDown={(e) => handlePaymentKeyDown(e)}
-                                        type="number"
-                                        required
-                                        min="0"
-                                        step="0.01"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-emerald-600"
-                                        value={paymentForm.amount || ''}
-                                        onChange={e => setPaymentForm({ ...paymentForm, amount: parseFloat(e.target.value) || 0 })}
-                                    />
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Payment Date *</label>
-                                    <input
-                                        ref={paymentDateRef}
-                                        onKeyDown={(e) => handlePaymentKeyDown(e)}
-                                        type="date"
-                                        required
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={paymentForm.paymentDate}
-                                        onChange={e => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Mode</label>
-                                    <select
-                                        ref={paymentModeRef}
-                                        onKeyDown={(e) => handlePaymentKeyDown(e)}
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium"
-                                        value={paymentForm.paymentMode}
-                                        onChange={e => setPaymentForm({ ...paymentForm, paymentMode: e.target.value as any })}
-                                    >
-                                        <option value="CASH">CASH</option>
-                                        <option value="BANK_TRANSFER">BANK TRANSFER</option>
-                                        <option value="UPI">UPI</option>
-                                        <option value="CHEQUE">CHEQUE</option>
-                                        <option value="OTHER">OTHER</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Reference Number</label>
-                                <input
-                                    ref={paymentReferenceRef}
-                                    onKeyDown={(e) => handlePaymentKeyDown(e)}
-                                    type="text"
-                                    placeholder="Txn ID / Cheque No"
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                    value={paymentForm.referenceNumber}
-                                    onChange={e => setPaymentForm({ ...paymentForm, referenceNumber: e.target.value })}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
-                                <textarea
-                                    ref={paymentNotesRef}
-                                    onKeyDown={(e) => handlePaymentKeyDown(e)}
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                    rows={2}
-                                    value={paymentForm.notes}
-                                    onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })}
-                                />
-                            </div>
-                            <div className="pt-4 flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsPaymentModalOpen(false)}
-                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg border border-slate-200"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-lg"
-                                >
-                                    Record Payment
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Statement Modal */}
-            {isStatementModalOpen && selectedSupplier && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        onClick={() => setIsStatementModalOpen(false)}
-                    />
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <div>
-                                <h1 className="text-xl font-bold text-slate-800">
-                                    Supplier Statement: {selectedSupplier.name}
-                                </h1>
-                                <p className="text-sm text-slate-500">History of bills and payments</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={downloadStatementPdf}
-                                    disabled={isGeneratingPdf}
-                                    className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-md disabled:bg-emerald-400"
-                                >
-                                    {isGeneratingPdf ? 'Generating...' : <><Download size={16} /> Export PDF</>}
-                                </button>
-                                <button onClick={() => setIsStatementModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
-                                    <X size={24} />
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="p-6 overflow-y-auto max-h-[70vh]">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                    <p className="text-xs text-slate-500 uppercase font-semibold">Total Purchases</p>
-                                    <p className="text-lg font-bold text-slate-800">
-                                        ₹{statementData.reduce((sum, e) => sum + e.debit, 0).toLocaleString()}
-                                    </p>
-                                </div>
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                    <p className="text-xs text-slate-500 uppercase font-semibold">Total Paid</p>
-                                    <p className="text-lg font-bold text-emerald-600">
-                                        ₹{statementData.reduce((sum, e) => sum + e.credit, 0).toLocaleString()}
-                                    </p>
-                                </div>
-                                <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-                                    <p className="text-xs text-red-500 uppercase font-semibold">Current Balance</p>
-                                    <p className="text-lg font-bold text-red-600">₹{selectedSupplier.balance.toLocaleString()}</p>
-                                </div>
-                            </div>
-
-                            <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                                <table className="w-full text-sm text-left">
-                                    <thead className="bg-slate-50 text-slate-600 font-medium">
-                                        <tr>
-                                            <th className="p-4 border-b">Date</th>
-                                            <th className="p-4 border-b">Type</th>
-                                            <th className="p-4 border-b">Reference</th>
-                                            <th className="p-4 border-b text-right">Debit (+)</th>
-                                            <th className="p-4 border-b text-right">Credit (-)</th>
-                                            <th className="p-4 border-b text-right bg-slate-100/50">Balance</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {statementData.map((entry, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                                <td className="p-4 text-slate-600">{new Date(entry.date).toLocaleDateString()}</td>
-                                                <td className="p-4">
-                                                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${entry.type === 'BILL' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                                                        {entry.type === 'BILL' ? 'BILL' : 'PAYMENT'}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4 font-mono text-xs">{entry.reference}</td>
-                                                <td className="p-4 text-right text-slate-800">
-                                                    {entry.debit > 0 ? `₹${entry.debit.toLocaleString()}` : '-'}
-                                                </td>
-                                                <td className="p-4 text-right text-emerald-600">
-                                                    {entry.credit > 0 ? `₹${entry.credit.toLocaleString()}` : '-'}
-                                                </td>
-                                                <td className="p-4 text-right font-bold bg-slate-50 text-slate-900 border-l border-slate-100">
-                                                    ₹{entry.balance.toLocaleString()}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }

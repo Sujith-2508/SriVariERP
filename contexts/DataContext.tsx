@@ -4,6 +4,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, PaymentAllocation, AgentTrackingData } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates } from '@/lib/agentTrackingService';
+import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
+import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
 
 interface InvoiceData {
     vehicleName?: string;
@@ -34,7 +36,7 @@ interface DataContextType {
     createInvoice: (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
     updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<void>;
     recordPayment: (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => Promise<string>;
-    updateStock: (productId: string, quantity: number) => void;
+    updateStock: (productId: string, quantity: number) => Promise<void>;
     addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
     updateProduct: (product: Product) => Promise<void>;
     deleteProduct: (id: string) => Promise<void>;
@@ -112,7 +114,20 @@ const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []
         destination: row.destination,
         paymentTerms: row.payment_terms,
         discountPercent: row.discount_percent ? Number(row.discount_percent) : undefined,
-        items: row.invoice_items ? row.invoice_items.map(transformInvoiceItem) : [],
+        items: row.invoice_items && row.invoice_items.length > 0
+            ? row.invoice_items.map(transformInvoiceItem)
+            : (() => {
+                // Fallback: parse items from notes JSON
+                try {
+                    if (row.notes) {
+                        const notes = JSON.parse(row.notes);
+                        if (notes.invoiceItems && Array.isArray(notes.invoiceItems)) {
+                            return notes.invoiceItems as InvoiceItem[];
+                        }
+                    }
+                } catch (e) { /* ignore parse errors */ }
+                return [];
+            })(),
         paymentAllocations: allocations,
         // Profit Analysis fields from DB
         cogs: Number(row.cogs) || 0,
@@ -178,42 +193,46 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [receiptCount, setReceiptCount] = useState(1);
     const [productCount, setProductCount] = useState(1);
 
-    // LocalStorage key for products
-    const PRODUCTS_KEY = 'sve_products';
-
-    // Helper functions for localStorage
-    const getLocalProducts = (): Product[] => {
-        if (typeof window === 'undefined') return [];
-        const data = localStorage.getItem(PRODUCTS_KEY);
-        return data ? JSON.parse(data) : [];
-    };
-
-    const saveLocalProducts = (data: Product[]) => {
-        localStorage.setItem(PRODUCTS_KEY, JSON.stringify(data));
-    };
-
-    // Fetch all data - Products from localStorage, others from Supabase
+    // Fetch all data - Products from Google Sheet, others from Supabase
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
 
         try {
-            // Fetch products from Supabase (Master Source)
-            const { data: productsData, error: productsError } = await supabase
-                .from('products')
-                .select('*')
-                .order('name');
-
-            if (productsError) {
-                console.error('Error fetching products from DB, falling back to local:', productsError);
-                const localProducts = getLocalProducts();
-                setProducts(localProducts);
-                setProductCount(localProducts.length + 1);
-            } else {
-                const dbProducts = productsData.map(transformProduct);
-                setProducts(dbProducts);
-                setProductCount(dbProducts.length + 1);
-                saveLocalProducts(dbProducts); // Update local cache
+            // Fetch products from Google Sheet via API (primary)
+            try {
+                const { products: sheetProducts } = await readProductsFromSheet();
+                if (sheetProducts.length > 0) {
+                    setProducts(sheetProducts);
+                    setProductCount(sheetProducts.length + 1);
+                    console.log('[DataContext] Loaded', sheetProducts.length, 'products from Google Sheet');
+                    saveLocalProducts(sheetProducts); // Cache for offline fallback
+                } else {
+                    // Empty sheet or tally format fallback
+                    const localProducts = getLocalProducts();
+                    setProducts(localProducts);
+                    setProductCount(localProducts.length + 1);
+                }
+            } catch (sheetErr) {
+                console.warn('[DataContext] authenticated Sheet fetch failed, trying CSV fallback:', sheetErr);
+                // Fallback to CSV URL (if configured) or localStorage
+                const sheetUrl = process.env.NEXT_PUBLIC_GOOGLE_SHEET_CSV_URL;
+                if (sheetUrl) {
+                    try {
+                        const csvProducts = await fetchProductsFromSheet(sheetUrl);
+                        setProducts(csvProducts);
+                        setProductCount(csvProducts.length + 1);
+                        console.log('[DataContext] Loaded', csvProducts.length, 'products from CSV fallback');
+                    } catch (csvErr) {
+                        const localProducts = getLocalProducts();
+                        setProducts(localProducts);
+                        setProductCount(localProducts.length + 1);
+                    }
+                } else {
+                    const localProducts = getLocalProducts();
+                    setProducts(localProducts);
+                    setProductCount(localProducts.length + 1);
+                }
             }
 
             // Fetch dealers from Supabase
@@ -280,7 +299,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Transform and set data
             setDealers(dealersData?.map(transformDealer) || []);
             setTransactions(transactionsWithItems.map(row => transformTransaction(row, transformedAllocations)));
-            setAgents(agentsData?.map(transformAgent) || []);
+
+            // Filter out deleted agents (those with "(Deleted)" in name or "del_" in ID/phone)
+            const allAgents = agentsData?.map(transformAgent) || [];
+            const filteredAgents = allAgents.filter(a => {
+                const isDeletedName = a.name?.includes('(Deleted)');
+                const isDeletedId = a.agentId?.startsWith('del_');
+                const isDeletedPhone = a.phone?.startsWith('del_');
+                return !isDeletedName && !isDeletedId && !isDeletedPhone;
+            });
+            setAgents(filteredAgents);
 
             // Calculate counts for numbering
             const invoices = transactionsData?.filter(t => t.type === 'INVOICE') || [];
@@ -361,47 +389,45 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, []); // Removed fetchData/loadTrackingData from deps to prevent infinite loops if they change
 
-    const updateStock = (productId: string, quantity: number) => {
+    const updateStock = async (productId: string, quantity: number) => {
         const currentProducts = getLocalProducts();
+        let updatedProduct: (Product & { rowIndex?: number }) | null = null;
         const updatedProducts = currentProducts.map(p => {
             if (p.id === productId || p.productId === productId) {
-                return { ...p, stock: p.stock - quantity };
+                const newStock = p.stock - quantity;
+                updatedProduct = { ...p, stock: newStock };
+                return updatedProduct;
             }
             return p;
         });
         saveLocalProducts(updatedProducts);
         setProducts(updatedProducts);
+
+        // Sync updated stock to Google Sheet in background
+        if (updatedProduct) {
+            const prod = updatedProduct as Product & { rowIndex?: number };
+            updateProductInSheet(prod.rowIndex || 0, prod).catch(e =>
+                console.warn('[DataContext] Stock sync to Google Sheet failed (non-critical):', e)
+            );
+        }
     };
 
     const addProduct = async (productData: Omit<Product, 'id'>) => {
-        const { data, error: supabaseError } = await supabase
-            .from('products')
-            .insert({
-                product_id: productData.productId,
-                name: productData.name,
-                category: productData.category,
-                price: productData.price,
-                cost_price: Number(productData.costPrice) || 0,
-                stock: productData.stock,
-                gst_rate: productData.gstRate,
-                hsn_code: productData.hsnCode,
-                unit: productData.unit,
-            })
-            .select()
-            .single();
+        const newProduct: Product = {
+            ...productData,
+            id: `P${String(productCount).padStart(3, '0')}`,
+        };
 
-        if (supabaseError) {
-            console.error('Error adding product to Supabase:', supabaseError.message);
-            throw new Error(`Failed to add product: ${supabaseError.message}`);
-        }
-
-        const newProduct = transformProduct(data);
-        setProducts(prev => [newProduct, ...prev]);
+        // Update local state immediately
+        const updatedProducts = [newProduct, ...products];
+        setProducts(updatedProducts);
         setProductCount(prev => prev + 1);
+        saveLocalProducts(updatedProducts);
 
-        // Update local cache
-        const currentLocal = getLocalProducts();
-        saveLocalProducts([newProduct, ...currentLocal]);
+        // Sync to Google Sheet directly
+        addProductToSheet(newProduct).catch(e =>
+            console.warn('[DataContext] Could not sync product add to Google Sheet:', e)
+        );
     };
 
     const updateProduct = async (updatedProduct: Product) => {
@@ -410,54 +436,38 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return;
         }
 
-        const { error: supabaseError } = await supabase
-            .from('products')
-            .update({
-                product_id: updatedProduct.productId,
-                name: updatedProduct.name,
-                category: updatedProduct.category,
-                price: updatedProduct.price,
-                cost_price: Number(updatedProduct.costPrice) || 0,
-                stock: updatedProduct.stock,
-                gst_rate: updatedProduct.gstRate,
-                hsn_code: updatedProduct.hsnCode || null,
-                unit: updatedProduct.unit || 'nos',
-            })
-            .eq('id', updatedProduct.id);
+        // Update local state immediately
+        const updatedProducts = products.map(p => p.id === updatedProduct.id ? updatedProduct : p);
+        setProducts(updatedProducts);
+        saveLocalProducts(updatedProducts);
 
-        if (supabaseError) {
-            console.error('[DataContext] Error updating product in Supabase:', {
-                message: supabaseError.message,
-                details: supabaseError.details,
-                hint: supabaseError.hint,
-                code: supabaseError.code
-            });
-            throw new Error(`Failed to update product: ${supabaseError.message}`);
+        // Sync to Google Sheet directly
+        const productIndex = products.findIndex(p => p.id === updatedProduct.id);
+        const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
+        if (rowIndex > 0) {
+            updateProductInSheet(rowIndex, updatedProduct).catch(e =>
+                console.warn('[DataContext] Could not sync product update to Google Sheet:', e)
+            );
         }
-
-        setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-
-        // Update local cache
-        const currentLocal = getLocalProducts();
-        saveLocalProducts(currentLocal.map(p => p.id === updatedProduct.id ? updatedProduct : p));
     };
 
     const deleteProduct = async (id: string) => {
-        const { error: supabaseError } = await supabase
-            .from('products')
-            .delete()
-            .eq('id', id);
+        // Find product and its row index before removing
+        const product = products.find(p => p.id === id);
+        const productIndex = products.findIndex(p => p.id === id);
 
-        if (supabaseError) {
-            console.error('Error deleting product from Supabase:', supabaseError.message);
-            throw new Error(`Failed to delete product: ${supabaseError.message}`);
+        // Update local state immediately
+        const updatedProducts = products.filter(p => p.id !== id);
+        setProducts(updatedProducts);
+        saveLocalProducts(updatedProducts);
+
+        // Sync to Google Sheet directly
+        const rowIndex = (product as any)?.rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
+        if (rowIndex > 0 || product?.name) {
+            deleteProductFromSheet(rowIndex, product?.name).catch(e =>
+                console.warn('[DataContext] Could not sync product delete to Google Sheet:', e)
+            );
         }
-
-        setProducts(prev => prev.filter(p => p.id !== id));
-
-        // Update local cache
-        const currentLocal = getLocalProducts();
-        saveLocalProducts(currentLocal.filter(p => p.id !== id));
     };
 
     const addDealer = async (dealerData: Omit<Dealer, 'id'>): Promise<string> => {
@@ -599,31 +609,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw new Error(`Failed to create invoice: ${txnError.message}`);
         }
 
-        // Insert invoice items
-        const itemsToInsert = items.map(item => ({
-            transaction_id: txnData.id,
-            product_id: item.productId,
-            product_name: item.productName,
-            quantity: item.quantity,
-            unit_price: item.unitPrice,
-            cgst: item.cgst,
-            sgst: item.sgst,
-            igst: item.igst,
-            cgst_amount: item.cgstAmount,
-            sgst_amount: item.sgstAmount,
-            igst_amount: item.igstAmount,
-            discount: item.discount,
-            discount_amount: item.discountAmount,
-            total: item.total,
-            hsn_code: item.hsnCode,
-            unit: item.unit,
-        }));
-
-        const { error: itemsError } = await supabase.from('invoice_items').insert(itemsToInsert);
-        if (itemsError) {
-            console.error('[DataContext] Error inserting invoice items:', itemsError.message, itemsError.details);
-            // We should probably still continue as the transaction is created, but log the error
-        }
+        // Invoice items are now stored in the notes JSON field (no separate table insert needed)
+        // Items are included in invoiceData.notes by the billing page
+        console.log('[DataContext] Invoice items stored in notes JSON:', items.length, 'items');
 
         // Calculate tax totals
         const totalCGST = items.reduce((sum, item) => sum + item.cgstAmount, 0);
@@ -637,14 +625,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const dealer = dealers.find(d => d.id === dealerId);
 
         // Insert into bill_payments table for mobile app to display invoice metadata
-        const { error: billPayError } = await supabase.from('bill_payments').insert({
-            receipt_number: null,
-            bill_number: invoiceNumber,
-            amount_applied: 0, // No payment applied yet
-            payment_date: invoiceDate.toISOString().split('T')[0], // Use invoice date as placeholder
-            payment_mode: null, // No payment mode until payment is made
-        });
-        if (billPayError) console.error('[DataContext] Error inserting bill_payment metadata:', billPayError.message);
+        // Wrapped in try-catch as this is non-critical and may fail due to FK constraints
+        try {
+            const { error: billPayError } = await supabase.from('bill_payments').insert({
+                receipt_number: null,
+                bill_number: invoiceNumber,
+                amount_applied: 0, // No payment applied yet
+                payment_date: invoiceDate.toISOString().split('T')[0], // Use invoice date as placeholder
+                payment_mode: null, // No payment mode until payment is made
+            });
+            if (billPayError) console.warn('[DataContext] bill_payment metadata insert skipped (non-critical):', billPayError.message);
+        } catch (e) {
+            console.warn('[DataContext] bill_payment metadata insert failed (non-critical):', e);
+        }
 
         // Update dealer balance
         if (dealer) {
@@ -687,17 +680,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const existingTxn = transactions.find(t => t.id === invoiceId);
         if (!existingTxn) throw new Error("Invoice not found");
 
-        const itemsResponse = await supabase
-            .from('invoice_items')
-            .select('*')
-            .eq('transaction_id', invoiceId);
-
-        const oldItems = itemsResponse.data || [];
+        // Get old items from notes JSON or context for stock restoration
+        let oldItems: InvoiceItem[] = existingTxn.items || [];
+        if (oldItems.length === 0 && existingTxn.notes) {
+            try {
+                const oldNotes = JSON.parse(existingTxn.notes);
+                if (oldNotes.invoiceItems) {
+                    oldItems = oldNotes.invoiceItems;
+                }
+            } catch (e) {
+                console.warn('[DataContext] Could not parse old items from notes');
+            }
+        }
 
         // 2. Restore Stock for OLD items
         for (const item of oldItems) {
             // updateStock subtracts, so passing negative quantity adds stock back
-            await updateStock(item.product_id, -item.quantity);
+            await updateStock(item.productId, -item.quantity);
         }
 
         // 3. Update Transaction Details
@@ -745,36 +744,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw new Error(`Failed to update invoice: ${updateError.message}`);
         }
 
-        // 4. Delete OLD invoice items
-        const { error: deleteItemsError } = await supabase
-            .from('invoice_items')
-            .delete()
-            .eq('transaction_id', invoiceId);
-
-        if (deleteItemsError) console.error('[DataContext] Error deleting old items:', deleteItemsError.message);
-
-        // 5. Insert NEW invoice items
-        const itemsToInsert = items.map(item => ({
-            transaction_id: invoiceId,
-            product_id: item.productId,
-            product_name: item.productName,
-            quantity: item.quantity,
-            unit_price: item.unitPrice,
-            cgst: item.cgst,
-            sgst: item.sgst,
-            igst: item.igst,
-            cgst_amount: item.cgstAmount,
-            sgst_amount: item.sgstAmount,
-            igst_amount: item.igstAmount,
-            discount: item.discount,
-            discount_amount: item.discountAmount,
-            total: item.total,
-            hsn_code: item.hsnCode,
-            unit: item.unit,
-        }));
-
-        const { error: newItemsError } = await supabase.from('invoice_items').insert(itemsToInsert);
-        if (newItemsError) console.error('[DataContext] Error inserting new items during update:', newItemsError.message);
+        // Invoice items are now stored in the notes JSON field (no separate table operations needed)
+        console.log('[DataContext] Invoice items stored in notes JSON during update:', items.length, 'items');
 
         // 6. Deduct Stock for NEW items
         for (const item of items) {
@@ -987,19 +958,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (delStatus.error) console.error('Error deleting status:', delStatus.error);
 
         // 4. Update local state
-        // We DO NOT filter them out, we update them so they show as "Inactive" in the list
-        setAgents(prev => prev.map(a => {
-            if (a.id === id) {
-                return {
-                    ...a,
-                    name: newName,
-                    isActive: false,
-                    phone: newPhone,
-                    agentId: newAgentId
-                };
-            }
-            return a;
-        }));
+        // We filter them out entirely so they disappear from all UI lists
+        setAgents(prev => prev.filter(a => a.id !== id));
 
         // Also remove from tracking data so they disappear from map immediately
         setTrackingData(prev => prev.filter(t => t.agent.id !== id));

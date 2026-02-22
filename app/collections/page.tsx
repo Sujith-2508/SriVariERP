@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Search, MapPin, Phone, Check, CheckCircle, Share2, Wallet, ArrowRight, FileText, User } from 'lucide-react';
 import { Dealer } from '@/types';
 import { calculateDealerStatement } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 
 export default function Collections() {
     const { dealers, transactions, agents, recordPayment } = useData();
@@ -14,6 +16,28 @@ export default function Collections() {
     const [method, setMethod] = useState('Cash');
     const [selectedAgent, setSelectedAgent] = useState(agents[0]?.name || 'Admin');
     const [isProcessing, setIsProcessing] = useState(false);
+    const [companySettings, setCompanySettings] = useState<any>(null);
+
+    // Load Company Settings
+    useEffect(() => {
+        const loadSettings = async () => {
+            const { data, error } = await supabase.from('company_settings').select('*').limit(1);
+            if (data && data[0]) {
+                const settings = data[0];
+                setCompanySettings({
+                    companyName: settings.company_name,
+                    addressLine1: settings.address_line1,
+                    city: settings.city,
+                    pinCode: settings.pin_code,
+                    gstNumber: settings.gst_number,
+                    phone: settings.phone
+                });
+            } else {
+                setCompanySettings(DEFAULT_COMPANY_SETTINGS);
+            }
+        };
+        loadSettings();
+    }, []);
 
     // Success State
     const [successData, setSuccessData] = useState<{
@@ -57,6 +81,20 @@ export default function Collections() {
         await new Promise(r => setTimeout(r, 1000));
 
         const receiptId = await recordPayment(activeDealer.id, amountNum, method, selectedAgent);
+
+        // Real-time Sync to Google Sheets
+        try {
+            const { syncPaymentToSheets } = await import('@/lib/googleSheetWriter');
+            await syncPaymentToSheets(
+                activeDealer.businessName,
+                receiptId,
+                amountNum,
+                method,
+                selectedAgent
+            );
+        } catch (syncError) {
+            console.error('[Collections] Sheets Sync Failed:', syncError);
+        }
 
         setSuccessData({
             dealerName: activeDealer.businessName,

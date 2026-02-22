@@ -26,6 +26,7 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            webSecurity: false, // Allow cross-origin fetch for Drive/Sheets sync
             preload: path.join(__dirname, 'preload.js')
         },
         title: 'Sri Vari Enterprises - Billing ERP',
@@ -33,34 +34,46 @@ function createWindow() {
     })
 
     // Remove default menu
-    win = mainWindow; // mapping back to existing names in some handlers if needed
-    win.setMenuBarVisibility(false)
+    mainWindow.setMenuBarVisibility(false)
 
     // Show window when ready to prevent white flash
-    win.once('ready-to-show', () => {
-        win.show()
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.show()
+    })
+
+    // CSP Fix for Google Drive & Sheets API
+    const { session } = require('electron')
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        callback({
+            responseHeaders: {
+                ...details.responseHeaders,
+                'Content-Security-Policy': [
+                    "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:3000 https://*.supabase.co https://*.googleapis.com https://*.google.com https://*.gstatic.com; connect-src 'self' http://localhost:3000 ws://localhost:3000 https://*.supabase.co wss://*.supabase.co https://*.googleapis.com https://*.google.com https://*.tile.openstreetmap.org;"
+                ]
+            }
+        })
     })
 
     if (isDev) {
         // Development: Load from Next.js dev server
         console.log('Loading from development server: http://localhost:3000')
-        win.loadURL('http://localhost:3000')
+        mainWindow.loadURL('http://localhost:3000')
         // DevTools disabled for clean UI
-        // win.webContents.openDevTools()
+        // mainWindow.webContents.openDevTools()
     } else {
         // Production: Load from static export
         console.log('Loading from production build:', outPath)
-        win.loadFile(outPath)
+        mainWindow.loadFile(outPath)
     }
 
     // Handle load errors
-    win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
         console.error(`Failed to load: ${errorDescription} (${errorCode})`)
         if (isDev) {
             // Retry loading after a short delay (dev server might still be starting)
             setTimeout(() => {
                 console.log('Retrying connection to dev server...')
-                win.loadURL('http://localhost:3000')
+                mainWindow.loadURL('http://localhost:3000')
             }, 2000)
         }
     })
@@ -70,6 +83,11 @@ function createWindow() {
 }
 
 function initWhatsApp() {
+    if (whatsappClient && (whatsappStatus === 'CONNECTING' || whatsappStatus === 'QR_READY' || whatsappStatus === 'AUTHENTICATED' || whatsappStatus === 'READY')) {
+        console.log('WhatsApp Client already initialized or connecting. Status:', whatsappStatus);
+        return;
+    }
+
     console.log('Initializing WhatsApp Client...');
     whatsappStatus = 'CONNECTING';
 
@@ -153,8 +171,29 @@ ipcMain.handle('whatsapp:send-pdf', async (event, { phoneNumber, pdfBase64, file
         return { success: true };
     } catch (err) {
         console.error('Failed to send WhatsApp message:', err);
+        // Specifically catch detached frame or similar errors
+        if (err.message && (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed'))) {
+            console.error('CRITICAL: WhatsApp browser context lost. Re-initialization recommended.');
+            whatsappStatus = 'DISCONNECTED';
+            if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+        }
         throw err;
     }
+});
+
+ipcMain.handle('whatsapp:reconnect', async () => {
+    console.log('Manual WhatsApp Reconnect Triggered');
+    if (whatsappClient) {
+        try {
+            await whatsappClient.destroy();
+        } catch (e) {
+            console.error('Error destroying old client:', e);
+        }
+        whatsappClient = null;
+    }
+    whatsappStatus = 'DISCONNECTED';
+    initWhatsApp();
+    return { status: whatsappStatus };
 });
 
 ipcMain.handle('whatsapp:get-status', () => {

@@ -152,44 +152,44 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                                 {/* Row 2: Delivery Note + Mode/Terms */}
                                 <tr>
                                     <td className={labelStyle}>Delivery Note</td>
-                                    <td className={cellStyle}>&nbsp;</td>
+                                    <td className={valueStyle}>{notes.deliveryNote || ''}</td>
                                     <td className={labelStyle}>Mode/Terms of Payment</td>
                                     <td className={valueStyle}>{invoice.paymentTerms || 'Immediate'}</td>
                                 </tr>
                                 {/* Row 3: Supplier's Ref + Other References */}
                                 <tr>
                                     <td className={labelStyle}>Supplier's Ref.</td>
-                                    <td className={cellStyle}>&nbsp;</td>
+                                    <td className={valueStyle}>{notes.supplierRef || ''}</td>
                                     <td className={labelStyle}>Other Reference(s)</td>
-                                    <td className={cellStyle}>&nbsp;</td>
+                                    <td className={valueStyle}>{notes.otherRef || ''}</td>
                                 </tr>
                                 {/* Row 4: Buyer's Order No + Dated */}
                                 <tr>
                                     <td className={labelStyle}>Buyer's Order No.</td>
-                                    <td className={cellStyle}>{notes.buyerOrderNo || ''}</td>
+                                    <td className={valueStyle}>{notes.buyerOrderNo || ''}</td>
                                     <td className={labelStyle}>Dated</td>
-                                    <td className={cellStyle}>{notes.buyerOrderDate ? new Date(notes.buyerOrderDate).toLocaleDateString('en-GB') : ''}</td>
+                                    <td className={valueStyle}>{notes.buyerOrderDate ? new Date(notes.buyerOrderDate).toLocaleDateString('en-GB') : ''}</td>
                                 </tr>
-                                {/* Row 5: Despatch Document No + Dated */}
+                                {/* Row 5: Despatch Document No + Vehicle Number */}
                                 <tr>
                                     <td className={labelStyle}>Despatch Document No.</td>
-                                    <td className={cellStyle}>{notes.dispatchDocNo || ''}</td>
-                                    <td className={labelStyle}>Dated</td>
-                                    <td className={valueStyle}>{notes.dispatchDocDate ? new Date(notes.dispatchDocDate).toLocaleDateString('en-GB') : ''}</td>
+                                    <td className={valueStyle}>{notes.dispatchDocNo || ''}</td>
+                                    <td className={labelStyle}>Vehicle Number</td>
+                                    <td className={valueStyle}>{invoice.vehicleNumber || ''}</td>
                                 </tr>
                                 {/* Row 6: Despatched through + Destination */}
                                 <tr>
                                     <td className={labelStyle}>Despatched through</td>
-                                    <td className={cellStyle}>{notes.dispatchThrough || invoice.vehicleName || ''}</td>
+                                    <td className={valueStyle}>{invoice.vehicleName || ''}</td>
                                     <td className={labelStyle}>Destination</td>
-                                    <td className={valueStyle}>{invoice.destination || dealer.city}</td>
+                                    <td className={valueStyle}>{invoice.destination || dealer.city || ''}</td>
                                 </tr>
                                 {/* Row 7: Terms of Delivery */}
                                 <tr>
                                     <td className={labelStyle} colSpan={4}>Terms of Delivery</td>
                                 </tr>
                                 <tr>
-                                    <td className={cellStyle} colSpan={4}>{notes.termsOfDelivery || ''}&nbsp;</td>
+                                    <td className={valueStyle} colSpan={4}>{notes.termsOfDelivery || ''}&nbsp;</td>
                                 </tr>
                             </tbody>
                         </table>

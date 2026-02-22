@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electron', {
         sendPDF: (phoneNumber, pdfBase64, filename, caption) =>
             ipcRenderer.invoke('whatsapp:send-pdf', { phoneNumber, pdfBase64, filename, caption }),
         getStatus: () => ipcRenderer.invoke('whatsapp:get-status'),
-        logout: () => ipcRenderer.invoke('whatsapp:logout')
+        logout: () => ipcRenderer.invoke('whatsapp:logout'),
+        reconnect: () => ipcRenderer.invoke('whatsapp:reconnect')
     }
 });

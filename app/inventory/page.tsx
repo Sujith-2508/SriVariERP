@@ -31,7 +31,7 @@ export default function Inventory() {
     }>({
         productId: '',
         name: '',
-        category: 'Cookware',
+        category: 'Castiron',
         price: '',
         costPrice: '',
         stock: '',
@@ -89,7 +89,7 @@ export default function Inventory() {
         setFormData({
             productId: '',
             name: '',
-            category: 'Cookware',
+            category: 'Castiron',
             price: '',
             costPrice: '',
             stock: '',
@@ -105,7 +105,7 @@ export default function Inventory() {
         setFormData({
             ...product,
             costPrice: product.costPrice || '',
-            gstRate: product.gstRate * 100, // Convert decimal to percentage for display
+            gstRate: product.gstRate > 1 ? product.gstRate : product.gstRate * 100, // Convert decimal to percentage for display, handle legacy whole numbers
             hsnCode: product.hsnCode || '',
             unit: product.unit || 'nos'
         });
@@ -176,7 +176,7 @@ export default function Inventory() {
     };
 
     return (
-        <div className="p-6 h-full overflow-y-auto relative">
+        <div className="p-6 h-full overflow-y-auto relative" >
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800">Inventory & Stock</h1>
@@ -196,6 +196,7 @@ export default function Inventory() {
                     <div className="relative flex-1 max-w-sm">
                         <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
                         <input
+                            id="inventory-search"
                             type="text"
                             placeholder="Search Product ID or Name..."
                             className="pl-10 pr-4 py-2 border rounded-lg w-full outline-none focus:ring-2 focus:ring-emerald-500"
@@ -433,106 +434,109 @@ export default function Inventory() {
                         </form>
                     </div>
                 </div>
-            )}
+            )
+            }
 
             {/* Update Stock Modal */}
-            {isStockModalOpen && stockUpdateProduct && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsStockModalOpen(false)}>
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                                <Package size={20} />
-                                Update Stock
-                            </h2>
-                            <button
-                                onClick={() => setIsStockModalOpen(false)}
-                                className="text-slate-400 hover:text-slate-600"
-                            >
-                                <X size={24} />
-                            </button>
-                        </div>
-
-                        <div className="p-6 space-y-4">
-                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                                <p className="font-medium text-slate-800">{stockUpdateProduct.name}</p>
-                                <p className="text-xs text-slate-500 mt-1">
-                                    Product ID: <span className="font-mono font-bold">{stockUpdateProduct.productId}</span>
-                                </p>
-                                <p className="text-sm text-slate-500">Current Stock: <strong>{stockUpdateProduct.stock}</strong></p>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Update Type</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setStockUpdateType('add')}
-                                        className={`py-2.5 rounded-lg border-2 font-medium text-sm transition-all ${stockUpdateType === 'add'
-                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
-                                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                                            }`}
-                                    >
-                                        Add to Stock
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setStockUpdateType('set')}
-                                        className={`py-2.5 rounded-lg border-2 font-medium text-sm transition-all ${stockUpdateType === 'set'
-                                            ? 'bg-blue-50 border-blue-500 text-blue-700'
-                                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                                            }`}
-                                    >
-                                        Set Stock To
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    {stockUpdateType === 'add' ? 'Quantity to Add' : 'New Stock Value'}
-                                </label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-lg font-medium text-center"
-                                    placeholder="0"
-                                    value={stockUpdateValue}
-                                    onChange={e => setStockUpdateValue(e.target.value)}
-                                />
-                            </div>
-
-                            {stockUpdateValue && (
-                                <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 text-center">
-                                    <span className="text-sm text-emerald-700">New Stock: </span>
-                                    <span className="font-bold text-emerald-800">
-                                        {stockUpdateType === 'add'
-                                            ? stockUpdateProduct.stock + (parseInt(stockUpdateValue) || 0)
-                                            : parseInt(stockUpdateValue) || 0
-                                        }
-                                    </span>
-                                </div>
-                            )}
-
-                            <div className="pt-2 flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsStockModalOpen(false)}
-                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleStockUpdate}
-                                    disabled={!stockUpdateValue}
-                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 disabled:bg-slate-300 disabled:shadow-none"
-                                >
+            {
+                isStockModalOpen && stockUpdateProduct && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsStockModalOpen(false)}>
+                        <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <Package size={20} />
                                     Update Stock
+                                </h2>
+                                <button
+                                    onClick={() => setIsStockModalOpen(false)}
+                                    className="text-slate-400 hover:text-slate-600"
+                                >
+                                    <X size={24} />
                                 </button>
+                            </div>
+
+                            <div className="p-6 space-y-4">
+                                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                    <p className="font-medium text-slate-800">{stockUpdateProduct.name}</p>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        Product ID: <span className="font-mono font-bold">{stockUpdateProduct.productId}</span>
+                                    </p>
+                                    <p className="text-sm text-slate-500">Current Stock: <strong>{stockUpdateProduct.stock}</strong></p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">Update Type</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setStockUpdateType('add')}
+                                            className={`py-2.5 rounded-lg border-2 font-medium text-sm transition-all ${stockUpdateType === 'add'
+                                                ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
+                                                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                                                }`}
+                                        >
+                                            Add to Stock
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setStockUpdateType('set')}
+                                            className={`py-2.5 rounded-lg border-2 font-medium text-sm transition-all ${stockUpdateType === 'set'
+                                                ? 'bg-blue-50 border-blue-500 text-blue-700'
+                                                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                                                }`}
+                                        >
+                                            Set Stock To
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                                        {stockUpdateType === 'add' ? 'Quantity to Add' : 'New Stock Value'}
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-lg font-medium text-center"
+                                        placeholder="0"
+                                        value={stockUpdateValue}
+                                        onChange={e => setStockUpdateValue(e.target.value)}
+                                    />
+                                </div>
+
+                                {stockUpdateValue && (
+                                    <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 text-center">
+                                        <span className="text-sm text-emerald-700">New Stock: </span>
+                                        <span className="font-bold text-emerald-800">
+                                            {stockUpdateType === 'add'
+                                                ? stockUpdateProduct.stock + (parseInt(stockUpdateValue) || 0)
+                                                : parseInt(stockUpdateValue) || 0
+                                            }
+                                        </span>
+                                    </div>
+                                )}
+
+                                <div className="pt-2 flex gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsStockModalOpen(false)}
+                                        className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleStockUpdate}
+                                        disabled={!stockUpdateValue}
+                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 disabled:bg-slate-300 disabled:shadow-none"
+                                    >
+                                        Update Stock
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }

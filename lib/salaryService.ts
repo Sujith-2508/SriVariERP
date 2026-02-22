@@ -118,7 +118,8 @@ export async function getSalaryByMonth(month: number, year: number): Promise<Age
         .order('created_at', { ascending: false });
 
     if (error) {
-        console.error('Error fetching salaries:', error);
+        // Silently handle — table may not exist yet
+        console.warn('Salary fetch skipped (table may not exist):', error.message || error.code || '');
         return [];
     }
 

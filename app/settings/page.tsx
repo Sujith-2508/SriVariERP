@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle } from 'lucide-react';
+import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive } from 'lucide-react';
 import WhatsAppSection from '@/components/WhatsAppSection';
 
 export default function SettingsPage() {
@@ -14,12 +14,28 @@ export default function SettingsPage() {
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [driveEmail, setDriveEmail] = useState('');
 
     useEffect(() => {
         // Load current username
         const storedUsername = localStorage.getItem('adminUsername') || 'SVadmin';
         setCurrentUsername(storedUsername);
+        // Load Drive email
+        const storedDriveEmail = localStorage.getItem('googleDriveEmail') || '';
+        setDriveEmail(storedDriveEmail);
     }, []);
+
+    const handleSaveDriveEmail = (e: React.FormEvent) => {
+        e.preventDefault();
+        const trimmed = driveEmail.trim();
+        if (trimmed) {
+            localStorage.setItem('googleDriveEmail', trimmed);
+        } else {
+            localStorage.removeItem('googleDriveEmail');
+        }
+        setMessage({ type: 'success', text: trimmed ? 'Google Drive email saved! Invoices folder will be shared with this email.' : 'Google Drive email cleared.' });
+        setTimeout(() => setMessage(null), 3000);
+    };
 
     // Password validation function
     const validatePassword = (pwd: string): { valid: boolean; message: string } => {
@@ -92,6 +108,41 @@ export default function SettingsPage() {
             <div className="max-w-2xl mx-auto">
                 {/* WhatsApp Connection Section */}
                 <WhatsAppSection />
+
+                {/* Google Drive Settings */}
+                <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+                    <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <HardDrive size={20} className="text-blue-500" />
+                        Google Drive
+                    </h2>
+                    <p className="text-sm text-slate-500 mb-3">
+                        Enter your Google email to access invoices. A &quot;SriVari Invoices&quot; folder with per-dealer subfolders will be shared with this email.
+                    </p>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                        <p className="text-xs text-blue-700">
+                            <strong>Folder structure:</strong> SriVari Invoices → Dealer Name → Invoices / Receipts
+                        </p>
+                    </div>
+                    <form onSubmit={handleSaveDriveEmail} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-600 mb-1">Google Email</label>
+                            <input
+                                type="email"
+                                value={driveEmail}
+                                onChange={(e) => setDriveEmail(e.target.value)}
+                                className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                placeholder="e.g. yourname@gmail.com"
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors"
+                        >
+                            Save Email
+                        </button>
+                    </form>
+                </div>
+
 
                 {/* Header */}
                 <div className="flex items-center gap-3 mb-8">

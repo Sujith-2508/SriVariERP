@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useData } from '@/contexts/DataContext';
 import { Agent } from '@/types';
 import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt } from 'lucide-react';
@@ -15,7 +16,16 @@ type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses' | 
 
 export default function AgentsPage() {
     const { agents, transactions, addAgent, updateAgent, deleteAgent, isLoading, trackingData, loadingTracking, refreshData } = useData();
+    const searchParams = useSearchParams();
     const [activeTab, setActiveTab] = useState<TabType>('overview');
+
+    // Handle tab change from query params (e.g. from Sidebar)
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab === 'overview') {
+            setActiveTab('overview');
+        }
+    }, [searchParams]);
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
     const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);

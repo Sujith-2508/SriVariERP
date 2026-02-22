@@ -33,8 +33,71 @@ function saveLocalData<T>(key: string, data: T[]) {
 // Supplier Operations
 // ============================================
 
+import { fetchRefinedSuppliers, fetchHistoricalVouchers } from './googleSheetSuppliers';
+import { syncAllStatements, syncLocalToDrive } from './folderSyncService';
+
 export async function getAllSuppliers(): Promise<SupplierData[]> {
-    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    let suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+
+    // Sync with Google Sheets in background (if in browser)
+    if (typeof window !== 'undefined') {
+        try {
+            const refinedSuppliers = await fetchRefinedSuppliers();
+            if (refinedSuppliers.length > 0) {
+                // Determine the new authoritative list
+                const syncedSuppliers = refinedSuppliers.map(refined => {
+                    const existing = suppliers.find(
+                        s => s.name?.toLowerCase().trim() === refined.name?.toLowerCase().trim()
+                    );
+
+                    // If it exists, keep the ID and balance, but update info from sheet
+                    if (existing) {
+                        return {
+                            ...existing,
+                            address: refined.address,
+                            gstNumber: refined.gstNumber,
+                            phone: refined.phone,
+                            updatedAt: new Date()
+                        };
+                    } else {
+                        // Brand new supplier from sheet
+                        return {
+                            ...refined,
+                            id: crypto.randomUUID(),
+                            balance: 0,
+                            createdAt: new Date(),
+                            updatedAt: new Date()
+                        };
+                    }
+                });
+
+                // Check if anything actually changed (ignoring timestamp differences for comparison)
+                const simplified = (list: SupplierData[]) => list.map(s => `${s.name}|${s.address}|${s.gstNumber}`).sort().join(',');
+                if (simplified(syncedSuppliers) !== simplified(suppliers)) {
+                    console.log('[PurchaseService] Authoritative sync: Updating local suppliers list from Google Sheet.');
+                    saveLocalData(KEYS.SUPPLIERS, syncedSuppliers);
+                    suppliers = syncedSuppliers;
+                }
+            }
+        } catch (err) {
+            console.error('[PurchaseService] Auto-sync failed:', err);
+        }
+
+        // Sync with Folder Statements (Authoritative for Lakshmi and others)
+        try {
+            await syncAllStatements();
+        } catch (err) {
+            console.error('[PurchaseService] Folder sync failed:', err);
+        }
+
+        // Sync historical vouchers (Fallback/Legacy)
+        try {
+            await syncHistoricalVouchers();
+        } catch (err) {
+            console.error('[PurchaseService] Historical sync failed:', err);
+        }
+    }
+
     return suppliers
         .map(s => ({
             ...s,
@@ -158,6 +221,12 @@ export async function createPurchaseBill(bill: {
         }
     }
 
+    // Track change to Drive
+    const supplier = suppliers.find(s => s.id === bill.supplierId);
+    if (supplier) {
+        syncLocalToDrive('PURCHASE', newBill, supplier.name);
+    }
+
     return newBill;
 }
 
@@ -226,6 +295,12 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
     const filteredAllocations = allocations.filter(a => a.billId !== billId);
     saveLocalData(KEYS.ALLOCATIONS, filteredAllocations);
 
+    // Track change to Drive
+    const supplier = suppliers.find(s => s.id === bill.supplierId);
+    if (supplier) {
+        syncLocalToDrive('PURCHASE', { ...bill, deleted: true }, supplier.name);
+    }
+
     return true;
 }
 
@@ -260,7 +335,7 @@ export async function createPurchasePayment(payment: {
     saveLocalData(KEYS.PAYMENTS, [newPayment, ...payments]);
 
     // 2. Apply FIFO allocation
-    applyFIFOAllocationLocal(payment.supplierId, newPayment.id, payment.paymentNumber, payment.amount, payment.paymentDate);
+    applyFIFOAllocationLocal(payment.supplierId, newPayment.id, newPayment.paymentNumber, newPayment.amount, newPayment.paymentDate);
 
     // 3. Update supplier balance
     const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
@@ -270,6 +345,12 @@ export async function createPurchasePayment(payment: {
         suppliers[supplierIndex].lastTransactionDate = new Date();
         suppliers[supplierIndex].updatedAt = new Date();
         saveLocalData(KEYS.SUPPLIERS, suppliers);
+    }
+
+    // Track change to Drive
+    const supplier = suppliers.find(s => s.id === payment.supplierId);
+    if (supplier) {
+        syncLocalToDrive('PAYMENT', newPayment, supplier.name);
     }
 
     return newPayment;
@@ -336,6 +417,59 @@ export async function getPurchasePayments(supplierId?: string): Promise<Purchase
     }
 
     return filtered.sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime());
+}
+
+export async function updatePurchasePayment(paymentId: string, updates: Partial<PurchasePaymentData>): Promise<boolean> {
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+    const index = payments.findIndex(p => p.id === paymentId);
+    if (index === -1) return false;
+
+    const payment = payments[index];
+    const supplierId = payment.supplierId;
+
+    payments[index] = {
+        ...payment,
+        ...updates,
+        // Ensure some fields aren't changed via partial updates if they shouldn't be
+        id: payment.id,
+        supplierId: payment.supplierId
+    };
+
+    saveLocalData(KEYS.PAYMENTS, payments);
+
+    // After updating payment, we MUST reallocate everything for this supplier to ensure FIFO correctness
+    await reallocateAllSupplierPayments(supplierId);
+
+    // Track change to Drive
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplier = suppliers.find(s => s.id === supplierId);
+    if (supplier) {
+        syncLocalToDrive('PAYMENT', payments[index], supplier.name);
+    }
+
+    return true;
+}
+
+export async function deletePurchasePayment(paymentId: string): Promise<boolean> {
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+    const payment = payments.find(p => p.id === paymentId);
+    if (!payment) return false;
+
+    const supplierId = payment.supplierId;
+    const filteredPayments = payments.filter(p => p.id !== paymentId);
+    saveLocalData(KEYS.PAYMENTS, filteredPayments);
+
+    // After deleting payment, we MUST reallocate everything for this supplier
+    await reallocateAllSupplierPayments(supplierId);
+
+    // Track change to Drive
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const sObj = suppliers.find(s => s.id === supplierId);
+    if (sObj) {
+        syncLocalToDrive('PAYMENT', { ...payment, deleted: true }, sObj.name);
+    }
+
+    return true;
 }
 
 // ============================================
@@ -440,4 +574,163 @@ export async function getBillAllocations(billId: string): Promise<PurchaseAlloca
             createdAt: new Date(a.createdAt)
         }))
         .sort((a, b) => b.allocationDate.getTime() - a.allocationDate.getTime());
+}
+export async function syncHistoricalVouchers(): Promise<void> {
+    try {
+        const vouchers = await fetchHistoricalVouchers();
+        if (vouchers.length === 0) return;
+
+        const currentBills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+        const currentPayments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+        const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+
+        let billsModified = false;
+        let paymentsModified = false;
+
+        // Track suppliers that need reallocation
+        const suppliersToReallocate = new Set<string>();
+
+        // "Remove testing data" - as requested by user.
+        // Identify test data (non-HIST) and remove it.
+        const originalBillCount = currentBills.length;
+        const cleanBills = currentBills.filter(b => b.id.startsWith('HIST-'));
+        if (cleanBills.length !== originalBillCount) {
+            console.log(`[PurchaseService] Removed ${originalBillCount - cleanBills.length} test bills.`);
+            currentBills.length = 0;
+            currentBills.push(...cleanBills);
+            billsModified = true;
+        }
+
+        const originalPaymentCount = currentPayments.length;
+        const cleanPayments = currentPayments.filter(p => p.id.startsWith('HIST-'));
+        if (cleanPayments.length !== originalPaymentCount) {
+            console.log(`[PurchaseService] Removed ${originalPaymentCount - cleanPayments.length} test payments.`);
+            currentPayments.length = 0;
+            currentPayments.push(...cleanPayments);
+            paymentsModified = true;
+        }
+
+        vouchers.forEach((vch: any) => {
+            const supplier = suppliers.find(s => s.name?.toLowerCase().trim() === vch.supplierName.toLowerCase().trim());
+            if (!supplier) return;
+
+            const vchTypeLower = (vch.vchType || '').toLowerCase();
+            const deterministicId = `HIST-${vch.supplierName}-${vch.date}-${vch.vchType}-${vch.vchNo}`;
+
+            // Robust Purchase detection (catches PURSHASE, etc.)
+            if (vchTypeLower.includes('pur') || vchTypeLower.includes('pru') || vch.date === 'Opening') {
+                const existing = currentBills.find(b => b.id === deterministicId);
+                if (!existing) {
+                    const billDate = vch.date === 'Opening' ? new Date('2019-04-01') : new Date(vch.date);
+                    currentBills.push({
+                        id: deterministicId,
+                        supplierId: supplier.id,
+                        billNumber: vch.vchNo || (vch.date === 'Opening' ? 'OPENING' : `P-${vch.date.replace(/-/g, '')}`),
+                        billDate: billDate,
+                        amount: vch.credit || vch.debit || 0,
+                        paidAmount: 0,
+                        balance: vch.credit || vch.debit || 0,
+                        notes: `Historical: ${vch.particulars}`,
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    });
+                    billsModified = true;
+                    suppliersToReallocate.add(supplier.id);
+                }
+            }
+            // Robust Payment detection (catches PAY, REC, journaling)
+            else if (vchTypeLower.includes('pay') || vchTypeLower.includes('rec') || vchTypeLower.includes('journal') || (vch.debit > 0 && vch.credit === 0)) {
+                const existing = currentPayments.find(p => p.id === deterministicId);
+                if (!existing) {
+                    currentPayments.push({
+                        id: deterministicId,
+                        supplierId: supplier.id,
+                        paymentNumber: vch.vchNo || `PMT-${vch.date.replace(/-/g, '')}`,
+                        paymentDate: new Date(vch.date),
+                        amount: vch.debit || vch.credit || 0,
+                        paymentMode: 'OTHERS' as any,
+                        notes: `Historical: ${vch.particulars}`,
+                        createdAt: new Date()
+                    });
+                    paymentsModified = true;
+                    suppliersToReallocate.add(supplier.id);
+                }
+            }
+        });
+
+        if (billsModified) saveLocalData(KEYS.BILLS, currentBills);
+        if (paymentsModified) saveLocalData(KEYS.PAYMENTS, currentPayments);
+
+        if (suppliersToReallocate.size > 0) {
+            console.log(`[PurchaseService] Historical sync: Reallocating for ${suppliersToReallocate.size} suppliers.`);
+            for (const supplierId of suppliersToReallocate) {
+                await reallocateAllSupplierPayments(supplierId);
+            }
+        }
+    } catch (error) {
+        console.error('[PurchaseService] Failed to sync historical vouchers:', error);
+    }
+}
+
+export async function reallocateAllSupplierPayments(supplierId: string): Promise<void> {
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS);
+
+    // 1. Reset all bills for this supplier
+    bills.forEach(b => {
+        if (b.supplierId === supplierId) {
+            b.paidAmount = 0;
+            b.balance = b.amount;
+        }
+    });
+
+    // 2. Clear existing allocations for this supplier
+    const filteredAllocations = allocations.filter(a => {
+        const bill = bills.find(b => b.id === a.billId);
+        return bill?.supplierId !== supplierId;
+    });
+
+    // 3. Get all payments for this supplier sorted by date
+    const supplierPayments = payments
+        .filter(p => p.supplierId === supplierId)
+        .sort((a, b) => new Date(a.paymentDate).getTime() - new Date(b.paymentDate).getTime());
+
+    // 4. Apply each payment using FIFO
+    const newAllocations = [...filteredAllocations];
+
+    for (const payment of supplierPayments) {
+        const unpaidBills = bills
+            .filter(b => b.supplierId === supplierId && b.balance > 0)
+            .sort((a, b) => new Date(a.billDate).getTime() - new Date(b.billDate).getTime());
+
+        let remainingAmount = payment.amount;
+
+        for (const bill of unpaidBills) {
+            if (remainingAmount <= 0) break;
+
+            const allocationAmount = Math.min(remainingAmount, bill.balance);
+
+            newAllocations.push({
+                id: crypto.randomUUID(),
+                billId: bill.id,
+                billNumber: bill.billNumber,
+                paymentId: payment.id,
+                paymentNumber: payment.paymentNumber,
+                amount: allocationAmount,
+                allocationDate: payment.paymentDate,
+                createdAt: new Date()
+            });
+
+            bill.paidAmount = (bill.paidAmount || 0) + allocationAmount;
+            bill.balance = bill.amount - bill.paidAmount;
+            remainingAmount -= allocationAmount;
+        }
+    }
+
+    saveLocalData(KEYS.BILLS, bills);
+    saveLocalData(KEYS.ALLOCATIONS, newAllocations);
+
+    // 5. Update supplier balance
+    await recalculateSupplierBalance(supplierId);
 }

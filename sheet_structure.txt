@@ -1,0 +1,33 @@
+
+--- Range: 'Ledger Vouchers'!A1:G5 ---
+Row 0: [0]SRI VARI ENTERPRISES
+Row 1: [0]T.S.NO:609
+Row 2: [0]BLOCK NO:9,PALANIYAPPAN STREET
+Row 3: [0]POLLACHI 642001
+Row 4: [0]GST IN:33DIGPM0162N1Z6
+
+--- Range: 'Ledger Vouchers'!A100:G110 ---
+Row 0: [0]5-Oct-23 | [1]By | [2]CASH DISCOUNT | [3]Receipt | [4] | [5] | [6]175.00
+Row 1: [0]12-Oct-23 | [1] | [2] | [3] | [4] | [5] | [6]1000.00
+Row 2: [0]19-Oct-23 | [1]To | [2]SALES | [3]Sales | [4]2437 | [5]7500.00
+Row 3: [0]19-Oct-23 | [1]By | [2]TMB OD
+Row 4: [0]19-Oct-23 | [1]By | [2] | [3]Stock Return | [4]0 | [5] | [6]545.00
+Row 5: [0]19-Oct-23 | [1]By | [2] | [3]Receipt | [4]000 | [5] | [6]750.00
+Row 6: [0]9-Nov-23 | [1]By | [2]TMB OD | [3] | [4] | [5] | [6]3000.00
+Row 7: [0]16-Nov-23 | [1] | [2] | [3] | [4] | [5] | [6]2000.00
+Row 8: [0]7-Dec-23 | [1]By | [2]TMB OD | [3]Receipt | [4] | [5] | [6]2500.00
+Row 9: [0]21-Dec-23
+Row 10: [0]21-Dec-23 | [1]By | [2]TMB OD | [3]Receipt | [4]4488 | [5] | [6]2000.00
+
+--- Range: 'Ledger Vouchers'!A20000:G20010 ---
+Row 0: [0]12-Mar-22 | [1]By | [2]SELVAKUMAR METAL  MART | [3]Sales | [4]1693 | [5] | [6]12094.86
+Row 1: [0]15-Mar-22 | [1]By | [2]DHANUJA METAL MART | [3]Sales | [4] | [5] | [6]300.00
+Row 2: [0]17-Mar-22 | [1]By | [2]Kamatchi Steel House | [3]Sales | [4]1694 | [5] | [6]3696.85
+Row 3: [0]18-Mar-22 | [1]By | [2]MUTHU METAL | [3]Sales | [4]0000 | [5] | [6]23952.37
+Row 4: [0]18-Mar-22 | [1]By | [2]A.K.KRISHNASAMY CHETTIAR&S0NS | [3]Sales | [4]1695 | [5] | [6]5161.56
+Row 5: [0]19-Mar-22 | [1]By | [2]DINDUGAL APPLIANCES AND SERVICES | [3]Sales | [4]1696 | [5] | [6]5153.40
+Row 6: [0]19-Mar-22 | [1]By | [2]SRI KRISHNA FURNITURES&HOME APPLIANCES | [3]Sales | [4]1697 | [5] | [6]9706.00
+Row 7: [0]19-Mar-22 | [1]By | [2]SRI KRISHNA FURNITURES&HOME APPLIANCES | [3]Sales | [4]1698 | [5] | [6]357.50
+Row 8: [0]19-Mar-22 | [1]By | [2]PUSHPAVALLI STORES | [3]Sales | [4]1699 | [5] | [6]3402.30
+Row 9: [0]19-Mar-22 | [1]By | [2]KAVI TRADERS | [3]Sales | [4]1700 | [5] | [6]5153.40
+Row 10: [0]19-Mar-22 | [1]By | [2]KAVI TRADERS | [3]Sales | [4]1701 | [5] | [6]715.00

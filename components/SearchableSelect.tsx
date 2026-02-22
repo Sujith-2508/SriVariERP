@@ -238,13 +238,32 @@ const SearchableSelect = React.forwardRef<any, SearchableSelectProps>((props, re
                                     key={option.id}
                                     onClick={() => handleSelect(option)}
                                     className={`
-                                        flex justify-between items-center px-3 py-2.5 rounded-lg cursor-pointer transition-colors text-sm mb-0.5
-                                        ${index === highlightedIndex ? 'bg-emerald-50 text-emerald-800 font-medium' : 'text-slate-600 hover:bg-slate-50'}
+                                        flex flex-col px-3 py-2.5 rounded-lg cursor-pointer transition-colors mb-0.5
+                                        ${index === highlightedIndex ? 'bg-emerald-50 text-emerald-800' : 'text-slate-600 hover:bg-slate-50'}
                                     `}
                                     onMouseEnter={() => setHighlightedIndex(index)}
                                 >
-                                    <span className="truncate">{option.name}</span>
-                                    {option.id === value && <Check size={16} className="text-emerald-600 shrink-0 ml-2" />}
+                                    <div className="flex justify-between items-center w-full">
+                                        <span className={`truncate text-sm ${index === highlightedIndex ? 'font-bold' : 'font-medium'}`}>
+                                            {option.name}
+                                        </span>
+                                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                                            {option.stock !== undefined && (
+                                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${option.stock <= 0 ? 'bg-red-100 text-red-700' :
+                                                        option.stock < 50 ? 'bg-amber-100 text-amber-700' :
+                                                            'bg-emerald-100 text-emerald-700'
+                                                    }`}>
+                                                    {option.stock} qty
+                                                </span>
+                                            )}
+                                            {option.id === value && <Check size={16} className="text-emerald-600 shrink-0" />}
+                                        </div>
+                                    </div>
+                                    {option.description && (
+                                        <span className={`text-[10px] truncate ${index === highlightedIndex ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                            {option.description}
+                                        </span>
+                                    )}
                                 </div>
                             ))
                         ) : (

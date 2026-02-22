@@ -1,0 +1,237 @@
+/**
+ * Google Sheets Product API Route
+ * 
+ * Server-side API for reading/writing product data to Google Sheets.
+ * Uses a service account for authentication.
+ * 
+ * Sheet structure (ProdData tab):
+ * Column A: Product Name
+ * Column B: Category
+ * Column C: HSN Code
+ * Column D: Unit
+ * Column E: Cost Price
+ * Column F: Selling Price
+ * Column G: GST%
+ * Column H: Stock
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { google } from 'googleapis';
+
+const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0';
+const SHEET_NAME = process.env.GOOGLE_SHEET_TAB_NAME || 'ProdData';
+const HEADER_ROW = ['Product Name', 'Category', 'HSN Code', 'Unit', 'Cost Price', 'Selling Price', 'GST%', 'Stock'];
+
+// Initialize Google Sheets API with service account
+function getSheets() {
+    const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    if (!credentials) {
+        throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY environment variable not set');
+    }
+
+    const auth = new google.auth.GoogleAuth({
+        credentials: JSON.parse(credentials),
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    return google.sheets({ version: 'v4', auth });
+}
+
+// GET: Read all products from sheet
+export async function GET() {
+    try {
+        const sheets = getSheets();
+
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME}!A:H`,
+        });
+
+        const rows = response.data.values || [];
+        if (rows.length < 2) {
+            return NextResponse.json({ products: [] });
+        }
+
+        // Find header row
+        let headerIndex = -1;
+        for (let i = 0; i < Math.min(rows.length, 15); i++) {
+            const row = rows[i].map((c: string) => c?.toLowerCase().trim() || '');
+            if (row.some((c: string) => c.includes('product name'))) {
+                headerIndex = i;
+                break;
+            }
+        }
+
+        // If no header found, assume first row that has Product Name header format
+        if (headerIndex === -1) {
+            // No structured headers, return raw data for client-side parsing
+            return NextResponse.json({ products: [], raw: rows, format: 'tally' });
+        }
+
+        const headers = rows[headerIndex].map((h: string) => h.toLowerCase().trim());
+        const products = [];
+
+        for (let i = headerIndex + 1; i < rows.length; i++) {
+            const row = rows[i];
+            const name = row[0]?.trim();
+            if (!name) continue;
+
+            products.push({
+                rowIndex: i + 1, // 1-indexed for Sheets API
+                productId: `P${String(i - headerIndex).padStart(3, '0')}`,
+                name: name,
+                category: row[1]?.trim() || 'General',
+                hsnCode: row[2]?.trim() || '',
+                unit: row[3]?.trim() || 'nos',
+                costPrice: parseFloat(row[4]) || 0,
+                price: parseFloat(row[5]) || 0,
+                gstRate: parseFloat(row[6]) || 0,
+                stock: parseInt(row[7]) || 0,
+            });
+        }
+
+        return NextResponse.json({ products, format: 'structured' });
+
+    } catch (error: any) {
+        const errorDetails = {
+            message: error.message,
+            code: error.code,
+            status: error?.response?.status,
+            statusText: error?.response?.statusText,
+            errors: error?.errors,
+            details: error?.response?.data?.error?.message,
+        };
+        console.error('[API/Products] Error reading sheet:', JSON.stringify(errorDetails, null, 2));
+        return NextResponse.json({ error: error.message, details: errorDetails }, { status: 500 });
+    }
+}
+
+// POST: Add a new product (append row)
+export async function POST(request: NextRequest) {
+    try {
+        const sheets = getSheets();
+        const product = await request.json();
+
+        // First ensure headers exist
+        await ensureHeaders(sheets);
+
+        // Append the new product row
+        await sheets.spreadsheets.values.append({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME}!A:H`,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [[
+                    product.name || '',
+                    product.category || 'General',
+                    product.hsnCode || '',
+                    product.unit || 'nos',
+                    product.costPrice || 0,
+                    product.price || 0,
+                    product.gstRate || 0,
+                    product.stock || 0,
+                ]],
+            },
+        });
+
+        return NextResponse.json({ success: true });
+
+    } catch (error: any) {
+        console.error('[API/Products] Error adding product:', error.message);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
+// PUT: Update a product (update specific row)
+export async function PUT(request: NextRequest) {
+    try {
+        const sheets = getSheets();
+        const { rowIndex, product } = await request.json();
+
+        if (!rowIndex) {
+            return NextResponse.json({ error: 'rowIndex is required' }, { status: 400 });
+        }
+
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME}!A${rowIndex}:H${rowIndex}`,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [[
+                    product.name || '',
+                    product.category || 'General',
+                    product.hsnCode || '',
+                    product.unit || 'nos',
+                    product.costPrice || 0,
+                    product.price || 0,
+                    product.gstRate || 0,
+                    product.stock || 0,
+                ]],
+            },
+        });
+
+        return NextResponse.json({ success: true });
+
+    } catch (error: any) {
+        console.error('[API/Products] Error updating product:', error.message);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
+// DELETE: Delete a product (clear row content)
+export async function DELETE(request: NextRequest) {
+    try {
+        const sheets = getSheets();
+        const { rowIndex } = await request.json();
+
+        if (!rowIndex) {
+            return NextResponse.json({ error: 'rowIndex is required' }, { status: 400 });
+        }
+
+        // Clear the row content (vs actually deleting the row which shifts indices)
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME}!A${rowIndex}:H${rowIndex}`,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [['', '', '', '', '', '', '', '']],
+            },
+        });
+
+        return NextResponse.json({ success: true });
+
+    } catch (error: any) {
+        console.error('[API/Products] Error deleting product:', error.message);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
+// Ensure the header row exists in the sheet
+async function ensureHeaders(sheets: any) {
+    try {
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME}!A1:H1`,
+        });
+
+        const firstRow = response.data.values?.[0] || [];
+        const hasHeaders = firstRow.some((c: string) => c?.toLowerCase().includes('product name'));
+
+        if (!hasHeaders) {
+            // Check if the existing data starts from row 1 (Tally format)
+            // In that case, insert header at row 1 by shifting data down
+            // For now, just update row 1 with headers
+            console.log('[API/Products] Adding header row to sheet');
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `${SHEET_NAME}!A1:H1`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [HEADER_ROW],
+                },
+            });
+        }
+    } catch (e: any) {
+        console.warn('[API/Products] Could not verify headers:', e.message);
+    }
+}

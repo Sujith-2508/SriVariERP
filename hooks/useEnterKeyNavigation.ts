@@ -1,43 +1,93 @@
 import { RefObject } from 'react';
 
 /**
- * Custom hook for handling Enter key navigation between form fields
- * @param fieldRefs - Array of refs to form fields in navigation order
- * @returns handleKeyDown function to attach to form fields
+ * Custom hook for handling keyboard navigation between form fields
+ * - Enter  → move to next field (or submit if on last field)
+ * - ArrowRight (when cursor at end)  → move to next field
+ * - ArrowLeft  (when cursor at start) → move to previous field
+ *
+ * @param fieldRefs       Array of refs in navigation order
+ * @param onLastFieldEnter Optional callback fired when Enter is pressed on the last field
  */
 export function useEnterKeyNavigation(
-    fieldRefs: { current: HTMLElement | null }[]
+    fieldRefs: { current: HTMLElement | null }[],
+    onLastFieldEnter?: () => void
 ) {
+    const focusField = (index: number) => {
+        const field = fieldRefs[index]?.current;
+        if (!field) return false;
+
+        // Skip disabled or hidden fields
+        if ((field as any).disabled || field.offsetParent === null) return false;
+
+        field.focus();
+        if (field instanceof HTMLSelectElement) field.click();
+        return true;
+    };
+
+    const focusNext = (currentIndex: number) => {
+        let next = currentIndex + 1;
+        while (next < fieldRefs.length) {
+            if (focusField(next)) return true;
+            next++;
+        }
+        return false; // reached end
+    };
+
+    const focusPrev = (currentIndex: number) => {
+        let prev = currentIndex - 1;
+        while (prev >= 0) {
+            if (focusField(prev)) return true;
+            prev--;
+        }
+        return false;
+    };
+
+    const getCurrentIndex = (e: React.KeyboardEvent) => {
+        const idx = fieldRefs.findIndex(ref => ref.current === e.currentTarget);
+        return idx !== -1 ? idx : 0;
+    };
+
+    /** True when the text cursor sits at position 0 (or the element has no selectionStart) */
+    const cursorAtStart = (el: EventTarget) => {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+            return (el.selectionStart ?? 0) === 0;
+        }
+        return true; // select / button — always allow
+    };
+
+    /** True when the text cursor sits at the end of the value */
+    const cursorAtEnd = (el: EventTarget) => {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+            return (el.selectionStart ?? 0) >= (el.value?.length ?? 0);
+        }
+        return true;
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent, passedIndex?: number) => {
+        const activeIndex = passedIndex ?? getCurrentIndex(e);
+
         if (e.key === 'Enter') {
             e.preventDefault();
-
-            // Find current field index dynamically for robustness
-            const currentIndex = fieldRefs.findIndex(ref => ref.current === e.currentTarget);
-
-            // Fallback to passed index if dynamic find fails (shouldn't happen for valid refs)
-            const activeIndex = currentIndex !== -1 ? currentIndex : (passedIndex || 0);
-
-            // Find next focusable field
-            let nextIndex = activeIndex + 1;
-            while (nextIndex < fieldRefs.length) {
-                const nextField = fieldRefs[nextIndex]?.current;
-
-                // Skip disabled or hidden fields
-                if (nextField && !(nextField as any).disabled && nextField.offsetParent !== null) {
-                    nextField.focus();
-
-                    // If it's a select, open the dropdown
-                    if (nextField instanceof HTMLSelectElement) {
-                        nextField.click();
-                    }
-                    return;
-                }
-                nextIndex++;
+            const moved = focusNext(activeIndex);
+            if (!moved && onLastFieldEnter) {
+                onLastFieldEnter(); // last field — trigger save / submit
             }
+            return;
+        }
 
-            // If no next field found, we're at the end - could trigger form submission
-            // But we'll leave that to the form's onSubmit handler
+        if (e.key === 'ArrowRight' && cursorAtEnd(e.currentTarget)) {
+            // Only hijack arrow when cursor is at the end of text
+            e.preventDefault();
+            focusNext(activeIndex);
+            return;
+        }
+
+        if (e.key === 'ArrowLeft' && cursorAtStart(e.currentTarget)) {
+            // Only hijack arrow when cursor is at the start of text
+            e.preventDefault();
+            focusPrev(activeIndex);
+            return;
         }
     };
 

@@ -330,6 +330,7 @@ declare global {
         sendPDF: (phoneNumber: string, pdfBase64: string, filename?: string, caption?: string) => Promise<{ success: boolean }>;
         getStatus: () => Promise<string>;
         logout: () => Promise<{ success: boolean }>;
+        reconnect: () => Promise<{ status: string }>;
       };
     };
   }

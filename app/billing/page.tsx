@@ -12,6 +12,8 @@ import PrintableInvoice from '@/components/PrintableInvoice';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { calculateDealerStatement } from '@/lib/utils';
+import SearchableSelect from '@/components/SearchableSelect';
+import { uploadInvoicePDF, buildInvoiceFileName } from '@/lib/googleDriveService';
 
 export default function Billing() {
     const { dealers, products, createInvoice, updateInvoice, addDealer, transactions } = useData();
@@ -31,6 +33,9 @@ export default function Billing() {
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [showWhatsAppPreview, setShowWhatsAppPreview] = useState(false);
     const [previewData, setPreviewData] = useState<{ dealer: Dealer; invoiceData: any } | null>(null);
+    const [showInvoicePreview, setShowInvoicePreview] = useState(false);
+    const [driveUploadStatus, setDriveUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+    const [driveError, setDriveError] = useState<string | null>(null);
 
     // Dealer Search
     const [dealerSearch, setDealerSearch] = useState('');
@@ -83,6 +88,9 @@ export default function Billing() {
     const dispatchThroughRef = useRef<HTMLInputElement>(null);
     const termsOfDeliveryRef = useRef<HTMLInputElement>(null);
     const paymentTermsRef = useRef<HTMLInputElement>(null);
+    const deliveryNoteRef = useRef<HTMLInputElement>(null);
+    const supplierRefRef = useRef<HTMLInputElement>(null);
+    const otherRefRef = useRef<HTMLInputElement>(null);
 
     const invoiceFieldRefs = [
         vehicleNameRef,
@@ -100,10 +108,16 @@ export default function Billing() {
         buyerOrderDateRef,
         dispatchDocNoRef,
         dispatchDateRef,
-        dispatchThroughRef,
+        deliveryNoteRef,
+        supplierRefRef,
+        otherRefRef,
         termsOfDeliveryRef
     ] as any;
-    const { handleKeyDown: handleInvoiceKeyDown } = useEnterKeyNavigation(invoiceFieldRefs);
+    const { handleKeyDown: handleInvoiceKeyDown } = useEnterKeyNavigation(invoiceFieldRefs, () => {
+        // Enter on last field → create/update the bill
+        const btn = document.getElementById('create-bill-btn') as HTMLButtonElement | null;
+        btn?.click();
+    });
 
     // Auto-scroll selected dealer into view
     useEffect(() => {
@@ -138,8 +152,10 @@ export default function Billing() {
     const [buyerOrderDate, setBuyerOrderDate] = useState('');
     const [dispatchDocNo, setDispatchDocNo] = useState('');
     const [dispatchDate, setDispatchDate] = useState('');
-    const [dispatchThrough, setDispatchThrough] = useState('');
     const [termsOfDelivery, setTermsOfDelivery] = useState('');
+    const [deliveryNote, setDeliveryNote] = useState('');
+    const [supplierRef, setSupplierRef] = useState('');
+    const [otherRef, setOtherRef] = useState('');
 
     // Invoice Number Manual Entry
     const [manualInvoiceNo, setManualInvoiceNo] = useState('');
@@ -257,8 +273,11 @@ export default function Billing() {
                     setBuyerOrderDate(notes.buyerOrderDate || '');
                     setDispatchDocNo(notes.dispatchDocNo || '');
                     setDispatchDate(notes.dispatchDate || '');
-                    setDispatchThrough(notes.dispatchThrough || '');
+                    setDeliveryNote(notes.deliveryNote || '');
+                    setSupplierRef(notes.supplierRef || '');
+                    setOtherRef(notes.otherRef || '');
                     setTermsOfDelivery(notes.termsOfDelivery || '');
+                    // setDispatchThrough(notes.dispatchThrough || ''); // Removed as per instruction
                     setRoundOff(notes.roundOff || '0');
                     setGlobalCGST(notes.globalCGST || '0');
                     setGlobalSGST(notes.globalSGST || '0');
@@ -273,38 +292,43 @@ export default function Billing() {
                 }
             }
 
-            // Fetch Items
-            const { data: items, error } = await supabase
-                .from('invoice_items')
-                .select('*')
-                .eq('transaction_id', editInvoiceId);
+            // Load Items from notes JSON (primary storage)
+            if (txn.notes) {
+                try {
+                    const notes = JSON.parse(txn.notes);
+                    if (notes.invoiceItems && notes.invoiceItems.length > 0) {
+                        setInvoiceItems(notes.invoiceItems.map((item: any) => ({
+                            productId: item.productId,
+                            productName: item.productName,
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            cgst: item.cgst,
+                            sgst: item.sgst,
+                            igst: item.igst,
+                            cgstAmount: item.cgstAmount,
+                            sgstAmount: item.sgstAmount,
+                            igstAmount: item.igstAmount,
+                            discount: item.discount,
+                            discountAmount: item.discountAmount,
+                            total: item.total,
+                            gstAmount: item.gstAmount || (item.cgstAmount + item.sgstAmount + item.igstAmount),
+                            hsnCode: item.hsnCode,
+                            unit: item.unit,
+                            gstRate: item.gstRate || (item.cgst + item.sgst + item.igst)
+                        })));
+                    }
+                } catch (e) {
+                    console.warn('[Billing] Failed to parse items from notes, trying context fallback');
+                }
+            }
 
-            if (!error && items) {
-                const loadedItems: InvoiceItem[] = items.map(item => ({
-                    productId: item.product_id,
-                    productName: item.product_name,
-                    quantity: item.quantity,
-                    unitPrice: item.unit_price,
-                    cgst: item.cgst,
-                    sgst: item.sgst,
-                    igst: item.igst,
-                    cgstAmount: item.cgst_amount,
-                    sgstAmount: item.sgst_amount,
-                    igstAmount: item.igst_amount,
-                    discount: item.discount,
-                    discountAmount: item.discount_amount,
-                    total: item.total,
-                    discountAmount: item.discount_amount,
-                    total: item.total,
-                    // gstAmount might be missing/null in DB if not inserted, so calculate it
-                    gstAmount: item.gst_amount || (item.cgst_amount + item.sgst_amount + item.igst_amount),
-                    hsnCode: item.hsn_code,
-                    unit: item.unit,
-                    // Store GST Rate if available, or derive it. 
-                    // Products usually have gstRate. item.cgst + item.sgst + item.igst gives the rate.
-                    gstRate: (item.cgst + item.sgst + item.igst)
-                }));
-                setInvoiceItems(loadedItems);
+            // Fallback: use items from context state (if loaded from invoice_items table)
+            if (invoiceItems.length === 0 && txn.items && txn.items.length > 0) {
+                setInvoiceItems(txn.items.map(item => ({
+                    ...item,
+                    gstAmount: item.gstAmount || (item.cgstAmount + item.sgstAmount + item.igstAmount),
+                    gstRate: item.gstRate || (item.cgst + item.sgst + item.igst)
+                })));
             }
         };
 
@@ -312,6 +336,97 @@ export default function Billing() {
             loadInvoice();
         }
     }, [editInvoiceId, dealers, transactions]);
+
+    // --- Draft Persistence ---
+    const DRAFT_KEY = 'bill_draft_data';
+
+    // Load Draft on Mount
+    useEffect(() => {
+        if (editInvoiceId) return; // Don't load draft if editing an existing invoice
+
+        const savedDraft = localStorage.getItem(DRAFT_KEY);
+        if (savedDraft) {
+            try {
+                const draft = JSON.parse(savedDraft);
+
+                // Only load if it's not too old (optional, e.g., 1 day)
+                const draftAge = Date.now() - (draft.timestamp || 0);
+                if (draftAge < 24 * 60 * 60 * 1000) {
+                    if (draft.selectedDealer) setSelectedDealer(draft.selectedDealer);
+                    if (draft.invoiceItems) setInvoiceItems(draft.invoiceItems);
+                    if (draft.invoiceDate) setInvoiceDate(draft.invoiceDate);
+                    if (draft.manualInvoiceNo) setManualInvoiceNo(draft.manualInvoiceNo);
+                    if (draft.vehicleName) setVehicleName(draft.vehicleName);
+                    if (draft.vehicleNumber) setVehicleNumber(draft.vehicleNumber);
+                    if (draft.destination) setDestination(draft.destination);
+                    if (draft.transportCharges) setTransportCharges(draft.transportCharges);
+                    if (draft.paymentTerms) setPaymentTerms(draft.paymentTerms);
+                    if (draft.globalDiscount) setGlobalDiscount(draft.globalDiscount);
+                    if (draft.globalCGST) setGlobalCGST(draft.globalCGST);
+                    if (draft.globalSGST) setGlobalSGST(draft.globalSGST);
+                    if (draft.globalIGST) setGlobalIGST(draft.globalIGST);
+                    if (draft.roundOff) setRoundOff(draft.roundOff);
+                    if (draft.buyerOrderNo) setBuyerOrderNo(draft.buyerOrderNo);
+                    if (draft.buyerOrderDate) setBuyerOrderDate(draft.buyerOrderDate);
+                    if (draft.dispatchDocNo) setDispatchDocNo(draft.dispatchDocNo);
+                    if (draft.dispatchDate) setDispatchDate(draft.dispatchDate);
+                    if (draft.termsOfDelivery) setTermsOfDelivery(draft.termsOfDelivery);
+                    if (draft.deliveryNote) setDeliveryNote(draft.deliveryNote);
+                    if (draft.supplierRef) setSupplierRef(draft.supplierRef);
+                    if (draft.otherRef) setOtherRef(draft.otherRef);
+                }
+            } catch (e) {
+                console.error('Failed to load invoice draft', e);
+            }
+        }
+    }, [editInvoiceId]);
+
+    // Save Draft on Change
+    useEffect(() => {
+        if (editInvoiceId) return; // Don't save draft if editing
+
+        const draftData = {
+            selectedDealer,
+            invoiceItems,
+            invoiceDate,
+            manualInvoiceNo,
+            vehicleName,
+            vehicleNumber,
+            destination,
+            transportCharges,
+            paymentTerms,
+            globalDiscount,
+            globalCGST,
+            globalSGST,
+            globalIGST,
+            roundOff,
+            buyerOrderNo,
+            buyerOrderDate,
+            dispatchDocNo,
+            dispatchDate,
+            deliveryNote,
+            supplierRef,
+            otherRef,
+            termsOfDelivery,
+            timestamp: Date.now()
+        };
+
+        const timer = setTimeout(() => {
+            localStorage.setItem(DRAFT_KEY, JSON.stringify(draftData));
+        }, 1000); // Debounce saves
+
+        return () => clearTimeout(timer);
+    }, [
+        selectedDealer, invoiceItems, invoiceDate, manualInvoiceNo,
+        vehicleName, vehicleNumber, destination, transportCharges,
+        paymentTerms, globalDiscount, globalCGST, globalSGST, globalIGST,
+        roundOff, buyerOrderNo, buyerOrderDate, dispatchDocNo,
+        dispatchDate, deliveryNote, supplierRef, otherRef, termsOfDelivery, editInvoiceId
+    ]);
+
+    const clearDraft = () => {
+        localStorage.removeItem(DRAFT_KEY);
+    };
 
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -331,6 +446,12 @@ export default function Billing() {
         d.phone.includes(dealerSearch) ||
         d.city?.toLowerCase().includes(dealerSearch.toLowerCase())
     );
+
+    // Live stock tracking: qty reserved by items already in this invoice
+    const reservedStock: Record<string, number> = {};
+    invoiceItems.forEach(item => {
+        reservedStock[item.productId] = (reservedStock[item.productId] || 0) + item.quantity;
+    });
 
     // Calculations
     const subTotal = invoiceItems.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
@@ -355,10 +476,11 @@ export default function Billing() {
 
         const qty = parseInt(itemQty) || 1;
 
-        // Check Stock
-        if (qty > itemProduct.stock) {
-            setQtyError(`Only ${itemProduct.stock} available`);
-            // Keep focus on quantity input without triggering alert loop
+        // Check available stock (total stock minus what's already in this invoice)
+        const alreadyReserved = reservedStock[itemProduct.id] || 0;
+        const availableStock = itemProduct.stock - alreadyReserved;
+        if (qty > availableStock) {
+            setQtyError(`Only ${availableStock} available`);
             itemQtyRef.current?.focus();
             itemQtyRef.current?.select();
             return;
@@ -488,7 +610,41 @@ export default function Billing() {
                 transportCharges: parseFloat(transportCharges) || 0,
                 paymentTerms,
                 discountPercent: parseFloat(globalDiscount) || 0,
-                creditDays: parseInt(creditDays) || 30
+                creditDays: parseInt(creditDays) || 30,
+                notes: JSON.stringify({
+                    buyerOrderNo,
+                    buyerOrderDate,
+                    dispatchDocNo,
+                    dispatchDate,
+                    deliveryNote,
+                    supplierRef,
+                    otherRef,
+                    termsOfDelivery,
+                    manualInvoiceNo,
+                    roundOff,
+                    globalCGST,
+                    globalSGST,
+                    globalIGST,
+                    invoiceItems: invoiceItems.map(item => ({
+                        productId: item.productId,
+                        productName: item.productName,
+                        quantity: item.quantity,
+                        unitPrice: item.unitPrice,
+                        cgst: item.cgst,
+                        sgst: item.sgst,
+                        igst: item.igst,
+                        cgstAmount: item.cgstAmount,
+                        sgstAmount: item.sgstAmount,
+                        igstAmount: item.igstAmount,
+                        discount: item.discount,
+                        discountAmount: item.discountAmount,
+                        total: item.total,
+                        gstAmount: item.gstAmount,
+                        hsnCode: item.hsnCode,
+                        unit: item.unit,
+                        gstRate: item.gstRate
+                    }))
+                })
             });
             // For update, we might want to just show success and then redirect back or stay
             // Here reusing generatedRef as the existing ID
@@ -519,17 +675,57 @@ export default function Billing() {
                     buyerOrderDate,
                     dispatchDocNo,
                     dispatchDate,
-                    dispatchThrough,
+                    deliveryNote,
+                    supplierRef,
+                    otherRef,
                     termsOfDelivery,
-                    manualInvoiceNo
+                    manualInvoiceNo,
+                    roundOff,
+                    globalCGST,
+                    globalSGST,
+                    globalIGST,
+                    invoiceItems: invoiceItems.map(item => ({
+                        productId: item.productId,
+                        productName: item.productName,
+                        quantity: item.quantity,
+                        unitPrice: item.unitPrice,
+                        cgst: item.cgst,
+                        sgst: item.sgst,
+                        igst: item.igst,
+                        cgstAmount: item.cgstAmount,
+                        sgstAmount: item.sgstAmount,
+                        igstAmount: item.igstAmount,
+                        discount: item.discount,
+                        discountAmount: item.discountAmount,
+                        total: item.total,
+                        gstAmount: item.gstAmount,
+                        hsnCode: item.hsnCode,
+                        unit: item.unit,
+                        gstRate: item.gstRate
+                    }))
                 })
             });
             setGeneratedRef((manualInvoiceNo ? `INV${manualInvoiceNo}` : refId));
             setCreatedInvoiceId(id);
         }
 
+        // Real-time Sync to Google Sheets
+        try {
+            const { syncInvoiceToSheets } = await import('@/lib/googleSheetWriter');
+            await syncInvoiceToSheets(
+                selectedDealer.businessName,
+                (manualInvoiceNo ? `INV${manualInvoiceNo}` : (editInvoiceId || 'NEW')),
+                invoiceTotal,
+                invoiceDate,
+                invoiceItems
+            );
+        } catch (syncError) {
+            console.error('[Billing] Sheets Sync Failed:', syncError);
+        }
+
         setIsSubmitting(false);
         setShowSuccess(true);
+        clearDraft(); // Clear draft only on success
 
         // Prepare data for WhatsApp Preview instead of sending automatically
         if (selectedDealer && selectedDealer.phone) {
@@ -553,7 +749,9 @@ export default function Billing() {
                     buyerOrderDate,
                     dispatchDocNo,
                     dispatchDate,
-                    dispatchThrough,
+                    deliveryNote,
+                    supplierRef,
+                    otherRef,
                     termsOfDelivery,
                     manualInvoiceNo,
                     roundOff,
@@ -633,6 +831,24 @@ export default function Billing() {
 
             setWhatsappSending('success');
             setTimeout(() => setWhatsappSending('idle'), 5000);
+
+            // 5. Auto-upload Invoice PDF to Google Drive (non-blocking)
+            try {
+                setDriveUploadStatus('uploading');
+                setDriveError(null);
+                const driveFileName = buildInvoiceFileName(
+                    invoiceData.referenceId || 'DRAFT',
+                    dealer.businessName,
+                    new Date(invoiceData.date)
+                );
+                await uploadInvoicePDF(invoiceBase64, driveFileName, dealer.businessName);
+                setDriveUploadStatus('success');
+                console.log('[Billing] Invoice saved to Google Drive:', driveFileName);
+            } catch (driveErr: any) {
+                console.error('[Billing] Drive upload failed (non-blocking):', driveErr);
+                setDriveUploadStatus('error');
+                setDriveError(driveErr.message || 'Failed to save to Google Drive');
+            }
         } catch (err: any) {
             console.error('WhatsApp send failed', err);
             setWhatsappSending('error');
@@ -682,6 +898,8 @@ export default function Billing() {
         setPaymentTerms('Immediate');
         setGlobalDiscount('0');
         setDealerSearch('');
+        setDriveUploadStatus('idle');
+        setDriveError(null);
     };
 
     const handlePrint = () => {
@@ -738,6 +956,7 @@ export default function Billing() {
                                         <span className="text-sm font-bold text-slate-500">INV</span>
                                         <input
                                             ref={invoiceNoRef}
+                                            id="invoice-no-field"
                                             type="text"
                                             value={manualInvoiceNo}
                                             onChange={(e) => {
@@ -779,84 +998,33 @@ export default function Billing() {
                             </div>
 
                             {!selectedDealer ? (
-                                <div className="flex gap-3" ref={dealerSearchRef}>
-                                    <div className="relative flex-1">
-                                        <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                                        <input
-                                            ref={dealerSearchInputRef}
-                                            type="text"
-                                            className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            placeholder="Search dealer by name, phone, city..."
-                                            value={dealerSearch}
-                                            onChange={(e) => {
-                                                setDealerSearch(e.target.value);
-                                                setShowDealerDropdown(true);
-                                                setSelectedDealerIndex(0);
-                                            }}
-                                            onFocus={() => {
-                                                setShowDealerDropdown(true);
-                                                setSelectedDealerIndex(0);
-                                            }}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'ArrowDown') {
-                                                    e.preventDefault();
-                                                    setSelectedDealerIndex(prev =>
-                                                        Math.min(prev + 1, filteredDealers.length - 1)
-                                                    );
-                                                } else if (e.key === 'ArrowUp') {
-                                                    e.preventDefault();
-                                                    setSelectedDealerIndex(prev => Math.max(prev - 1, 0));
-                                                } else if (e.key === 'Enter' && filteredDealers.length > 0) {
-                                                    e.preventDefault();
-                                                    setSelectedDealer(filteredDealers[selectedDealerIndex]);
-                                                    setShowDealerDropdown(false);
-                                                    setDealerSearch('');
+                                <div className="flex gap-3">
+                                    <div className="flex-1">
+                                        <SearchableSelect
+                                            options={dealers.map(d => ({
+                                                ...d,
+                                                name: d.businessName,
+                                                description: `${d.contactPerson} • ${d.phone} • ${d.city && `${d.city}, `}${d.district}`
+                                            }))}
+                                            value={''}
+                                            onChange={(val: string) => {
+                                                const dealer = dealers.find(d => d.id === val);
+                                                if (dealer) {
+                                                    setSelectedDealer(dealer);
                                                     setTimeout(() => productSelectRef.current?.focus(), 100);
                                                 }
                                             }}
+                                            placeholder="Search and Select Dealer..."
+                                            className="w-full"
+                                            ref={dealerSearchInputRef as any}
                                         />
-                                        {/* Dropdown */}
-                                        {showDealerDropdown && (
-                                            <div ref={dealerDropdownRef} className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                                                {filteredDealers.length === 0 ? (
-                                                    <div className="p-4 text-center text-slate-500">
-                                                        No dealers found
-                                                    </div>
-                                                ) : (
-                                                    filteredDealers.map((d, index) => (
-                                                        <button
-                                                            key={d.id}
-                                                            ref={(el) => { dealerItemRefs.current[index] = el; }}
-                                                            className={`w-full px-4 py-3 text-left border-b border-slate-100 last:border-b-0 transition-colors ${index === selectedDealerIndex
-                                                                ? 'bg-emerald-600 text-white'
-                                                                : 'hover:bg-slate-50'
-                                                                }`}
-                                                            onClick={() => {
-                                                                setSelectedDealer(d);
-                                                                setShowDealerDropdown(false);
-                                                                setDealerSearch('');
-                                                                setTimeout(() => productSelectRef.current?.focus(), 100);
-                                                            }}
-                                                            onMouseEnter={() => setSelectedDealerIndex(index)}
-                                                        >
-                                                            <p className={`font-medium ${index === selectedDealerIndex ? 'text-white' : 'text-slate-800'
-                                                                }`}>{d.businessName}</p>
-                                                            <p className={`text-xs ${index === selectedDealerIndex ? 'text-emerald-100' : 'text-slate-500'
-                                                                }`}>
-                                                                {d.contactPerson} • {d.phone} • {d.city && `${d.city}, `}{d.district}
-                                                            </p>
-                                                        </button>
-                                                    ))
-                                                )}
-                                            </div>
-                                        )}
                                     </div>
                                     <button
                                         onClick={() => setShowAddDealerModal(true)}
-                                        className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 font-medium shrink-0"
+                                        className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 font-medium shrink-0 h-11"
                                     >
                                         <Plus size={18} />
-                                        Add New
+                                        Add New Dealer
                                     </button>
                                 </div>
                             ) : (
@@ -893,26 +1061,28 @@ export default function Billing() {
                             </h3>
                             <div className="flex gap-4">
                                 <div className="flex-1">
-                                    <select
-                                        ref={productSelectRef}
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                    <SearchableSelect
+                                        options={products.map(p => {
+                                            const available = p.stock - (reservedStock[p.id] || 0);
+                                            return {
+                                                ...p,
+                                                name: `${p.productId} - ${p.name}`,
+                                                stock: available,
+                                                description: `₹${p.price} per ${p.unit || 'unit'}`
+                                            };
+                                        })}
                                         value={itemProduct?.id || ''}
-                                        onChange={(e) => setItemProduct(products.find(p => p.id === e.target.value) || null)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && itemProduct) {
-                                                e.preventDefault();
-                                                itemQtyRef.current?.focus();
-                                                itemQtyRef.current?.select();
+                                        onChange={(val: string) => {
+                                            const prod = products.find(p => p.id === val);
+                                            if (prod) {
+                                                setItemProduct(prod);
+                                                setTimeout(() => itemQtyRef.current?.focus(), 100);
                                             }
                                         }}
-                                    >
-                                        <option value="" disabled>Select Product...</option>
-                                        {products.map(p => (
-                                            <option key={p.id} value={p.id} disabled={p.stock <= 0}>
-                                                {p.productId} - {p.name} (₹{p.price}) {p.stock <= 0 ? '- OUT OF STOCK' : `- Stock: ${p.stock}`}
-                                            </option>
-                                        ))}
-                                    </select>
+                                        placeholder="Search and Add Product..."
+                                        className="w-full"
+                                        ref={productSelectRef as any}
+                                    />
                                 </div>
                                 <div className="w-24">
                                     <input
@@ -1087,241 +1257,233 @@ export default function Billing() {
                         <div className={`bg-white p-5 rounded-xl shadow-sm border border-slate-200 ${invoiceItems.length === 0 ? 'opacity-50 pointer-events-none' : ''}`}>
                             <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
                                 <Truck size={18} />
-                                Transport & Payment Details
+                                Transport & Invoice Details
                             </h3>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1">Vehicle Name</label>
+                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Vehicle Name / Dispatch Through</label>
                                     <input
                                         ref={vehicleNameRef}
                                         type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="e.g., SV Transport"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder="e.g. SV Transport"
                                         value={vehicleName}
                                         onChange={(e) => setVehicleName(e.target.value)}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 0)}
                                     />
                                 </div>
-                                <div>
+                                <div className="col-span-1">
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Vehicle Number</label>
                                     <input
                                         ref={vehicleNumberRef}
                                         type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="e.g., TN-01-AB-1234"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder="e.g. TN-01-AB-1234"
                                         value={vehicleNumber}
                                         onChange={(e) => setVehicleNumber(e.target.value)}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 1)}
                                     />
                                 </div>
-                                <div>
+                                <div className="col-span-1">
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Destination</label>
                                     <input
                                         ref={destinationRef}
                                         type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="e.g., Chennai"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder="e.g. Chennai"
                                         value={destination}
                                         onChange={(e) => setDestination(e.target.value)}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 2)}
                                     />
                                 </div>
-                                <div>
+                                <div className="col-span-1">
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Transport Charges (₹)</label>
                                     <input
                                         ref={transportChargesRef}
                                         type="text"
                                         inputMode="numeric"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="0"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                         value={transportCharges}
                                         onChange={(e) => setTransportCharges(e.target.value.replace(/[^0-9.]/g, ''))}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 3)}
                                     />
                                 </div>
-                                <div>
+                                <div className="col-span-1">
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Mode/Terms of Payment</label>
                                     <input
                                         ref={paymentTermsRef}
                                         type="text"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="e.g., Immediate, Cash, Cheque"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                         value={paymentTerms}
                                         onChange={(e) => setPaymentTerms(e.target.value)}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 4)}
                                     />
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-500 mb-1">Credit Days *</label>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Credit Days</label>
                                     <input
                                         ref={creditDaysRef}
                                         type="text"
                                         inputMode="numeric"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="e.g., 30, 45, 60, 90"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                         value={creditDays}
                                         onChange={(e) => setCreditDays(e.target.value.replace(/[^0-9]/g, ''))}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 5)}
                                     />
-                                    <p className="text-xs text-slate-400 mt-1">Days until payment due</p>
                                 </div>
-                                <div>
+                                <div className="col-span-1">
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Global Discount (%)</label>
                                     <input
                                         ref={globalDiscountRef}
                                         type="text"
                                         inputMode="decimal"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="0"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                         value={globalDiscount}
                                         onChange={(e) => setGlobalDiscount(e.target.value.replace(/[^0-9.]/g, ''))}
                                         onKeyDown={(e) => handleInvoiceKeyDown(e, 6)}
                                     />
                                 </div>
-
-                                {/* Global GST Fields */}
-                                <div className="col-span-2 md:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4 mt-2">
-                                    {/* CGST - Always visible */}
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Global CGST (%)</label>
-                                        <input
-                                            ref={globalCGSTRef}
-                                            type="text"
-                                            inputMode="decimal"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            placeholder="0"
-                                            value={globalCGST}
-                                            onChange={(e) => setGlobalCGST(e.target.value.replace(/[^0-9.]/g, ''))}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
-                                        />
-                                    </div>
-
-                                    {/* SGST - Visible for Non-Kerala */}
-                                    {selectedDealer?.state?.toLowerCase() !== 'kerala' && (
-                                        <div>
-                                            <label className="block text-xs font-medium text-slate-500 mb-1">Global SGST (%)</label>
-                                            <input
-                                                ref={globalSGSTRef}
-                                                type="text"
-                                                inputMode="decimal"
-                                                className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                                placeholder="0"
-                                                value={globalSGST}
-                                                onChange={(e) => setGlobalSGST(e.target.value.replace(/[^0-9.]/g, ''))}
-                                                onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
-                                            />
-                                        </div>
-                                    )}
-
-                                    {/* IGST - Always Visible */}
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Global IGST (%)</label>
-                                        <input
-                                            ref={globalIGSTRef}
-                                            type="text"
-                                            inputMode="decimal"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            placeholder="0"
-                                            value={globalIGST}
-                                            onChange={(e) => setGlobalIGST(e.target.value.replace(/[^0-9.]/g, ''))}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 11)}
-                                        />
-                                    </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Global CGST (%)</label>
+                                    <input
+                                        ref={globalCGSTRef}
+                                        type="text"
+                                        inputMode="decimal"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={globalCGST}
+                                        onChange={(e) => setGlobalCGST(e.target.value.replace(/[^0-9.]/g, ''))}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 7)}
+                                    />
                                 </div>
-
-                                <div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Global SGST (%)</label>
+                                    <input
+                                        ref={globalSGSTRef}
+                                        type="text"
+                                        inputMode="decimal"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={globalSGST}
+                                        onChange={(e) => setGlobalSGST(e.target.value.replace(/[^0-9.]/g, ''))}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 8)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Global IGST (%)</label>
+                                    <input
+                                        ref={globalIGSTRef}
+                                        type="text"
+                                        inputMode="decimal"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={globalIGST}
+                                        onChange={(e) => setGlobalIGST(e.target.value.replace(/[^0-9.]/g, ''))}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
                                     <label className="block text-xs font-medium text-slate-500 mb-1">Round Off (₹)</label>
                                     <input
                                         ref={roundOffRef}
                                         type="text"
                                         inputMode="decimal"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                        placeholder="0"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                         value={roundOff}
                                         onChange={(e) => {
-                                            const value = e.target.value;
-                                            // Allow negative sign, digits, and decimal point
-                                            if (value === '' || value === '-' || /^-?\d*\.?\d*$/.test(value)) {
-                                                setRoundOff(value);
-                                            }
+                                            const val = e.target.value;
+                                            if (val === '' || val === '-' || /^-?\d*\.?\d*$/.test(val)) setRoundOff(val);
                                         }}
-                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 7)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
                                     />
-                                    <p className="text-xs text-slate-400 mt-1">Use + or - to adjust total</p>
                                 </div>
-
-                                {/* New Fields */}
-                                <div className="col-span-2 md:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4 mt-2">
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Buyer's Order No.</label>
-                                        <input
-                                            ref={buyerOrderNoRef}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={buyerOrderNo}
-                                            onChange={(e) => setBuyerOrderNo(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 7)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Buyer's Order Date</label>
-                                        <input
-                                            ref={buyerOrderDateRef}
-                                            type="date"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={buyerOrderDate}
-                                            onChange={(e) => setBuyerOrderDate(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 8)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Dispatch Doc No.</label>
-                                        <input
-                                            ref={dispatchDocNoRef}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={dispatchDocNo}
-                                            onChange={(e) => setDispatchDocNo(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 9)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Dispatch Date</label>
-                                        <input
-                                            ref={dispatchDateRef}
-                                            type="date"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={dispatchDate}
-                                            onChange={(e) => setDispatchDate(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 10)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Dispatch Through</label>
-                                        <input
-                                            ref={dispatchThroughRef}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={dispatchThrough}
-                                            onChange={(e) => setDispatchThrough(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 11)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-slate-500 mb-1">Terms of Delivery</label>
-                                        <input
-                                            ref={termsOfDeliveryRef}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                            value={termsOfDelivery}
-                                            onChange={(e) => setTermsOfDelivery(e.target.value)}
-                                            onKeyDown={(e) => handleInvoiceKeyDown(e, 12)}
-                                        />
-                                    </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Buyer's Order No.</label>
+                                    <input
+                                        ref={buyerOrderNoRef}
+                                        type="text"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={buyerOrderNo}
+                                        onChange={(e) => setBuyerOrderNo(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 11)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Buyer's Order Date</label>
+                                    <input
+                                        ref={buyerOrderDateRef}
+                                        type="date"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={buyerOrderDate}
+                                        onChange={(e) => setBuyerOrderDate(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 12)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Dispatch Doc No.</label>
+                                    <input
+                                        ref={dispatchDocNoRef}
+                                        type="text"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={dispatchDocNo}
+                                        onChange={(e) => setDispatchDocNo(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 13)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Dispatch Date</label>
+                                    <input
+                                        ref={dispatchDateRef}
+                                        type="date"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={dispatchDate}
+                                        onChange={(e) => setDispatchDate(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 14)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Delivery Note</label>
+                                    <input
+                                        ref={deliveryNoteRef}
+                                        type="text"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={deliveryNote}
+                                        onChange={(e) => setDeliveryNote(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 15)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Supplier's Ref</label>
+                                    <input
+                                        ref={supplierRefRef}
+                                        type="text"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={supplierRef}
+                                        onChange={(e) => setSupplierRef(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 16)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Other Reference(s)</label>
+                                    <input
+                                        ref={otherRefRef}
+                                        type="text"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={otherRef}
+                                        onChange={(e) => setOtherRef(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 17)}
+                                    />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">Terms of Delivery</label>
+                                    <input
+                                        ref={termsOfDeliveryRef}
+                                        type="text"
+                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                        value={termsOfDelivery}
+                                        onChange={(e) => setTermsOfDelivery(e.target.value)}
+                                        onKeyDown={(e) => handleInvoiceKeyDown(e, 18)}
+                                    />
                                 </div>
                             </div>
                         </div>
-
                     </div>
 
                     {/* Right Column: Calculations & Actions */}
@@ -1386,23 +1548,26 @@ export default function Billing() {
                             </div>
 
                             <button
-                                onClick={handleCreateBill}
-                                disabled={invoiceItems.length === 0 || isSubmitting}
-                                className={`w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold text-white transition-all shadow-lg ${isSubmitting ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800 hover:shadow-xl'
+                                id="create-bill-btn"
+                                onClick={() => {
+                                    if (!selectedDealer || invoiceItems.length === 0) return;
+                                    setShowInvoicePreview(true);
+                                }}
+                                disabled={!selectedDealer || invoiceItems.length === 0 || isSubmitting}
+                                className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg ${!selectedDealer || invoiceItems.length === 0
+                                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                    : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
                                     }`}
                             >
                                 {isSubmitting ? (
-                                    <span className="flex items-center gap-2">
-                                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                        </svg>
+                                    <>
+                                        <Loader2 size={20} className="animate-spin" />
                                         Processing...
-                                    </span>
+                                    </>
                                 ) : (
                                     <>
                                         <FileText size={20} />
-                                        {editInvoiceId ? 'Update Bill' : 'Confirm & Generate Bill'}
+                                        {editInvoiceId ? 'Preview & Update' : 'Preview & Generate Bill'}
                                     </>
                                 )}
                             </button>
@@ -1559,7 +1724,9 @@ export default function Billing() {
                                     buyerOrderDate,
                                     dispatchDocNo,
                                     dispatchDate,
-                                    dispatchThrough,
+                                    deliveryNote,
+                                    supplierRef,
+                                    otherRef,
                                     termsOfDelivery,
                                     manualInvoiceNo,
                                     roundOff,
@@ -1679,7 +1846,9 @@ export default function Billing() {
                                                     buyerOrderDate,
                                                     dispatchDocNo,
                                                     dispatchDate,
-                                                    dispatchThrough,
+                                                    deliveryNote,
+                                                    supplierRef,
+                                                    otherRef,
                                                     termsOfDelivery,
                                                     manualInvoiceNo,
                                                     roundOff,
@@ -1713,12 +1882,105 @@ export default function Billing() {
                                     {whatsappError && (
                                         <p className="text-[10px] text-red-500 text-center">{whatsappError}</p>
                                     )}
+                                    {/* Google Drive Upload Status */}
+                                    {driveUploadStatus !== 'idle' && (
+                                        <div className={`mt-2 py-2 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-2 ${driveUploadStatus === 'uploading' ? 'bg-blue-50 text-blue-600 border border-blue-200' :
+                                            driveUploadStatus === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' :
+                                                'bg-red-50 text-red-600 border border-red-200'
+                                            }`}>
+                                            {driveUploadStatus === 'uploading' && <Loader2 size={14} className="animate-spin" />}
+                                            {driveUploadStatus === 'success' && <Check size={14} />}
+                                            {driveUploadStatus === 'uploading' ? 'Saving to Google Drive...' :
+                                                driveUploadStatus === 'success' ? '✓ Invoice saved to Google Drive' :
+                                                    `Drive upload failed: ${driveError}`}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     </div>
                 )
             }
+
+            {/* Invoice Preview Modal (Before Generation) */}
+            {showInvoicePreview && selectedDealer && companySettings && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-in fade-in duration-300 print:hidden">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+                        {/* Modal Header */}
+                        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800">Invoice Preview</h2>
+                                <p className="text-sm text-slate-500">Review carefully before generating the final bill</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setShowInvoicePreview(false)}
+                                    className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors border border-slate-300 bg-white shadow-sm"
+                                >
+                                    Back to Form
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setShowInvoicePreview(false);
+                                        handleCreateBill();
+                                    }}
+                                    className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
+                                >
+                                    Confirm & Generate Bill
+                                </button>
+                                <button
+                                    onClick={() => setShowInvoicePreview(false)}
+                                    className="p-2 hover:bg-slate-200 rounded-full transition-colors ml-2"
+                                >
+                                    <X size={24} className="text-slate-500" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body - Scrollable Preview */}
+                        <div className="flex-1 overflow-y-auto p-8 bg-slate-100">
+                            <div className="bg-white shadow-xl mx-auto max-w-[21cm] p-8 min-h-[29.7cm]">
+                                <PrintableInvoice
+                                    invoice={{
+                                        id: editInvoiceId || '',
+                                        customerId: selectedDealer.id,
+                                        type: TransactionType.INVOICE,
+                                        amount: invoiceTotal,
+                                        date: new Date(invoiceDate),
+                                        referenceId: generatedRef || `INV${manualInvoiceNo}`,
+                                        items: invoiceItems,
+                                        vehicleName,
+                                        vehicleNumber,
+                                        destination,
+                                        transportCharges: parseFloat(transportCharges) || 0,
+                                        paymentTerms,
+                                        discountPercent: parseFloat(globalDiscount) || 0,
+                                        creditDays: parseInt(creditDays) || 30,
+                                        notes: JSON.stringify({
+                                            buyerOrderNo,
+                                            buyerOrderDate,
+                                            dispatchDocNo,
+                                            dispatchDate,
+                                            deliveryNote,
+                                            supplierRef,
+                                            otherRef,
+                                            termsOfDelivery,
+                                            manualInvoiceNo,
+                                            roundOff,
+                                            globalCGST,
+                                            globalSGST,
+                                            globalIGST
+                                        })
+                                    }}
+                                    dealer={selectedDealer}
+                                    items={invoiceItems}
+                                    company={companySettings}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* WhatsApp Preview Modal */}
             {showWhatsAppPreview && previewData && companySettings && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-in fade-in duration-300 print:hidden">
