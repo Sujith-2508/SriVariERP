@@ -406,6 +406,149 @@ export const generateInvoicePDFBase64 = async (
 };
 
 /**
+ * Generates a Payment Receipt PDF and returns it as a Base64 string.
+ */
+export const generateReceiptPDFBase64 = async (
+    dealer: Dealer,
+    amount: number,
+    method: string,
+    agent: string,
+    receiptId: string,
+    company: CompanySettings
+): Promise<string> => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    // Number to words helper (Indian format) - Reusing or re-declaring for self-containment
+    const numberToWords = (num: number): string => {
+        const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+        const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+        const teens = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+        if (num === 0) return 'Zero';
+        const crores = Math.floor(num / 10000000);
+        const lakhs = Math.floor((num % 10000000) / 100000);
+        const thousands = Math.floor((num % 100000) / 1000);
+        const hundreds = Math.floor((num % 1000) / 100);
+        const remainder = Math.floor(num % 100);
+        let words = '';
+        if (crores > 0) words += ones[crores] + ' Crore ';
+        if (lakhs > 0) {
+            if (lakhs < 10) words += ones[lakhs] + ' Lakh ';
+            else if (lakhs < 20) words += teens[lakhs - 10] + ' Lakh ';
+            else words += tens[Math.floor(lakhs / 10)] + ' ' + ones[lakhs % 10] + ' Lakh ';
+        }
+        if (thousands > 0) {
+            if (thousands < 10) words += ones[thousands] + ' Thousand ';
+            else if (thousands < 20) words += teens[thousands - 10] + ' Thousand ';
+            else words += tens[Math.floor(thousands / 10)] + ' ' + ones[thousands % 10] + ' Thousand ';
+        }
+        if (hundreds > 0) words += ones[hundreds] + ' Hundred ';
+        if (remainder > 0) {
+            if (remainder < 10) words += ones[remainder];
+            else if (remainder < 20) words += teens[remainder - 10];
+            else words += tens[Math.floor(remainder / 10)] + ' ' + ones[remainder % 10];
+        }
+        return words.trim() + ' Only';
+    };
+
+    // 1. OUTER BORDER BOX
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 140); // Half-page sized receipt
+
+    // 2. HEADER SECTION
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 105, 20, { align: 'center' });
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${company.addressLine1 || ''}, ${company.addressLine2 || ''}`, 105, 25, { align: 'center' });
+    doc.text(`${company.city || ''} - ${company.pinCode || ''}`, 105, 29, { align: 'center' });
+    doc.text(`GST NO: ${company.gstNumber || 'N/A'}`, 105, 33, { align: 'center' });
+
+    doc.setLineWidth(0.3);
+    doc.line(10, 38, 200, 38);
+
+    // 3. RECEIPT TITLE
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.setFillColor(245, 245, 245);
+    doc.rect(75, 42, 60, 10, 'F');
+    doc.rect(75, 42, 60, 10, 'S');
+    doc.text('PAYMENT RECEIPT', 105, 49, { align: 'center' });
+
+    // 4. RECEIPT DETAILS
+    let rY = 65;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+
+    // Receipt No & Date
+    doc.text('Receipt No:', 15, rY);
+    doc.setFont('helvetica', 'bold');
+    doc.text(receiptId, 45, rY);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Date:', 140, rY);
+    doc.setFont('helvetica', 'bold');
+    doc.text(new Date().toLocaleDateString('en-GB'), 160, rY);
+
+    rY += 12;
+
+    // Content
+    doc.setFont('helvetica', 'normal');
+    doc.text('Received with thanks from:', 15, rY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text(dealer.businessName, 68, rY);
+
+    rY += 8;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${dealer.address || ''}, ${dealer.city || ''}`, 68, rY, { maxWidth: 110 });
+
+    rY += 12;
+
+    doc.setFontSize(11);
+    doc.text('The sum of Rupees:', 15, rY);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Rs. ${numberToWords(Math.round(amount))}`, 55, rY, { maxWidth: 130 });
+
+    rY += 12;
+
+    doc.setFont('helvetica', 'normal');
+    doc.text('By:', 15, rY);
+    doc.setFont('helvetica', 'bold');
+    doc.text(method, 25, rY);
+
+    doc.setFont('helvetica', 'normal');
+    doc.text('Amount:', 80, rY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(`Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 100, rY);
+
+    // 5. FOOTER
+    rY = 130;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Collected by: ${agent}`, 15, rY);
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`for ${company.companyName.toUpperCase()}`, 155, rY, { align: 'center' });
+    doc.setLineWidth(0.2);
+    doc.line(135, rY + 12, 175, rY + 12);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Authorised Signatory', 155, rY + 16, { align: 'center' });
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'italic');
+    doc.text('This is a computer generated receipt and does not require a physical signature.', 105, 148, { align: 'center' });
+
+    const pdfOutput = doc.output('datauristring');
+    return pdfOutput.split(',')[1];
+};
+
+/**
  * Generates a Dealer Statement PDF and returns it as a Base64 string.
  */
 export const generateStatementPDFBase64 = async (

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
@@ -30,7 +30,9 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         },
         title: 'Sri Vari Enterprises - Billing ERP',
-        icon: path.join(__dirname, 'public/icon.png')
+        icon: process.platform === 'win32'
+            ? path.join(__dirname, 'public/icon.ico')
+            : path.join(__dirname, 'public/icon.png')
     })
 
     // Remove default menu
@@ -48,7 +50,9 @@ function createWindow() {
             responseHeaders: {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
-                    "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:3000 https://*.supabase.co https://*.googleapis.com https://*.google.com https://*.gstatic.com; connect-src 'self' http://localhost:3000 ws://localhost:3000 https://*.supabase.co wss://*.supabase.co https://*.googleapis.com https://*.google.com https://*.tile.openstreetmap.org;"
+                    "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:3000 https://*; " +
+                    "connect-src 'self' http://localhost:3000 ws://localhost:3000 https://*; " +
+                    "img-src 'self' data: blob: https://*;"
                 ]
             }
         })
@@ -207,6 +211,54 @@ ipcMain.handle('whatsapp:logout', async () => {
         if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
     }
 });
+
+// ─── Printer IPC Handlers ────────────────────────────────────────────────────
+
+// List all installed printers (Windows 7-12 compatible via Chromium)
+ipcMain.handle('printer:get-printers', async () => {
+    try {
+        if (!mainWindow) return [];
+        const printers = await mainWindow.webContents.getPrintersAsync();
+        return printers.map(p => ({
+            name: p.name,
+            displayName: p.displayName || p.name,
+            isDefault: p.isDefault,
+            status: p.status,
+            description: p.description || ''
+        }));
+    } catch (err) {
+        console.error('Failed to list printers:', err);
+        return [];
+    }
+});
+
+// Print the current invoice page to a selected printer (silent, no dialog)
+ipcMain.handle('printer:print', async (event, { printerName, silent }) => {
+    try {
+        if (!mainWindow) throw new Error('No main window');
+        return await new Promise((resolve, reject) => {
+            mainWindow.webContents.print(
+                {
+                    silent: silent !== false,     // silent by default
+                    printBackground: true,         // print CSS backgrounds
+                    deviceName: printerName || '', // '' = system default printer
+                    pageSize: 'A4',
+                    margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
+                    scaleFactor: 100
+                },
+                (success, failureReason) => {
+                    if (success) resolve({ success: true });
+                    else reject(new Error(failureReason || 'Print failed'));
+                }
+            );
+        });
+    } catch (err) {
+        console.error('Print failed:', err);
+        throw err;
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 app.whenReady().then(createWindow)
 

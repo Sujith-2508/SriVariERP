@@ -1,0 +1,101 @@
+{
+  "ARUN RUBBER PRODUCTS": {
+    "rowCount": 18,
+    "dateHeaderIndex": 9,
+    "sampleRows": [
+      [
+        "SRI VARI ENTERPRISES"
+      ],
+      [
+        "T.S.NO:609, BLOCK NO:9, PALANIYAPPAN STREET, POLLACHI 642001"
+      ],
+      [
+        "GST IN: 33DIGPM0162N1Z6 | MOB: 9488075194 | Email: maharajagrouppvtltd@gmail.com"
+      ],
+      [],
+      [
+        "ARUN RUBBER PRODUCTS - Ledger Account"
+      ],
+      [
+        "11, MURUGAN NAGAR, CHINNAVEDAMPATTI, COIMBATORE"
+      ],
+      [
+        "GST: 33CSYPS2445D1ZE | CELL: 8248044070"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Date",
+        "Particulars",
+        "Vch Type",
+        "Vch Ref.",
+        "Vch No.",
+        "Debit (₹)",
+        "Credit (₹)",
+        "Balance (₹)",
+        "Balance Type"
+      ]
+    ],
+    "rowsAround90": []
+  },
+  "Summary": {
+    "rowCount": 13,
+    "dateHeaderIndex": -1,
+    "sampleRows": [
+      [
+        "SUPPLIER GROUP 3 - SUMMARY"
+      ],
+      [],
+      [
+        "Sri Vari Enterprises | GST: 33DIGPM0162N1Z6 | Pollachi 642001"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Supplier",
+        "Address",
+        "GST No.",
+        "Closing Balance (₹)",
+        "Balance Type",
+        "Remarks"
+      ],
+      [
+        "PNB Kitchenmate Limited",
+        "Kundli, Haryana",
+        "06AADCS9633D1ZE",
+        "203,580.00",
+        "Cr",
+        "Payable to supplier"
+      ],
+      [
+        "Arun Rubber Products",
+        "Coimbatore",
+        "33CSYPS2445D1ZE",
+        "114,873.02",
+        "Cr",
+        "Payable to supplier"
+      ],
+      [
+        "Rao Rubber Industries",
+        "Delhi",
+        "07ABYPY5337K1ZK",
+        "28,320.00",
+        "Dr",
+        "Receivable from supplier"
+      ],
+      [
+        "Muthu Metal",
+        "Pollachi",
+        "33ABTPT3174G1Z9",
+        "2,909,511.09",
+        "Dr",
+        "Receivable from supplier"
+      ]
+    ],
+    "rowsAround90": []
+  }
+}

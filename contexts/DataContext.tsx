@@ -562,19 +562,28 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dueDate.setDate(dueDate.getDate() + creditDays);
 
         // Calculate COGS and Profit metrics for the invoice
-        let totalCOGS = 0;
-        items.forEach(item => {
-            const product = products.find(p => p.id === item.productId || p.productId === item.productId);
-            const costPrice = Number(product?.costPrice) || 0;
-            totalCOGS += (costPrice * item.quantity);
-        });
+        // Cheque returns are balance reversals — treat as 0 profit
+        const noteStr = invoiceData?.notes || '';
+        const isChequeReturn = noteStr.startsWith('Cheque Return');
 
-        const transportCharges = invoiceData?.transportCharges || 0;
-        const grossProfit = totalAmount - totalCOGS;
-        const discountPercent = invoiceData?.discountPercent || 0;
-        const dealerDiscountAmount = (grossProfit * discountPercent) / 100;
-        const netProfit = grossProfit - dealerDiscountAmount;
-        const profitPercentage = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
+        let totalCOGS = 0;
+        let netProfit = 0;
+        let profitPercentage = 0;
+        let dealerDiscountAmount = 0;
+
+        if (!isChequeReturn) {
+            items.forEach(item => {
+                const product = products.find(p => p.id === item.productId || p.productId === item.productId);
+                const costPrice = Number(product?.costPrice) || 0;
+                totalCOGS += (costPrice * item.quantity);
+            });
+
+            const grossProfit = totalAmount - totalCOGS;
+            const discountPercent = invoiceData?.discountPercent || 0;
+            dealerDiscountAmount = (grossProfit * discountPercent) / 100;
+            netProfit = grossProfit - dealerDiscountAmount;
+            profitPercentage = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
+        }
 
         // Insert transaction
         const { data: txnData, error: txnError } = await supabase
