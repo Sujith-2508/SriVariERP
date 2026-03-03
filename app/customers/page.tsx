@@ -850,28 +850,6 @@ export default function DealerLedger() {
                                         whatsappSending === 'error' ? 'Retry' : 'WhatsApp'}
                             </button>
 
-                            {/* Force Sync Ledger Button */}
-                            <button
-                                onClick={async () => {
-                                    if (!selectedDealer) return;
-                                    setIsLedgerSyncing(true);
-                                    try {
-                                        await syncDealerLedgerToSheet(selectedDealer.id);
-                                        alert('Ledger re-synced to Google Sheets successfully!');
-                                    } catch (e) {
-                                        console.error(e);
-                                        alert('Failed to sync ledger');
-                                    } finally {
-                                        setIsLedgerSyncing(false);
-                                    }
-                                }}
-                                disabled={isLedgerSyncing}
-                                className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-50"
-                                title="Force sync all transactions to Google Sheets"
-                            >
-                                {isLedgerSyncing ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                                Force Sync
-                            </button>
                         </div>
                     </div>
                 </div>

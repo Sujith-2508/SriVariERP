@@ -46,6 +46,28 @@ function base64url(str: string): string {
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/**
+ * Sanitizes and truncates a string for use as a Google Sheets tab name.
+ * Tab names:
+ * 1. Must be <= 31 characters.
+ * 2. Cannot contain: : \ / ? * [ ]
+ * 3. Cannot start or end with a single quote.
+ */
+export function sanitizeTabName(name: string): string {
+    if (!name) return 'Untitled';
+    let sanitized = name
+        .replace(/[:\\/?*\[\]]/g, ' ') // Replace invalid chars with space
+        .replace(/'/g, '')             // Remove single quotes
+        .trim();
+
+    // Truncate to 31 characters
+    if (sanitized.length > 31) {
+        sanitized = sanitized.substring(0, 31).trim();
+    }
+
+    return sanitized || 'Untitled';
+}
+
 // Auth: Get access token
 async function getAccessToken(): Promise<string> {
     if (cachedToken && Date.now() < cachedToken.expires) return cachedToken.token;
@@ -149,7 +171,7 @@ export async function syncDealerToSheet(dealer: Dealer, companyInfo?: any): Prom
  * Creates a professional Tally-style header for a dealer's ledger
  */
 async function initializeDealerLedger(dealer: Dealer, companyInfo: any): Promise<void> {
-    const name = dealer.businessName;
+    const name = sanitizeTabName(dealer.businessName);
     try {
         const res = await sheetsRequest('?fields=sheets.properties.title,sheets.properties.sheetId');
         const sheet = (res.sheets || []).find((s: any) => s.properties.title === name);
@@ -243,9 +265,10 @@ async function initializeDealerLedger(dealer: Dealer, companyInfo: any): Promise
  * Specifically deletes a dealer's individual sheet tab
  */
 export async function deleteDealerSheet(sheetName: string): Promise<boolean> {
+    const name = sanitizeTabName(sheetName);
     try {
         const res = await sheetsRequest('?fields=sheets.properties.title,sheets.properties.sheetId');
-        const sheet = (res.sheets || []).find((s: any) => s.properties.title === sheetName);
+        const sheet = (res.sheets || []).find((s: any) => s.properties.title === name);
 
         if (sheet) {
             const sheetId = sheet.properties.sheetId;
@@ -268,6 +291,7 @@ export async function deleteDealerSheet(sheetName: string): Promise<boolean> {
  * Appends a transaction to the dealer's individual ledger sheet
  */
 export async function syncTransactionToDealerSheet(dealerName: string, transaction: any, runningBalance: number): Promise<boolean> {
+    const name = sanitizeTabName(dealerName);
     try {
         const isInvoice = transaction.type === 'INVOICE';
 
@@ -285,7 +309,7 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
 
         // --- NEW: DUPLICATE CHECK ---
         // Before appending, check if this receipt/invoice already exists in the sheet
-        const existingRow = await findTransactionRow(dealerName, transaction.referenceId);
+        const existingRow = await findTransactionRow(name, transaction.referenceId);
         if (existingRow !== -1) {
             console.log(`[SheetsDealers] Skipping sync for ${transaction.referenceId} - already exists at row ${existingRow}`);
             return true; // Already synced, we count this as success
@@ -303,12 +327,12 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
             runningBalance >= 0 ? 'Dr' : 'Cr'                        // I: Type
         ];
 
-        await sheetsRequest(`/values/'${dealerName}'!A11:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', {
+        await sheetsRequest(`/values/'${name}'!A11:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', {
             values: [rowData]
         });
         return true;
     } catch (e) {
-        console.error(`[SheetsDealers] Failed to sync transaction for ${dealerName}:`, e);
+        console.error(`[SheetsDealers] Failed to sync transaction for ${name}:`, e);
         return false;
     }
 }
@@ -317,8 +341,9 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
  * Checks if a transaction already exists in a dealer's sheet by reference ID
  */
 export async function findTransactionRow(dealerName: string, referenceId: string): Promise<number> {
+    const name = sanitizeTabName(dealerName);
     try {
-        const res = await sheetsRequest(`/values/'${dealerName}'!C11:D`);
+        const res = await sheetsRequest(`/values/'${name}'!C11:D`);
         const rows = res.values || [];
         for (let i = 0; i < rows.length; i++) {
             // Check Invoice (col C) or Receipt (col D)
@@ -335,8 +360,9 @@ export async function findTransactionRow(dealerName: string, referenceId: string
  * Keeps headers (Rows 1-10).
  */
 export async function clearDealerTransactionsForSync(dealerName: string): Promise<void> {
+    const name = sanitizeTabName(dealerName);
     try {
-        await sheetsRequest(`/values/'${dealerName}'!A11:I:clear`, 'POST');
+        await sheetsRequest(`/values/'${name}'!A11:I:clear`, 'POST');
     } catch (e) {
         console.warn(`[SheetsDealers] Failed to clear ${dealerName} ledger:`, e);
     }

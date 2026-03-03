@@ -288,8 +288,8 @@ export default function Billing() {
                 setInvoiceDate(new Date(txn.date).toISOString().split('T')[0]);
             }
 
-            // Parse Notes for additional fields
-            if (txn.notes) {
+            // Parse Notes for additional fields (only if it looks like JSON)
+            if (txn.notes && txn.notes.trim().startsWith('{')) {
                 try {
                     const notes = JSON.parse(txn.notes);
                     setBuyerOrderNo(notes.buyerOrderNo || '');
@@ -300,7 +300,7 @@ export default function Billing() {
                     setSupplierRef(notes.supplierRef || '');
                     setOtherRef(notes.otherRef || '');
                     setTermsOfDelivery(notes.termsOfDelivery || '');
-                    // setDispatchThrough(notes.dispatchThrough || ''); // Removed as per instruction
+                    // setDispatchThrough(notes.dispatchThrough || '');
                     setRoundOff(notes.roundOff || '0');
                     setGlobalCGST(notes.globalCGST || '0');
                     setGlobalSGST(notes.globalSGST || '0');
@@ -311,12 +311,12 @@ export default function Billing() {
                         isInvoiceInitialized.current = true;
                     }
                 } catch (e) {
-                    console.error('Failed to parse invoice notes', e);
+                    console.warn('[Billing] Note exists but is not valid JSON (metadata parse):', e);
                 }
             }
 
-            // Load Items from notes JSON (primary storage)
-            if (txn.notes) {
+            // Load Items from notes JSON (primary storage, only if it looks like JSON)
+            if (txn.notes && txn.notes.trim().startsWith('{')) {
                 try {
                     const notes = JSON.parse(txn.notes);
                     if (notes.invoiceItems && notes.invoiceItems.length > 0) {
@@ -341,7 +341,7 @@ export default function Billing() {
                         })));
                     }
                 } catch (e) {
-                    console.warn('[Billing] Failed to parse items from notes, trying context fallback');
+                    console.warn('[Billing] Note exists but is not valid JSON (items parse):', e);
                 }
             }
 

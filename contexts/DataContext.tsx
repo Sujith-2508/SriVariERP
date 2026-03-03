@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, PaymentAllocation, AgentTrackingData, CompanySettings } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
@@ -62,6 +62,7 @@ interface DataContextType {
     deleteCustomer: (id: string) => Promise<void>;
     getCustomerTransactions: (customerId: string) => Transaction[];
     companySettings: CompanySettings | null;
+    lastBackgroundSync: Date | null;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -200,6 +201,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [invoiceCount, setInvoiceCount] = useState(1);
     const [receiptCount, setReceiptCount] = useState(1);
     const [productCount, setProductCount] = useState(1);
+
+    // REFs to prevent stale closures in background tasks/intervals
+    const dealersRef = useRef<Dealer[]>([]);
+    const transactionsRef = useRef<Transaction[]>([]);
+    const isLoadingRef = useRef(true);
+
+    // Sync REFs with state
+    useEffect(() => {
+        dealersRef.current = dealers;
+    }, [dealers]);
+
+    useEffect(() => {
+        transactionsRef.current = transactions;
+    }, [transactions]);
+
+    useEffect(() => {
+        isLoadingRef.current = isLoading;
+    }, [isLoading]);
 
     // Fetch all data - Products from Google Sheet, others from Supabase
     const fetchData = useCallback(async () => {
@@ -419,11 +438,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 console.log('[DataContext] REAL-TIME: New mobile transaction detected:', data.reference_id);
 
                 // 1. Check if we already have this in state to avoid duplicate UI/sync
-                const currentTxns = transactions; // Note: Use functional update for latest state
-                setTransactions(prev => {
-                    if (prev.some(t => t.id === data.id)) return prev;
-                    return [transformTransaction(data), ...prev];
-                });
+                // Use Ref to avoid stale closure issues
+                if (transactionsRef.current.some(t => t.id === data.id)) {
+                    console.log('[DataContext] REAL-TIME: Transaction already exists in state, skipping');
+                    return;
+                }
+
+                setTransactions(prev => [transformTransaction(data), ...prev]);
 
                 // 2. Fetch dealer to get updated balance and sync to sheet
                 try {
@@ -635,8 +656,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
     };
 
-    const getDealerTransactions = (dealerId: string): Transaction[] => {
-        return transactions
+    const getDealerTransactions = (dealerId: string, customTxns?: Transaction[]): Transaction[] => {
+        const txnsToUse = customTxns || transactions;
+        return txnsToUse
             .filter(t => t.customerId === dealerId)
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     };
@@ -659,6 +681,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const noteStr = invoiceData?.notes || '';
         const isChequeReturn = noteStr.startsWith('Cheque Return');
 
+        const transportCharges = invoiceData?.transportCharges || 0;
+        const discountPercent = invoiceData?.discountPercent || 0;
+
         let totalCOGS = 0;
         let netProfit = 0;
         let profitPercentage = 0;
@@ -672,7 +697,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
 
             const grossProfit = totalAmount - totalCOGS;
-            const discountPercent = invoiceData?.discountPercent || 0;
             dealerDiscountAmount = (grossProfit * discountPercent) / 100;
             netProfit = grossProfit - dealerDiscountAmount;
             profitPercentage = totalAmount > 0 ? (netProfit / totalAmount) * 100 : 0;
@@ -701,7 +725,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 profit_amount: netProfit,
                 profit_percentage: profitPercentage,
                 dealer_discount_amount: dealerDiscountAmount,
-                source: 'DESKTOP'
+                source: 'DESKTOP',
+                synced_to_sheet: true // Mark as synced for desktop actions
             })
             .select()
             .single();
@@ -1242,12 +1267,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await refreshData();
     };
 
-    const syncDealerLedgerToSheet = async (dealerId: string) => {
-        const dealer = dealers.find(d => d.id === dealerId);
-        if (!dealer) throw new Error("Dealer not found");
+    const syncDealerLedgerToSheet = async (dealerId: string, customDealers?: Dealer[], customTxns?: Transaction[]) => {
+        // Find dealer in state
+        const dealersToUse = customDealers || dealers;
+        let dealer = dealersToUse.find(d => d.id === dealerId);
+
+        // If not in state, it might be a newly created dealer from mobile, refresh first
+        if (!dealer && !customDealers) {
+            console.warn(`[DataContext] Dealer ${dealerId} not found in state, refreshing cache...`);
+            await fetchData();
+            dealer = dealers.find(d => d.id === dealerId);
+        }
+
+        if (!dealer) {
+            throw new Error(`Dealer with ID ${dealerId} not found even after refresh`);
+        }
 
         // 1. Get all transactions for this dealer sorted by date
-        const dealerTxns = getDealerTransactions(dealerId);
+        const dealerTxns = getDealerTransactions(dealerId, customTxns);
 
         // 2. Clear current rows in the sheet to prevent duplicates and ensure order
         await clearDealerTransactionsForSync(dealer.businessName);
@@ -1261,6 +1298,122 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             await syncTransactionToDealerSheet(dealer.businessName, txn, balance);
         }
     };
+
+    const [lastBackgroundSync, setLastBackgroundSync] = useState<Date | null>(null);
+    const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+
+    // PERIODIC SYNC: Automatically catch up mobile transactions to Sheets
+    const hasInitialSynced = useRef(false);
+
+    // Initial sync on startup - only runs after data is loaded
+    useEffect(() => {
+        if (!isLoading && dealers.length > 0 && !hasInitialSynced.current) {
+            console.log('[DataContext] Data loaded: Performing startup catch-up sync...');
+            hasInitialSynced.current = true;
+            performBackgroundSync();
+        }
+    }, [isLoading, dealers.length]);
+
+    async function performBackgroundSync() {
+        if (isAutoSyncing) return;
+
+        // Safety: If main data (dealers) is still loading from Supabase, wait for next cycle
+        // Use REFs to ensure we have the latest values from the background worker
+        if (isLoadingRef.current || dealersRef.current.length === 0) {
+            console.log('[DataContext] Skipping background sync: Data still loading or no dealers in state');
+            return;
+        }
+
+        setIsAutoSyncing(true);
+        try {
+            // 1. Find dealers with unsynced transactions (mobile added them while desktop was closed)
+            const { data: unsyncedTxns, error: txnError } = await supabase
+                .from('transactions')
+                .select('id, customer_id')
+                .eq('synced_to_sheet', false);
+
+            if (txnError) throw txnError;
+
+            if (unsyncedTxns && unsyncedTxns.length > 0) {
+                console.log(`[DataContext] Auto-sync: Found ${unsyncedTxns.length} unsynced transactions. Fetching fresh data for sync...`);
+
+                // 2. Fetch all required data directly for the sync process (bypass React state/refs)
+                const [dealersRes, txnsRes, itemsRes, allocationsRes] = await Promise.all([
+                    supabase.from('dealers').select('*'),
+                    supabase.from('transactions').select('*').order('date', { ascending: true }),
+                    supabase.from('invoice_items').select('*'),
+                    supabase.from('payment_allocations').select('*')
+                ]);
+
+                if (dealersRes.error) throw dealersRes.error;
+                if (txnsRes.error) throw txnsRes.error;
+
+                const transformedDealers = (dealersRes.data || []).map(transformDealer);
+                const transformedAllocations = (allocationsRes.data || []).map(transformAllocation);
+                const rawItems = itemsRes.data || [];
+
+                const fullyTransformedTxns = (txnsRes.data || []).map(row => {
+                    const items = rawItems.filter(item => item.transaction_id === row.id);
+                    return transformTransaction({ ...row, invoice_items: items }, transformedAllocations);
+                });
+
+                // Get unique dealer IDs affected
+                const dealerIds = Array.from(new Set(unsyncedTxns.map(t => t.customer_id)));
+                console.log(`[DataContext] Auto-sync: Re-syncing ledgers for ${dealerIds.length} dealers to Google Sheets...`);
+
+                for (const dId of dealerIds) {
+                    try {
+                        // Re-sync the entire ledger using the fresh local data
+                        await syncDealerLedgerToSheet(dId, transformedDealers, fullyTransformedTxns);
+
+                        // Mark all transactions for this dealer as synced
+                        await supabase
+                            .from('transactions')
+                            .update({ synced_to_sheet: true })
+                            .eq('customer_id', dId)
+                            .eq('synced_to_sheet', false);
+
+                        // Mark dealer meta as synced
+                        await supabase
+                            .from('dealers')
+                            .update({ synced_to_sheet: true })
+                            .eq('id', dId);
+
+                        console.log(`[DataContext] Successfully auto-synced dealer: ${dId}`);
+                    } catch (err) {
+                        console.error(`[DataContext] Background sync failed for dealer ${dId}:`, err);
+                    }
+                }
+
+                // Also refresh the UI state so the user sees the synced status if they open it
+                fetchData();
+                setLastBackgroundSync(new Date());
+            } else {
+                console.log('[DataContext] No unsynced transactions found during background check');
+            }
+        } catch (err) {
+            console.error('[DataContext] Periodic sync error:', err);
+        } finally {
+            setIsAutoSyncing(false);
+        }
+    }
+
+    const performBackgroundSyncRef = useRef<() => Promise<void>>(performBackgroundSync);
+    useEffect(() => {
+        performBackgroundSyncRef.current = performBackgroundSync;
+    }, [performBackgroundSync]);
+
+    useEffect(() => {
+        // Weekly periodic sync (every 5 minutes)
+        const intervalId = setInterval(async () => {
+            console.log('[DataContext] Background Interval: Triggering periodic sync check...');
+            if (performBackgroundSyncRef.current) {
+                await performBackgroundSyncRef.current();
+            }
+        }, 5 * 60 * 1000); // 5 minutes
+
+        return () => clearInterval(intervalId);
+    }, []);
 
     return (
         <DataContext.Provider value={{
@@ -1300,7 +1453,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             getCustomerTransactions,
             trackingData,
             loadingTracking,
-            companySettings
+            companySettings,
+            lastBackgroundSync
         }}>
             {children}
         </DataContext.Provider>
