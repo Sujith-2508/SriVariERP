@@ -299,6 +299,34 @@ export function subscribeToLocationUpdates(
 }
 
 /**
+ * Subscribe to transaction updates
+ */
+export function subscribeToTransactionUpdates(
+    callback: (transaction: any, eventType: 'INSERT' | 'UPDATE' | 'DELETE') => void
+) {
+    const subscription = supabase
+        .channel('transaction_updates')
+        .on(
+            'postgres_changes',
+            {
+                event: '*',
+                schema: 'public',
+                table: 'transactions',
+            },
+            (payload) => {
+                const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
+                const data = payload.new || payload.old;
+                if (data) {
+                    callback(data, eventType);
+                }
+            }
+        )
+        .subscribe();
+
+    return subscription;
+}
+
+/**
  * Subscribe to attendance updates
  */
 export function subscribeToAttendanceUpdates(

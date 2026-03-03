@@ -1,11 +1,12 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, PaymentAllocation, AgentTrackingData } from '@/types';
+import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, PaymentAllocation, AgentTrackingData, CompanySettings } from '@/types';
 import { supabase } from '@/lib/supabase';
-import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates } from '@/lib/agentTrackingService';
+import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
 import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
+import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow } from '@/lib/googleSheetDealers';
 
 interface InvoiceData {
     vehicleName?: string;
@@ -46,6 +47,11 @@ interface DataContextType {
     getDealerTransactions: (dealerId: string) => Transaction[];
     getInvoicePaymentHistory: (invoiceId: string) => PaymentAllocation[];
     refreshData: () => Promise<void>;
+    bulkSyncDealers: () => Promise<void>;
+    importDealersFromSheet: () => Promise<{ added: number; updated: number }>;
+    importDealersFromTally: () => Promise<{ added: number; updated: number }>;
+    deleteDealerWithSheet: (id: string, sheetName: string, deleteTab: boolean) => Promise<void>;
+    syncDealerLedgerToSheet: (dealerId: string) => Promise<void>;
     // Agent methods
     addAgent: (agent: Omit<Agent, 'id'>) => Promise<string>;
     updateAgent: (agent: Agent) => Promise<void>;
@@ -55,6 +61,7 @@ interface DataContextType {
     addCustomer: (customer: Omit<Dealer, 'id'>) => Promise<string>;
     deleteCustomer: (id: string) => Promise<void>;
     getCustomerTransactions: (customerId: string) => Transaction[];
+    companySettings: CompanySettings | null;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -187,6 +194,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [error, setError] = useState<string | null>(null);
     const [trackingData, setTrackingData] = useState<AgentTrackingData[]>([]);
     const [loadingTracking, setLoadingTracking] = useState(false);
+    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
 
     // Sequential counters
     const [invoiceCount, setInvoiceCount] = useState(1);
@@ -233,6 +241,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     setProducts(localProducts);
                     setProductCount(localProducts.length + 1);
                 }
+            }
+
+            // Fetch company settings
+            const { data: companyData } = await supabase.from('company_settings').select('*').single();
+            if (companyData) {
+                setCompanySettings({
+                    id: companyData.id,
+                    companyName: companyData.company_name,
+                    addressLine1: companyData.address_line1,
+                    addressLine2: companyData.address_line2,
+                    city: companyData.city,
+                    state: companyData.state,
+                    pinCode: companyData.pin_code,
+                    gstNumber: companyData.gst_number,
+                    panNumber: companyData.pan_number,
+                    phone: companyData.phone,
+                    email: companyData.email,
+                    bankName: companyData.bank_name,
+                    bankBranch: companyData.bank_branch,
+                    accountNumber: companyData.account_number,
+                    ifscCode: companyData.ifsc_code,
+                    accountHolderName: companyData.account_holder_name
+                });
             }
 
             // Fetch dealers from Supabase
@@ -382,10 +413,56 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ));
         });
 
+        // NEW: Subscribe to transactions to sync mobile receipts in real-time
+        const transactionSub = subscribeToTransactionUpdates(async (data: any, event: 'INSERT' | 'UPDATE' | 'DELETE') => {
+            if (event === 'INSERT' && data.source === 'MOBILE') {
+                console.log('[DataContext] REAL-TIME: New mobile transaction detected:', data.reference_id);
+
+                // 1. Check if we already have this in state to avoid duplicate UI/sync
+                const currentTxns = transactions; // Note: Use functional update for latest state
+                setTransactions(prev => {
+                    if (prev.some(t => t.id === data.id)) return prev;
+                    return [transformTransaction(data), ...prev];
+                });
+
+                // 2. Fetch dealer to get updated balance and sync to sheet
+                try {
+                    const { data: dealerData } = await supabase
+                        .from('dealers')
+                        .select('*')
+                        .eq('id', data.customer_id)
+                        .single();
+
+                    if (dealerData) {
+                        const dealer = transformDealer(dealerData);
+                        setDealers(prev => prev.map(d => d.id === dealer.id ? dealer : d));
+
+                        // 3. Sync to Google Sheet
+                        console.log('[DataContext] REAL-TIME syncing mobile payment to Sheet:', data.reference_id);
+                        const transformedTxn = transformTransaction(data);
+                        syncTransactionToDealerSheet(dealer.businessName, transformedTxn, dealer.balance).catch(e =>
+                            console.warn('[DataContext] Real-time sheet sync failed:', e)
+                        );
+                    }
+                } catch (e) {
+                    console.error('[DataContext] Error handling real-time transaction sync:', e);
+                }
+            }
+        });
+
+        // NEW: Handle window focus to catch any transactions missed while the app was backgrounded/paused
+        const handleFocus = () => {
+            console.log('[DataContext] Window focused: Refreshing for latest mobile syncs');
+            refreshData();
+        };
+        window.addEventListener('focus', handleFocus);
+
         return () => {
             window.removeEventListener('storage_products_updated', handleStorageUpdate);
+            window.removeEventListener('focus', handleFocus);
             statusSub.unsubscribe();
             locationSub.unsubscribe();
+            transactionSub.unsubscribe();
         };
     }, []); // Removed fetchData/loadTrackingData from deps to prevent infinite loops if they change
 
@@ -494,6 +571,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const newDealer = transformDealer(data);
         setDealers(prev => [newDealer, ...prev]);
+
+        // Sync to Google Sheets in background
+        syncDealerToSheet(newDealer, companySettings).catch(e =>
+            console.warn('[DataContext] Dealer sync to Google Sheet failed:', e)
+        );
+
         return newDealer.id;
     };
 
@@ -519,6 +602,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         setDealers(prev => prev.map(d => d.id === updatedDealer.id ? updatedDealer : d));
+
+        // Sync to Google Sheets in background
+        syncDealerToSheet(updatedDealer, companySettings).catch(e =>
+            console.warn('[DataContext] Dealer update sync to Google Sheet failed:', e)
+        );
     };
 
     const deleteDealer = async (id: string) => {
@@ -540,6 +628,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setTransactions(prev => prev.filter(t => t.customerId !== id));
         setDealers(prev => prev.filter(d => d.id !== id));
+
+        // Remove from Google Sheets in background
+        removeDealerFromSheet(id).catch(e =>
+            console.warn('[DataContext] Dealer removal sync to Google Sheet failed:', e)
+        );
     };
 
     const getDealerTransactions = (dealerId: string): Transaction[] => {
@@ -672,6 +765,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTransactions(prev => [newTxn, ...prev]);
         setInvoiceCount(prev => prev + 1);
 
+        // Sync to individual dealer sheet
+        if (dealer) {
+            syncTransactionToDealerSheet(dealer.businessName, newTxn, dealer.balance + totalAmount).catch(e =>
+                console.warn('[DataContext] Failed to sync transaction to dealer sheet:', e)
+            );
+        }
+
         return { id: txnData.id, refId: invoiceNumber };
     };
 
@@ -800,7 +900,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             p_amount: amount,
             p_payment_mode: method,
             p_agent_name: agentName || 'Admin',
-            p_notes: `via ${method}`
+            p_notes: `via ${method}`,
+            p_source: 'DESKTOP'
         });
 
         if (rpcError) {
@@ -843,6 +944,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (!reference) {
             setReceiptCount(prev => prev + 1);
+        }
+
+        // Sync to individual dealer sheet
+        const dealer = dealers.find(d => d.id === dealerId);
+        if (dealer) {
+            syncTransactionToDealerSheet(dealer.businessName, newTxn, dealer.balance - amount).catch(e =>
+                console.warn('[DataContext] Failed to sync payment to dealer sheet:', e)
+            );
         }
 
         return receiptNumber;
@@ -971,6 +1080,179 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const deleteCustomer = deleteDealer;
     const getCustomerTransactions = getDealerTransactions;
 
+    const bulkSyncDealers = async () => {
+        if (dealers.length === 0) return;
+        await bulkSyncDealersToSheet(dealers);
+    };
+
+    const importDealersFromSheet = async () => {
+        const sheetDealers = await fetchRefinedDealersRaw();
+        let added = 0;
+        let updated = 0;
+
+        for (const sd of sheetDealers) {
+            const existingDealer = dealers.find(d => d.businessName.toLowerCase() === sd.businessName.toLowerCase());
+
+            // Smarter Address Splitting
+            const addressParts = sd.address.split(',').map((p: string) => p.trim());
+            const district = addressParts.length >= 1 ? addressParts[addressParts.length - 1] : '';
+            const city = addressParts.length >= 2 ? addressParts[addressParts.length - 2] : (district || 'Unknown');
+            const pinMatch = sd.address.match(/\d{6}/);
+            const pinCode = pinMatch ? pinMatch[0] : '';
+
+            if (!existingDealer) {
+                const { data, error } = await supabase
+                    .from('dealers')
+                    .insert([{
+                        business_name: sd.businessName,
+                        contact_person: sd.businessName,
+                        phone: sd.phone || '0000000000',
+                        district: district || 'Tamil Nadu',
+                        city: city || 'Unknown',
+                        pin_code: pinCode,
+                        address: sd.address,
+                        gst_number: sd.gstNumber,
+                        balance: 0
+                    }])
+                    .select()
+                    .single();
+
+                if (data && !error) {
+                    added++;
+                    // Sync to NEW structured tab
+                    syncDealerToSheet(transformDealer(data));
+                }
+            } else {
+                const updatedDealer = {
+                    ...existingDealer,
+                    address: existingDealer.address || sd.address,
+                    gstNumber: existingDealer.gstNumber || sd.gstNumber,
+                    phone: existingDealer.phone || sd.phone,
+                };
+
+                const { error } = await supabase
+                    .from('dealers')
+                    .update({
+                        address: updatedDealer.address,
+                        gst_number: updatedDealer.gstNumber,
+                        phone: updatedDealer.phone
+                    })
+                    .eq('id', updatedDealer.id);
+
+                if (!error) {
+                    updated++;
+                    syncDealerToSheet(updatedDealer);
+                }
+            }
+        }
+
+        await refreshData();
+        return { added, updated };
+    };
+
+    const importDealersFromTally = async () => {
+        const tallyDealers = await parseTallyLedgers();
+        let added = 0;
+        let updated = 0;
+
+        for (const td of tallyDealers) {
+            const existingDealer = dealers.find(d => d.businessName.toLowerCase() === td.businessName.toLowerCase());
+
+            // Extract City/District from address string
+            const addressParts = td.address.split(',').map((p: string) => p.trim());
+            const district = addressParts.length >= 1 ? addressParts[addressParts.length - 1] : '';
+            const city = addressParts.length >= 2 ? addressParts[addressParts.length - 2] : (district || 'Unknown');
+
+            if (!existingDealer) {
+                const { data, error } = await supabase
+                    .from('dealers')
+                    .insert([{
+                        business_name: td.businessName,
+                        contact_person: td.businessName,
+                        phone: td.phone || '0000000000',
+                        district: district || 'Tamil Nadu',
+                        city: city || 'Unknown',
+                        pin_code: '',
+                        address: td.address,
+                        gst_number: td.gstNumber,
+                        balance: td.balance || 0
+                    }])
+                    .select()
+                    .single();
+
+                if (data && !error) {
+                    added++;
+                    syncDealerToSheet(transformDealer(data));
+                }
+            } else {
+                // Update existing with REAL tally balance and info
+                const { error } = await supabase
+                    .from('dealers')
+                    .update({
+                        balance: td.balance, // Force update to real tally balance
+                        gst_number: td.gstNumber || existingDealer.gstNumber,
+                        phone: td.phone || existingDealer.phone,
+                        address: td.address || existingDealer.address
+                    })
+                    .eq('id', existingDealer.id);
+
+                if (!error) {
+                    updated++;
+                    // Refresh local object for sync
+                    syncDealerToSheet({
+                        ...existingDealer,
+                        balance: td.balance,
+                        gstNumber: td.gstNumber || existingDealer.gstNumber,
+                        phone: td.phone || existingDealer.phone,
+                        address: td.address || existingDealer.address
+                    });
+                }
+            }
+        }
+
+        await refreshData();
+        return { added, updated };
+    };
+
+    const deleteDealerWithSheet = async (id: string, sheetName: string, deleteTab: boolean) => {
+        const { error } = await supabase
+            .from('dealers')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+
+        // Remove from master index
+        await removeDealerFromSheet(id);
+
+        // Optionally delete the individual sheet tab
+        if (deleteTab) {
+            await deleteDealerSheet(sheetName);
+        }
+
+        await refreshData();
+    };
+
+    const syncDealerLedgerToSheet = async (dealerId: string) => {
+        const dealer = dealers.find(d => d.id === dealerId);
+        if (!dealer) throw new Error("Dealer not found");
+
+        // 1. Get all transactions for this dealer sorted by date
+        const dealerTxns = getDealerTransactions(dealerId);
+
+        // 2. Clear current rows in the sheet to prevent duplicates and ensure order
+        await clearDealerTransactionsForSync(dealer.businessName);
+
+        // 3. Re-append all transactions with correct running balance
+        let balance = 0; // Starting from 0 as per sheet opening balance
+        for (const txn of dealerTxns) {
+            if (txn.type === 'INVOICE') balance += txn.amount;
+            else balance -= txn.amount;
+
+            await syncTransactionToDealerSheet(dealer.businessName, txn, balance);
+        }
+    };
+
     return (
         <DataContext.Provider value={{
             products,
@@ -996,6 +1278,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             getDealerTransactions,
             getInvoicePaymentHistory,
             refreshData,
+            bulkSyncDealers,
+            importDealersFromSheet,
+            importDealersFromTally,
+            deleteDealerWithSheet,
+            syncDealerLedgerToSheet,
             addAgent,
             updateAgent,
             deleteAgent,
@@ -1003,7 +1290,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             deleteCustomer,
             getCustomerTransactions,
             trackingData,
-            loadingTracking
+            loadingTracking,
+            companySettings
         }}>
             {children}
         </DataContext.Provider>

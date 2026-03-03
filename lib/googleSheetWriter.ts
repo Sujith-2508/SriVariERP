@@ -453,9 +453,69 @@ export async function syncPaymentToSheets(dealerName: string, receiptId: string,
 }
 
 /**
+ * Find a row index by searching for a value in a specific column index (0-based)
+ */
+export async function findRowByValue(sheetName: string, columnIndex: number, value: string): Promise<number> {
+    try {
+        await ensureTabExistsWithName(sheetName);
+        const colLetter = String.fromCharCode(65 + columnIndex);
+        const data = await sheetsRequest(`/values/${sheetName}!${colLetter}:${colLetter}`);
+        const rows = data.values || [];
+
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0]?.trim() === value?.trim()) {
+                return i + 1; // 1-indexed
+            }
+        }
+        return -1;
+    } catch (e) {
+        console.error(`[SheetsWriter] Failed to find row in ${sheetName}:`, e);
+        return -1;
+    }
+}
+
+/**
+ * Update a specific row in a sheet
+ */
+export async function updateRowInSheet(sheetName: string, rowIndex: number, rowData: any[]): Promise<boolean> {
+    try {
+        await ensureTabExistsWithName(sheetName);
+        await sheetsRequest(
+            `/values/${sheetName}!A${rowIndex}:Z${rowIndex}?valueInputOption=USER_ENTERED`,
+            'PUT',
+            { values: [rowData] }
+        );
+        return true;
+    } catch (error: any) {
+        console.error(`[SheetsWriter] Failed to update row ${rowIndex} in ${sheetName}:`, error.message);
+        return false;
+    }
+}
+
+/**
+ * Clear a row (deletion)
+ */
+export async function clearRowInSheet(sheetName: string, rowIndex: number, columnCount: number = 10): Promise<boolean> {
+    try {
+        const lastColLetter = String.fromCharCode(64 + columnCount);
+        const emptyRow = Array(columnCount).fill('');
+
+        await sheetsRequest(
+            `/values/${sheetName}!A${rowIndex}:${lastColLetter}${rowIndex}?valueInputOption=USER_ENTERED`,
+            'PUT',
+            { values: [emptyRow] }
+        );
+        return true;
+    } catch (error: any) {
+        console.error(`[SheetsWriter] Failed to clear row ${rowIndex} in ${sheetName}:`, error.message);
+        return false;
+    }
+}
+
+/**
  * Ensure a specific tab exists by name
  */
-async function ensureTabExistsWithName(name: string): Promise<void> {
+export async function ensureTabExistsWithName(name: string): Promise<void> {
     try {
         const token = await getAccessToken();
         const response = await fetch(
@@ -469,6 +529,7 @@ async function ensureTabExistsWithName(name: string): Promise<void> {
             const sheetNames = sheets.map((s: any) => s.properties.title);
 
             if (!sheetNames.includes(name)) {
+                console.log(`[SheetsWriter] Creating tab: ${name}`);
                 await sheetsRequest(
                     ':batchUpdate',
                     'POST',

@@ -3,7 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
-import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2 } from 'lucide-react';
+import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw } from 'lucide-react';
 import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
@@ -14,7 +14,11 @@ import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 // ... existing imports
 
 export default function DealerLedger() {
-    const { dealers, transactions, addDealer, updateDealer, deleteDealer, getInvoicePaymentHistory, products } = useData();
+    const { dealers, transactions, addDealer, updateDealer, deleteDealer, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet } = useData();
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const [isTallyImporting, setIsTallyImporting] = useState(false);
+    const [isLedgerSyncing, setIsLedgerSyncing] = useState(false);
     const router = useRouter();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDealerId, setSelectedDealerId] = useState<string | null>(null);
@@ -472,6 +476,49 @@ export default function DealerLedger() {
         }
     };
 
+    const handleBulkSync = async () => {
+        setIsSyncing(true);
+        try {
+            await bulkSyncDealers();
+            alert('Successfully synced all dealers to Google Sheets!');
+        } catch (error) {
+            console.error('Migration failed:', error);
+            alert('Failed to sync dealers to Google Sheets');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    const handleImportFromSheets = async () => {
+        if (!confirm('This will import new dealers from the "refined dealers" sheet and update existing ones. Continue?')) return;
+
+        setIsImporting(true);
+        try {
+            const result = await importDealersFromSheet();
+            alert(`Import Complete!\nAdded: ${result.added} new dealers\nUpdated: ${result.updated} existing dealers`);
+        } catch (error) {
+            console.error('Import failed:', error);
+            alert('Failed to import dealers from Google Sheets');
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const handleImportFromTally = async () => {
+        if (!confirm('This will parse the "Ledger Vouchers" Tally export to extract ACTUAL dealer names and balances. It will update current balances in Supabase. Continue?')) return;
+
+        setIsTallyImporting(true);
+        try {
+            const result = await importDealersFromTally();
+            alert(`Tally Migration Complete!\nBalanced Data for: ${result.added + result.updated} dealers migrated.`);
+        } catch (error) {
+            console.error('Tally migration failed:', error);
+            alert('Failed to import data from Tally Ledger Vouchers');
+        } finally {
+            setIsTallyImporting(false);
+        }
+    };
+
 
     // Invoice Detail View - shows payment history for specific invoice
     if (selectedInvoice && selectedDealer) {
@@ -802,6 +849,29 @@ export default function DealerLedger() {
                                     whatsappSending === 'success' ? 'Sent!' :
                                         whatsappSending === 'error' ? 'Retry' : 'WhatsApp'}
                             </button>
+
+                            {/* Force Sync Ledger Button */}
+                            <button
+                                onClick={async () => {
+                                    if (!selectedDealer) return;
+                                    setIsLedgerSyncing(true);
+                                    try {
+                                        await syncDealerLedgerToSheet(selectedDealer.id);
+                                        alert('Ledger re-synced to Google Sheets successfully!');
+                                    } catch (e) {
+                                        console.error(e);
+                                        alert('Failed to sync ledger');
+                                    } finally {
+                                        setIsLedgerSyncing(false);
+                                    }
+                                }}
+                                disabled={isLedgerSyncing}
+                                className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-50"
+                                title="Force sync all transactions to Google Sheets"
+                            >
+                                {isLedgerSyncing ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                Force Sync
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1051,6 +1121,33 @@ export default function DealerLedger() {
                 </div>
                 <div className="flex gap-3">
                     <button
+                        onClick={handleImportFromSheets}
+                        disabled={isImporting}
+                        className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                        title="Import all dealers from 'refined dealers' sheet"
+                    >
+                        {isImporting ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
+                        Import from Sheets
+                    </button>
+                    <button
+                        onClick={handleImportFromTally}
+                        disabled={isTallyImporting}
+                        className="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                        title="Import actual Tally balances from 'Ledger Vouchers' sheet"
+                    >
+                        {isTallyImporting ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                        Sync Tally Data
+                    </button>
+                    <button
+                        onClick={handleBulkSync}
+                        disabled={isSyncing}
+                        className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-100 transition-colors disabled:opacity-50"
+                        title="Backup all dealers to Google Sheets"
+                    >
+                        {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
+                        Sync Backup
+                    </button>
+                    <button
                         onClick={() => setIsAddModalOpen(true)}
                         className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-lg"
                     >
@@ -1137,7 +1234,8 @@ export default function DealerLedger() {
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     if (window.confirm(`Are you sure you want to delete ${d.businessName}?`)) {
-                                        deleteDealer(d.id);
+                                        const deleteTab = window.confirm(`Do you also want to delete the Google Sheet tab for ${d.businessName}? (Keep it if you need the data for analytics)`);
+                                        deleteDealerWithSheet(d.id, d.businessName, deleteTab);
                                     }
                                 }}
                                 className="w-full mt-2 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-red-200"
