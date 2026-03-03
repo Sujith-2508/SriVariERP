@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Dealer, InvoiceItem, Product, CompanySettings, TransactionType } from '@/types';
 import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2, Edit } from 'lucide-react';
@@ -37,6 +37,13 @@ export default function Billing() {
     const [driveUploadStatus, setDriveUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
     const [driveError, setDriveError] = useState<string | null>(null);
 
+    // Printer Dialog State
+    const [showPrinterDialog, setShowPrinterDialog] = useState(false);
+    const [printers, setPrinters] = useState<{ name: string; displayName: string; isDefault: boolean; status: number; description: string }[]>([]);
+    const [selectedPrinter, setSelectedPrinter] = useState<string>('');
+    const [printingStatus, setPrintingStatus] = useState<'idle' | 'loading' | 'printing' | 'done' | 'error'>('idle');
+    const [printError, setPrintError] = useState<string | null>(null);
+
     // Dealer Search
     const [dealerSearch, setDealerSearch] = useState('');
     const [showDealerDropdown, setShowDealerDropdown] = useState(false);
@@ -54,7 +61,7 @@ export default function Billing() {
         businessName: '',
         contactPerson: '',
         phone: '',
-        district: '',
+        district: '', // This corresponds to 'State' in UI now
         city: '',
         pinCode: '',
         address: '',
@@ -63,8 +70,24 @@ export default function Billing() {
 
     // Refs for Enter key navigation in Add Dealer modal
     const dealerBusinessNameRef = useRef<HTMLInputElement>(null);
+    const dealerContactPersonRef = useRef<HTMLInputElement>(null);
     const dealerPhoneRef = useRef<HTMLInputElement>(null);
-    const dealerFieldRefs = [dealerBusinessNameRef, dealerPhoneRef] as any;
+    const dealerCityRef = useRef<HTMLInputElement>(null);
+    const dealerDistrictRef = useRef<HTMLInputElement>(null); // State
+    const dealerPinCodeRef = useRef<HTMLInputElement>(null);
+    const dealerGstRef = useRef<HTMLInputElement>(null);
+    const dealerAddressRef = useRef<HTMLTextAreaElement>(null);
+
+    const dealerFieldRefs = [
+        dealerBusinessNameRef,
+        dealerContactPersonRef,
+        dealerPhoneRef,
+        dealerCityRef,
+        dealerDistrictRef,
+        dealerPinCodeRef,
+        dealerGstRef,
+        dealerAddressRef
+    ] as any;
     const { handleKeyDown: handleDealerKeyDown } = useEnterKeyNavigation(dealerFieldRefs);
 
     // Refs for Enter key navigation in Invoice Form
@@ -448,30 +471,37 @@ export default function Billing() {
     );
 
     // Live stock tracking: qty reserved by items already in this invoice
-    const reservedStock: Record<string, number> = {};
-    invoiceItems.forEach(item => {
-        reservedStock[item.productId] = (reservedStock[item.productId] || 0) + item.quantity;
-    });
+    const reservedStock = useMemo(() => {
+        const map: Record<string, number> = {};
+        invoiceItems.forEach(item => {
+            map[item.productId] = (map[item.productId] || 0) + item.quantity;
+        });
+        return map;
+    }, [invoiceItems]);
 
-    // Calculations
-    const subTotal = invoiceItems.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
-    const totalTax = invoiceItems.reduce((acc, item) => acc + item.cgstAmount + item.sgstAmount + item.igstAmount, 0);
-    const totalDiscount = invoiceItems.reduce((acc, item) => acc + item.discountAmount, 0);
-    const globalDiscountAmount = (subTotal * parseFloat(globalDiscount || '0')) / 100;
+    // Memoized Calculations — prevents re-running reduce on every keystroke
+    const { subTotal, totalTax, totalDiscount } = useMemo(() => ({
+        subTotal: invoiceItems.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0),
+        totalTax: invoiceItems.reduce((acc, item) => acc + item.cgstAmount + item.sgstAmount + item.igstAmount, 0),
+        totalDiscount: invoiceItems.reduce((acc, item) => acc + item.discountAmount, 0),
+    }), [invoiceItems]);
 
-    // Global GST Calculations
-    const globalCGSTAmount = (subTotal * parseFloat(globalCGST || '0')) / 100;
-    const globalSGSTAmount = (subTotal * parseFloat(globalSGST || '0')) / 100;
-    const globalIGSTAmount = (subTotal * parseFloat(globalIGST || '0')) / 100;
+    const globalDiscountAmount = useMemo(() => (subTotal * parseFloat(globalDiscount || '0')) / 100, [subTotal, globalDiscount]);
+    const globalCGSTAmount = useMemo(() => (subTotal * parseFloat(globalCGST || '0')) / 100, [subTotal, globalCGST]);
+    const globalSGSTAmount = useMemo(() => (subTotal * parseFloat(globalSGST || '0')) / 100, [subTotal, globalSGST]);
+    const globalIGSTAmount = useMemo(() => (subTotal * parseFloat(globalIGST || '0')) / 100, [subTotal, globalIGST]);
 
-    const roundOffAmount = parseFloat(roundOff || '0');
-    const invoiceTotal = subTotal + totalTax - totalDiscount - globalDiscountAmount +
+    const roundOffAmount = useMemo(() => parseFloat(roundOff || '0'), [roundOff]);
+    // Product-level totalTax is excluded from invoice total — only global GST counts
+    const invoiceTotal = useMemo(() => subTotal - totalDiscount - globalDiscountAmount +
         globalCGSTAmount + globalSGSTAmount + globalIGSTAmount +
-        parseFloat(transportCharges || '0') + roundOffAmount;
+        parseFloat(transportCharges || '0') + roundOffAmount,
+        [subTotal, totalDiscount, globalDiscountAmount, globalCGSTAmount, globalSGSTAmount, globalIGSTAmount, transportCharges, roundOffAmount]
+    );
     const previousBalance = selectedDealer ? selectedDealer.balance : 0;
     const grandTotal = invoiceTotal + previousBalance;
 
-    const handleAddItem = () => {
+    const handleAddItem = useCallback(() => {
         if (!itemProduct || !selectedDealer) return;
 
         const qty = parseInt(itemQty) || 1;
@@ -511,7 +541,8 @@ export default function Billing() {
         const cgstAmount = (baseAmount * cgst) / 100;
         const sgstAmount = (baseAmount * sgst) / 100;
         const igstAmount = (baseAmount * igst) / 100;
-        const total = baseAmount + cgstAmount + sgstAmount + igstAmount;
+        // Product GST is only for taxable summary / HSN reference, NOT added to line total
+        const total = baseAmount;
 
         const newItem: InvoiceItem = {
             productId: itemProduct.id,
@@ -538,16 +569,17 @@ export default function Billing() {
 
         // Focus back to product select for next entry
         setTimeout(() => productSelectRef.current?.focus(), 100);
-    };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [itemProduct, itemQty, invoiceItems, selectedDealer]);
 
 
-    const handleRemoveItem = (index: number) => {
+    const handleRemoveItem = useCallback((index: number) => {
         const newItems = [...invoiceItems];
         newItems.splice(index, 1);
         setInvoiceItems(newItems);
-    };
+    }, [invoiceItems]);
 
-    const handleUpdateItemTax = (index: number, field: 'cgst' | 'sgst' | 'igst' | 'discount', value: string) => {
+    const handleUpdateItemTax = useCallback((index: number, field: 'cgst' | 'sgst' | 'igst' | 'discount', value: string) => {
         const newItems = [...invoiceItems];
         const item = newItems[index];
         const numValue = parseFloat(value) || 0;
@@ -560,12 +592,14 @@ export default function Billing() {
         item.sgstAmount = (baseAmount * item.sgst) / 100;
         item.igstAmount = (baseAmount * item.igst) / 100;
         item.discountAmount = (baseAmount * item.discount) / 100;
-        item.total = baseAmount + item.cgstAmount + item.sgstAmount + item.igstAmount - item.discountAmount;
+        // Product GST is for taxable summary only — not added to line total
+        item.total = baseAmount - item.discountAmount;
 
         setInvoiceItems(newItems);
-    };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [invoiceItems]);
 
-    const handleUpdateItemQty = (index: number, value: string) => {
+    const handleUpdateItemQty = useCallback((index: number, value: string) => {
         // Allow empty string for typing
         if (value === '') {
             const newItems = [...invoiceItems];
@@ -587,10 +621,12 @@ export default function Billing() {
         item.sgstAmount = (baseAmount * item.sgst) / 100;
         item.igstAmount = (baseAmount * item.igst) / 100;
         item.discountAmount = (baseAmount * item.discount) / 100;
-        item.total = baseAmount + item.cgstAmount + item.sgstAmount + item.igstAmount - item.discountAmount;
+        // Product GST is for taxable summary only — not added to line total
+        item.total = baseAmount - item.discountAmount;
 
         setInvoiceItems(newItems);
-    };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [invoiceItems]);
 
     const handleCreateBill = async () => {
         if (!selectedDealer || invoiceItems.length === 0) return;
@@ -723,6 +759,55 @@ export default function Billing() {
             console.error('[Billing] Sheets Sync Failed:', syncError);
         }
 
+        // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
+        if (companySettings && selectedDealer) {
+            // Background process to avoid blocking UI success screen
+            (async () => {
+                try {
+                    const invoiceData = {
+                        id: (editInvoiceId || 'NEW'),
+                        customerId: selectedDealer.id,
+                        type: TransactionType.INVOICE,
+                        amount: invoiceTotal,
+                        date: new Date(invoiceDate),
+                        referenceId: (manualInvoiceNo ? `INV${manualInvoiceNo}` : (editInvoiceId || 'NEW')),
+                        items: invoiceItems,
+                        vehicleName,
+                        vehicleNumber,
+                        destination,
+                        transportCharges: parseFloat(transportCharges) || 0,
+                        paymentTerms,
+                        discountPercent: parseFloat(globalDiscount) || 0,
+                        creditDays: parseInt(creditDays) || 30,
+                        notes: JSON.stringify({
+                            buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
+                            deliveryNote, supplierRef, otherRef, termsOfDelivery,
+                            manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST
+                        })
+                    };
+
+                    const invoiceBase64 = await generateInvoicePDFBase64(
+                        invoiceData as any,
+                        selectedDealer!,
+                        invoiceItems,
+                        companySettings
+                    );
+
+                    const driveFileName = buildInvoiceFileName(
+                        invoiceData.referenceId,
+                        selectedDealer!.businessName,
+                        new Date(invoiceData.date)
+                    );
+
+                    console.log('[Billing] Starting automatic Drive upload:', driveFileName);
+                    await uploadInvoicePDF(invoiceBase64, driveFileName, selectedDealer!.businessName);
+                    console.log('[Billing] Automatic Drive upload success!');
+                } catch (driveErr) {
+                    console.error('[Billing] Automatic Drive upload failed:', driveErr);
+                }
+            })();
+        }
+
         setIsSubmitting(false);
         setShowSuccess(true);
         clearDraft(); // Clear draft only on success
@@ -832,27 +917,114 @@ export default function Billing() {
             setWhatsappSending('success');
             setTimeout(() => setWhatsappSending('idle'), 5000);
 
-            // 5. Auto-upload Invoice PDF to Google Drive (non-blocking)
-            try {
-                setDriveUploadStatus('uploading');
-                setDriveError(null);
-                const driveFileName = buildInvoiceFileName(
-                    invoiceData.referenceId || 'DRAFT',
-                    dealer.businessName,
-                    new Date(invoiceData.date)
-                );
-                await uploadInvoicePDF(invoiceBase64, driveFileName, dealer.businessName);
-                setDriveUploadStatus('success');
-                console.log('[Billing] Invoice saved to Google Drive:', driveFileName);
-            } catch (driveErr: any) {
-                console.error('[Billing] Drive upload failed (non-blocking):', driveErr);
-                setDriveUploadStatus('error');
-                setDriveError(driveErr.message || 'Failed to save to Google Drive');
-            }
+            // 5. Success
+            setWhatsappSending('success');
+            setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
             console.error('WhatsApp send failed', err);
             setWhatsappSending('error');
             setWhatsappError(err.message || 'Failed to send WhatsApp message');
+        }
+    };
+
+    // ══════════════════════════════════════════
+    // Cheque Return State & Handler
+    // ══════════════════════════════════════════
+    const [showChequeReturnModal, setShowChequeReturnModal] = useState(false);
+    const [crDealer, setCrDealer] = useState<Dealer | null>(null);
+    const [crDealerSearch, setCrDealerSearch] = useState('');
+    const [crChequeNo, setCrChequeNo] = useState('');
+    const [crAmount, setCrAmount] = useState('');
+    const [crReason, setCrReason] = useState('Insufficient Funds');
+    const [crProcessing, setCrProcessing] = useState(false);
+    const [crSuccess, setCrSuccess] = useState(false);
+    const crChequeNoRef = useRef<HTMLInputElement>(null);
+    const crAmountRef = useRef<HTMLInputElement>(null);
+    const crReasonRef = useRef<HTMLSelectElement>(null);
+    const crSubmitRef = useRef<HTMLButtonElement>(null);
+
+    const filteredCrDealers = dealers.filter(d =>
+        d.businessName.toLowerCase().includes(crDealerSearch.toLowerCase())
+    );
+
+    const handleChequeReturn = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!crDealer || !crAmount) return;
+        const amountNum = parseFloat(crAmount);
+        if (isNaN(amountNum) || amountNum <= 0) return;
+
+        setCrProcessing(true);
+        try {
+            const refNote = crChequeNo ? ` (Cheque No: ${crChequeNo})` : '';
+            const noteText = `Cheque Return${refNote} – Reason: ${crReason}`;
+
+            // Create invoice to increase balance
+            await createInvoice(
+                crDealer.id,
+                [],
+                amountNum,
+                { notes: noteText } as any
+            );
+
+            // Send WhatsApp statement with updated balance
+            if (companySettings && crDealer.phone && window.electron?.whatsapp) {
+                try {
+                    const status = await window.electron.whatsapp.getStatus();
+                    if (status === 'READY') {
+                        // Build cheque-return transaction entry for the statement
+                        const crTxn = {
+                            id: 'cr-tmp',
+                            customerId: crDealer.id,
+                            type: TransactionType.INVOICE,
+                            amount: amountNum,
+                            date: new Date(),
+                            referenceId: `CHQ-RETURN`,
+                            notes: noteText
+                        };
+                        const filteredTxns = transactions.filter(t => t.customerId === crDealer.id);
+                        const dealerTxns = [...filteredTxns, crTxn];
+                        const { invoices: stmtInvoices, payments: stmtPayments } = calculateDealerStatement(dealerTxns);
+                        const totalInvoiced = stmtInvoices.reduce((s, i) => s + i.amount, 0);
+                        const totalPaid = stmtPayments.reduce((s, p) => s + p.amount, 0);
+                        const totalOutstanding = totalInvoiced - totalPaid;
+
+                        const statementBase64 = await generateStatementPDFBase64(
+                            crDealer,
+                            stmtInvoices,
+                            stmtPayments,
+                            companySettings,
+                            { totalInvoiced, totalPaid, totalOutstanding }
+                        );
+
+                        const msg = `Hello ${crDealer.businessName}, a cheque return of ₹${amountNum.toLocaleString()} has been recorded${refNote ? ` for ${crChequeNo}` : ''}. Your updated outstanding balance is ₹${totalOutstanding.toLocaleString()}. Please find the account statement attached.`;
+
+                        await window.electron.whatsapp.sendPDF(
+                            crDealer.phone,
+                            statementBase64,
+                            `Statement_${crDealer.businessName.replace(/\s+/g, '_')}.pdf`,
+                            msg
+                        );
+                    }
+                } catch (waErr) {
+                    console.warn('[Billing] Cheque Return WhatsApp send failed:', waErr);
+                }
+            }
+
+            setCrSuccess(true);
+            setTimeout(() => {
+                setShowChequeReturnModal(false);
+                setCrSuccess(false);
+                setCrDealer(null);
+                setCrDealerSearch('');
+                setCrChequeNo('');
+                setCrAmount('');
+                setCrReason('Insufficient Funds');
+            }, 2000);
+        } catch (err) {
+            console.error('[Billing] Cheque Return failed:', err);
+            alert('Failed to record cheque return. Please try again.');
+        } finally {
+            setCrProcessing(false);
         }
     };
 
@@ -897,20 +1069,63 @@ export default function Billing() {
         setTransportCharges('0');
         setPaymentTerms('Immediate');
         setGlobalDiscount('0');
+        setGlobalCGST('0');
+        setGlobalSGST('0');
+        setGlobalIGST('0');
+        setRoundOff('0');
+        setBuyerOrderNo('');
+        setBuyerOrderDate('');
+        setDispatchDocNo('');
+        setDispatchDate('');
+        setDeliveryNote('');
+        setSupplierRef('');
+        setOtherRef('');
+        setTermsOfDelivery('');
+        setCreditDays('30');
         setDealerSearch('');
         setDriveUploadStatus('idle');
         setDriveError(null);
     };
 
-    const handlePrint = () => {
+    const handleNewInvoice = () => {
+        if (invoiceItems.length > 0) {
+            if (!confirm('You have unsaved items in the current invoice. Are you sure you want to start a new invoice?')) {
+                return;
+            }
+        }
+        resetForm();
+        clearDraft();
+        // Focus search after reset
+        setTimeout(() => dealerSearchInputRef.current?.focus(), 100);
+    };
+
+    const handlePrint = async () => {
         if (!companySettings) {
-            alert('Company settings (Name, Address, GST) are missing or failed to load. Please check your database settings.');
+            alert('Company settings are missing. Please check your database settings.');
             return;
         }
+        // Show the invoice in print-ready mode first
         setShowPrintPreview(true);
-        setTimeout(() => {
-            window.print();
-        }, 500);
+        // Open the Select Printer dialog
+        setPrintError(null);
+        setPrintingStatus('loading');
+        setShowPrinterDialog(true);
+
+        // Load printers from Electron
+        try {
+            if (window.electron?.printer?.getPrinters) {
+                const list = await window.electron.printer.getPrinters();
+                setPrinters(list);
+                // Pre-select the default printer
+                const def = list.find((p: any) => p.isDefault);
+                setSelectedPrinter(def ? def.name : (list[0]?.name || ''));
+            } else {
+                setPrinters([]);
+            }
+        } catch (err) {
+            setPrinters([]);
+        }
+        setPrintingStatus('idle');
     };
 
     // Success Screen with Green Tick Animation
@@ -919,7 +1134,7 @@ export default function Billing() {
         <div className="h-full">
             {/* Input Form - Hidden on Success or Print */}
             <div className={`p-6 h-full overflow-y-auto ${showSuccess ? 'hidden' : 'block'} print:hidden`}>
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex justify-between items-end mb-6">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-800">{editInvoiceId ? 'Edit Invoice' : 'New Invoice'}</h1>
                         {/* Input Form Header Continued... */}
@@ -927,16 +1142,33 @@ export default function Billing() {
                             {editInvoiceId ? 'Modify existing bill details' : 'Create bill with tax details and transport information'}
                         </p>
                     </div>
-                    <div className="text-right bg-white px-4 py-2 rounded-lg border border-slate-200">
-                        <p className="text-xs text-slate-500">Bill Date (IST)</p>
-                        <p className="font-bold text-slate-800">
-                            {new Date().toLocaleDateString('en-IN', {
-                                day: '2-digit',
-                                month: '2-digit',
-                                year: 'numeric',
-                                timeZone: 'Asia/Kolkata'
-                            })}
-                        </p>
+                    <div className="flex items-center gap-3">
+                        {/* Cheque Return Button */}
+                        <button
+                            onClick={() => setShowChequeReturnModal(true)}
+                            className="bg-red-600 text-white px-5 py-2.5 rounded-xl hover:bg-red-700 transition-all flex items-center gap-2 font-bold shadow-lg shadow-red-100 h-fit"
+                        >
+                            <CreditCard size={18} />
+                            Cheque Return
+                        </button>
+                        <button
+                            onClick={handleNewInvoice}
+                            className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl hover:bg-emerald-700 transition-all flex items-center gap-2 font-bold shadow-lg shadow-emerald-100 h-fit"
+                        >
+                            <Plus size={20} />
+                            New Invoice
+                        </button>
+                        <div className="text-right bg-white px-4 py-2 rounded-lg border border-slate-200">
+                            <p className="text-xs text-slate-500">Bill Date (IST)</p>
+                            <p className="font-bold text-slate-800">
+                                {new Date().toLocaleDateString('en-IN', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    timeZone: 'Asia/Kolkata'
+                                })}
+                            </p>
+                        </div>
                     </div>
                 </div>
 
@@ -1023,7 +1255,7 @@ export default function Billing() {
                                         onClick={() => setShowAddDealerModal(true)}
                                         className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 font-medium shrink-0 h-11"
                                     >
-                                        <Plus size={18} />
+                                        <Users size={18} />
                                         Add New Dealer
                                     </button>
                                 </div>
@@ -1499,18 +1731,24 @@ export default function Billing() {
                                     <span>Subtotal</span>
                                     <span>₹{subTotal.toFixed(2)}</span>
                                 </div>
-                                <div className="flex justify-between text-slate-600 text-sm">
-                                    <span className="pl-2">+ CGST</span>
-                                    <span>₹{invoiceItems.reduce((a, i) => a + i.cgstAmount, 0).toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-slate-600 text-sm">
-                                    <span className="pl-2">+ SGST</span>
-                                    <span>₹{invoiceItems.reduce((a, i) => a + i.sgstAmount, 0).toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-slate-600 text-sm">
-                                    <span className="pl-2">+ IGST</span>
-                                    <span>₹{invoiceItems.reduce((a, i) => a + i.igstAmount, 0).toFixed(2)}</span>
-                                </div>
+                                {globalCGSTAmount > 0 && (
+                                    <div className="flex justify-between text-slate-600 text-sm">
+                                        <span className="pl-2">+ CGST ({globalCGST}%)</span>
+                                        <span>₹{globalCGSTAmount.toFixed(2)}</span>
+                                    </div>
+                                )}
+                                {globalSGSTAmount > 0 && (
+                                    <div className="flex justify-between text-slate-600 text-sm">
+                                        <span className="pl-2">+ SGST ({globalSGST}%)</span>
+                                        <span>₹{globalSGSTAmount.toFixed(2)}</span>
+                                    </div>
+                                )}
+                                {globalIGSTAmount > 0 && (
+                                    <div className="flex justify-between text-slate-600 text-sm">
+                                        <span className="pl-2">+ IGST ({globalIGST}%)</span>
+                                        <span>₹{globalIGSTAmount.toFixed(2)}</span>
+                                    </div>
+                                )}
                                 {totalDiscount > 0 && (
                                     <div className="flex justify-between text-green-600 text-sm">
                                         <span className="pl-2">- Item Discounts</span>
@@ -1606,10 +1844,12 @@ export default function Billing() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
                                         <input
+                                            ref={dealerContactPersonRef}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.contactPerson}
                                             onChange={e => setNewDealer({ ...newDealer, contactPerson: e.target.value })}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 1)}
                                         />
                                     </div>
                                     <div>
@@ -1621,7 +1861,7 @@ export default function Billing() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.phone}
                                             onChange={e => setNewDealer({ ...newDealer, phone: e.target.value })}
-                                            onKeyDown={(e) => handleDealerKeyDown(e, 1)}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 2)}
                                         />
                                     </div>
                                 </div>
@@ -1629,20 +1869,24 @@ export default function Billing() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
                                         <input
+                                            ref={dealerCityRef}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             placeholder="e.g., Chennai"
                                             value={newDealer.city}
                                             onChange={e => setNewDealer({ ...newDealer, city: e.target.value })}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 3)}
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">District</label>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
                                         <input
+                                            ref={dealerDistrictRef}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.district}
                                             onChange={e => setNewDealer({ ...newDealer, district: e.target.value })}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 4)}
                                         />
                                     </div>
                                 </div>
@@ -1650,31 +1894,37 @@ export default function Billing() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
                                         <input
+                                            ref={dealerPinCodeRef}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             placeholder="e.g., 600001"
                                             value={newDealer.pinCode}
                                             onChange={e => setNewDealer({ ...newDealer, pinCode: e.target.value.replace(/[^0-9]/g, '') })}
                                             maxLength={6}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 5)}
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
                                         <input
+                                            ref={dealerGstRef}
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.gstNumber}
                                             onChange={e => setNewDealer({ ...newDealer, gstNumber: e.target.value.toUpperCase() })}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 6)}
                                         />
                                     </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
                                     <textarea
+                                        ref={dealerAddressRef}
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
                                         rows={2}
                                         value={newDealer.address}
                                         onChange={e => setNewDealer({ ...newDealer, address: e.target.value })}
+                                        onKeyDown={(e) => handleDealerKeyDown(e, 7)}
                                     />
                                 </div>
 
@@ -2034,7 +2284,302 @@ export default function Billing() {
                 </div>
             )}
             {/* End of Print Preview */}
-        </div >
+
+            {/* ─── Select Printer Modal ─── */}
+            {showPrinterDialog && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm print:hidden"
+                    onClick={() => { setShowPrinterDialog(false); setShowPrintPreview(false); }}>
+                    <div
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center">
+                                    <Printer size={18} className="text-slate-700" />
+                                </div>
+                                <div>
+                                    <p className="font-bold text-slate-800 text-base">Select Printer</p>
+                                    <p className="text-xs text-slate-400">Choose printer for invoice</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setShowPrinterDialog(false); setShowPrintPreview(false); }}
+                                className="text-slate-400 hover:text-slate-600 transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Printer List */}
+                        <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
+                            {printingStatus === 'loading' ? (
+                                <div className="flex items-center justify-center py-6 gap-2 text-slate-400">
+                                    <Loader2 size={18} className="animate-spin" />
+                                    <span className="text-sm">Loading printers...</span>
+                                </div>
+                            ) : printers.length === 0 ? (
+                                <p className="text-center text-sm text-slate-400 py-4">No printers found</p>
+                            ) : (
+                                printers.map((printer) => {
+                                    const isSelected = selectedPrinter === printer.name;
+                                    return (
+                                        <button
+                                            key={printer.name}
+                                            onClick={() => setSelectedPrinter(printer.name)}
+                                            className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${isSelected
+                                                ? 'border-emerald-500 bg-emerald-50'
+                                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                                                }`}
+                                        >
+                                            <p className={`font-semibold text-sm ${isSelected ? 'text-emerald-800' : 'text-slate-800'}`}>
+                                                {printer.displayName || printer.name}
+                                            </p>
+                                            <p className={`text-xs mt-0.5 ${isSelected ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                                {printer.isDefault ? '✓ Default' : 'Ready'}
+                                                {printer.description ? ` · ${printer.description}` : ''}
+                                            </p>
+                                        </button>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {/* Error */}
+                        {printError && (
+                            <p className="px-5 text-xs text-red-500 pb-2">{printError}</p>
+                        )}
+
+                        {/* Actions */}
+                        <div className="px-4 pb-4 space-y-2">
+                            {/* Print Now — native silent print */}
+                            <button
+                                disabled={printingStatus === 'printing' || !selectedPrinter}
+                                onClick={async () => {
+                                    if (!window.electron?.printer?.print) {
+                                        // Fallback: use system dialog
+                                        window.print();
+                                        setShowPrinterDialog(false);
+                                        return;
+                                    }
+                                    setPrintingStatus('printing');
+                                    setPrintError(null);
+                                    try {
+                                        await window.electron.printer.print(selectedPrinter);
+                                        setPrintingStatus('done');
+                                        setTimeout(() => {
+                                            setShowPrinterDialog(false);
+                                            setShowPrintPreview(false);
+                                            setPrintingStatus('idle');
+                                        }, 800);
+                                    } catch (err: any) {
+                                        setPrintingStatus('error');
+                                        setPrintError(err.message || 'Printing failed. Try the fallback below.');
+                                    }
+                                }}
+                                className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${printingStatus === 'done'
+                                    ? 'bg-emerald-600 text-white'
+                                    : printingStatus === 'printing'
+                                        ? 'bg-slate-700 text-white cursor-wait'
+                                        : 'bg-slate-800 text-white hover:bg-slate-900'
+                                    }`}
+                            >
+                                {printingStatus === 'printing' && <Loader2 size={18} className="animate-spin" />}
+                                {printingStatus === 'done' && <Check size={18} />}
+                                {printingStatus !== 'printing' && printingStatus !== 'done' && <Printer size={18} />}
+                                {printingStatus === 'printing' ? 'Printing...' : printingStatus === 'done' ? 'Sent to Printer!' : 'Print Now'}
+                            </button>
+
+                            {/* Fallback: system dialog */}
+                            <button
+                                onClick={() => {
+                                    setShowPrinterDialog(false);
+                                    setTimeout(() => window.print(), 200);
+                                }}
+                                className="w-full py-2 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+                            >
+                                Print with System Dialog (Fallback)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ═══════════════════════════════════════════════════════════
+                Cheque Return Modal
+            ═══════════════════════════════════════════════════════════ */}
+            {showChequeReturnModal && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-red-100 overflow-hidden">
+                        {/* Modal Header */}
+                        <div className="bg-red-600 text-white p-5 flex justify-between items-start">
+                            <div>
+                                <h2 className="text-lg font-bold flex items-center gap-2">
+                                    <CreditCard size={20} />
+                                    Record Cheque Return
+                                </h2>
+                                <p className="text-red-200 text-sm mt-1">
+                                    Creates an invoice to increase outstanding balance
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setShowChequeReturnModal(false)}
+                                className="text-red-200 hover:text-white transition-colors mt-1"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {crSuccess ? (
+                            <div className="p-10 text-center">
+                                <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <CheckCircle size={40} className="text-emerald-600" />
+                                </div>
+                                <p className="font-bold text-slate-800 text-xl">Cheque Return Recorded!</p>
+                                <p className="text-slate-500 text-sm mt-2">
+                                    Balance updated &amp; WhatsApp statement sent{crDealer?.phone ? '' : ' (no phone on file)'}.
+                                </p>
+                            </div>
+                        ) : (
+                            <form onSubmit={handleChequeReturn} className="p-5 space-y-4">
+                                {/* Warning banner */}
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                                    <strong>⚠️</strong> This will <strong>increase</strong> the dealer's outstanding balance and send a WhatsApp statement.
+                                </div>
+
+                                {/* Dealer Search */}
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                                        Select Dealer *
+                                    </label>
+                                    {crDealer ? (
+                                        <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                                            <div>
+                                                <p className="font-bold text-slate-800 text-sm">{crDealer.businessName}</p>
+                                                <p className="text-xs text-slate-500">{crDealer.phone} &bull; Balance: ₹{crDealer.balance.toLocaleString()}</p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setCrDealer(null); setCrDealerSearch(''); }}
+                                                className="text-slate-400 hover:text-red-500 transition-colors"
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <SearchableSelect
+                                            options={dealers.map(d => ({
+                                                ...d,
+                                                name: d.businessName,
+                                                description: `${d.phone} • ₹${d.balance.toLocaleString()} outstanding`
+                                            }))}
+                                            value={''}
+                                            onChange={(val: string) => {
+                                                const dealer = dealers.find(d => d.id === val);
+                                                if (dealer) {
+                                                    setCrDealer(dealer);
+                                                    setTimeout(() => crChequeNoRef.current?.focus(), 100);
+                                                }
+                                            }}
+                                            placeholder="Search and select dealer..."
+                                            className="w-full"
+                                        />
+                                    )}
+                                </div>
+
+                                {/* Cheque / Receipt Number */}
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                                        Original Cheque / Receipt No
+                                    </label>
+                                    <input
+                                        type="text"
+                                        className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-lg focus:border-red-500 outline-none font-mono"
+                                        placeholder="e.g. 123456 or R001"
+                                        value={crChequeNo}
+                                        onChange={e => setCrChequeNo(e.target.value)}
+                                        ref={crChequeNoRef}
+                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); crAmountRef.current?.focus(); } }}
+                                    />
+                                </div>
+
+                                {/* Bounced Amount */}
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                                        Bounced Amount *
+                                    </label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                                        <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            className="w-full pl-8 pr-4 py-3 border-2 border-slate-200 rounded-lg focus:border-red-500 outline-none font-bold text-slate-800"
+                                            placeholder="Enter bounced amount"
+                                            value={crAmount}
+                                            onChange={e => setCrAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                                            required
+                                            ref={crAmountRef}
+                                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); crReasonRef.current?.focus(); } }}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Reason */}
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                                        Reason for Return
+                                    </label>
+                                    <select
+                                        className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-lg focus:border-red-500 outline-none bg-white font-medium"
+                                        value={crReason}
+                                        onChange={e => setCrReason(e.target.value)}
+                                        ref={crReasonRef}
+                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); crSubmitRef.current?.focus(); } }}
+                                    >
+                                        <option>Insufficient Funds</option>
+                                        <option>Signature Mismatch</option>
+                                        <option>Account Closed</option>
+                                        <option>Date Mismatch</option>
+                                        <option>Payment Stopped by Drawer</option>
+                                        <option>Other</option>
+                                    </select>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowChequeReturnModal(false)}
+                                        className="flex-1 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        ref={crSubmitRef}
+                                        type="submit"
+                                        disabled={crProcessing || !crDealer || !crAmount}
+                                        className="flex-[2] bg-red-600 text-white py-3 rounded-xl font-bold hover:bg-red-700 disabled:bg-slate-300 flex items-center justify-center gap-2 transition-all"
+                                    >
+                                        {crProcessing ? (
+                                            <>
+                                                <Loader2 size={18} className="animate-spin" />
+                                                Processing...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <MessageSquare size={18} />
+                                                Record &amp; Send via WhatsApp
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }
 

@@ -12,5 +12,10 @@ contextBridge.exposeInMainWorld('electron', {
         getStatus: () => ipcRenderer.invoke('whatsapp:get-status'),
         logout: () => ipcRenderer.invoke('whatsapp:logout'),
         reconnect: () => ipcRenderer.invoke('whatsapp:reconnect')
+    },
+    printer: {
+        getPrinters: () => ipcRenderer.invoke('printer:get-printers'),
+        print: (printerName) => ipcRenderer.invoke('printer:print', { printerName, silent: true })
     }
 });
+

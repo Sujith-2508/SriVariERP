@@ -6,12 +6,23 @@ import {
     PurchasePaymentData,
     PurchaseAllocationData
 } from '@/types';
+import { normalizeSupplierName } from './purchaseService';
 
 // Standardize dates from Tally formats
-function parseTallyDate(dateStr: string): Date {
-    if (!dateStr) return new Date();
-    // Handle DD-MMM-YY or DD-MMM-YYYY
-    const clean = dateStr.trim();
+function parseTallyDate(dateVal: any): Date {
+    if (!dateVal) return new Date();
+
+    // Handle serial numbers from Excel/Sheets (e.g. 46083)
+    const num = Number(dateVal);
+    if (!isNaN(num) && typeof dateVal !== 'boolean' && num > 0) {
+        // Offset for Sheets/Excel epoch (1899-12-30) relative to Unix (1970-01-01)
+        return new Date((num - 25569) * 86400 * 1000);
+    }
+
+    // Handle strings
+    const clean = String(dateVal).trim();
+    if (!clean) return new Date();
+
     const d = new Date(clean);
     return isNaN(d.getTime()) ? new Date() : d;
 }
@@ -42,7 +53,21 @@ function parseStatementRows(rows: any[][], fileName: string, sheetName?: string)
     const payments: Partial<PurchasePaymentData>[] = [];
 
     // Fallback order: Header "Ledger:" > "Name - Ledger Account" > Tab Name > File Name
-    let currentEntityName = (sheetName || fileName.replace(/\.[^/.]+$/, "")).trim();
+    let rawName = sheetName || fileName.replace(/\.[^/.]+$/, "");
+
+    // Clean up generic sheet names or filenames
+    if (rawName.toLowerCase().match(/sheet\d+|ledger|statement|export/)) {
+        // If it's generic, try to get a better name from the filename if sheetName was used
+        if (sheetName) rawName = fileName.replace(/\.[^/.]+$/, "");
+    }
+
+    // Remove common prefixes/suffixes and dates from filename
+    let currentEntityName = rawName
+        .replace(/^\d{2}-\d{2}-\d{4}_/i, '') // Remove date prefixes
+        .replace(/_ledger/i, '')
+        .replace(/_statement/i, '')
+        .trim() || 'Unnamed Supplier';
+
     let supplierAddress = '';
     let supplierGst = '';
 
@@ -201,8 +226,14 @@ export async function syncAllStatements() {
                 const { name, address, gst, bills, payments } = parseStatementRows(rows, file.name, sheetName);
                 console.log(`[FolderSync]   -> Parsed tab "${sheetName}" as entity "${name}"`);
 
+                if (!name || name === 'Unknown' || name === 'Unnamed Supplier') {
+                    console.warn(`[FolderSync] Skipping invalid entity name: "${name}" in tab "${sheetName}"`);
+                    continue;
+                }
+
                 // Find or Create Supplier in the NEW list
-                let supplier = allSuppliers.find(s => s.name.toLowerCase() === name.toLowerCase());
+                const search = normalizeSupplierName(name);
+                let supplier = allSuppliers.find(s => normalizeSupplierName(s.name) === search);
                 if (!supplier) {
                     supplier = {
                         id: crypto.randomUUID(),
@@ -227,6 +258,7 @@ export async function syncAllStatements() {
                         ...b,
                         id: crypto.randomUUID(),
                         supplierId: supplier!.id,
+                        supplierName: supplier!.name, // FIX: Populate supplierName
                         amount: amount,
                         paidAmount: 0,
                         balance: amount,
@@ -241,6 +273,7 @@ export async function syncAllStatements() {
                         ...p,
                         id: crypto.randomUUID(),
                         supplierId: supplier!.id,
+                        supplierName: supplier!.name, // FIX: Populate supplierName
                         paymentMode: 'OTHER',
                         createdAt: new Date()
                     } as PurchasePaymentData);
@@ -248,12 +281,72 @@ export async function syncAllStatements() {
             }
         }
 
-        // 3. Persistent Save (Full Overwrite)
-        localStorage.setItem(KEYS.SUPPLIERS, JSON.stringify(allSuppliers));
-        localStorage.setItem(KEYS.BILLS, JSON.stringify(allNewBills));
-        localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(allNewPayments));
+        // 3. Persistent Save (Merge Overwrite)
+        // Load current local data to preserve manual changes
+        const currentSuppliers = JSON.parse(localStorage.getItem(KEYS.SUPPLIERS) || '[]');
+        const currentBills = JSON.parse(localStorage.getItem(KEYS.BILLS) || '[]');
+        const currentPayments = JSON.parse(localStorage.getItem(KEYS.PAYMENTS) || '[]');
 
-        console.log(`[FolderSync] Sync complete. ${allSuppliers.length} suppliers, ${allNewBills.length} bills, ${allNewPayments.length} payments.`);
+        // Filter out old HIST records from current local data
+        const manualBills = currentBills.filter((b: any) => !b.id.startsWith('HIST-'));
+        const manualPayments = currentPayments.filter((p: any) => !p.id.startsWith('HIST-'));
+
+        // Identify existing suppliers to merge metadata (keep existing IDs for manual record linking)
+        // We also need to map the "new" IDs in our arrays to these reconciled IDs
+        const idMap = new Map<string, string>();
+
+        allSuppliers.forEach(newSup => {
+            const oldId = newSup.id;
+            const search = normalizeSupplierName(newSup.name);
+            const existing = currentSuppliers.find((s: any) => normalizeSupplierName(s.name) === search);
+            if (existing) {
+                newSup.id = existing.id; // Preserve ID so existing manual bills/payments keep linking
+                // Keep the better address/GST
+                newSup.address = newSup.address || existing.address;
+                newSup.gstNumber = newSup.gstNumber || existing.gstNumber;
+            }
+            idMap.set(oldId, newSup.id);
+        });
+
+        // Update supplierId in our new records based on the ID map
+        allNewBills.forEach(b => {
+            b.supplierId = idMap.get(b.supplierId) || b.supplierId;
+        });
+        allNewPayments.forEach(p => {
+            p.supplierId = idMap.get(p.supplierId) || p.supplierId;
+        });
+
+        // Add back any manual suppliers not found in the sync
+        currentSuppliers.forEach((s: any) => {
+            const search = normalizeSupplierName(s.name);
+            if (!allSuppliers.find(n => normalizeSupplierName(n.name) === search)) {
+                allSuppliers.push(s);
+            }
+        });
+
+        // Map fresh historical records to the reconciled supplier IDs
+        const finalBills = [...manualBills];
+        const finalPayments = [...manualPayments];
+
+        allNewBills.forEach(b => {
+            // For simplicity in Drive sync, we treat Drive-found records as truth for HIST-
+            // We give them deterministic IDs just like PurchaseService
+            const dateStr = b.billDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '');
+            const detId = `HIST-${b.supplierName}-${dateStr}-${b.billNumber}`;
+            finalBills.push({ ...b, id: detId });
+        });
+
+        allNewPayments.forEach(p => {
+            const dateStr = p.paymentDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '');
+            const detId = `HIST-${p.supplierName}-${dateStr}-${p.paymentNumber}`;
+            finalPayments.push({ ...p, id: detId });
+        });
+
+        localStorage.setItem(KEYS.SUPPLIERS, JSON.stringify(allSuppliers));
+        localStorage.setItem(KEYS.BILLS, JSON.stringify(finalBills));
+        localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(finalPayments));
+
+        console.log(`[FolderSync] Sync complete. Merged state: ${allSuppliers.length} suppliers, ${finalBills.length} total bills, ${finalPayments.length} total payments.`);
         return true;
     } catch (error) {
         console.error('[FolderSync] Sync failed:', error);
@@ -267,7 +360,6 @@ export async function syncAllStatements() {
 export async function syncLocalToDrive(type: 'PURCHASE' | 'PAYMENT', data: any, entityName: string) {
     if (typeof window === 'undefined') return;
 
-    console.log(`[FolderSync] Writing local change to Drive for ${entityName}...`);
     try {
         const isSupplier = type.startsWith('PURCHASE') || type.includes('SUPPLIER');
         const folderId = await getSyncFolderId(isSupplier ? SUPPLIER_FOLDER : DEALER_FOLDER);
@@ -278,7 +370,16 @@ export async function syncLocalToDrive(type: 'PURCHASE' | 'PAYMENT', data: any, 
 
         await uploadTextFile(content, fileName, folderId, 'application/json');
         console.log(`[FolderSync] Local CRUD uploaded to Drive as ${fileName}`);
-    } catch (e) {
-        console.error(`[FolderSync] Local to Drive sync failed:`, e);
+    } catch (e: unknown) {
+        // Service accounts have no personal Drive storage quota — this is expected
+        // when a service account is used without a Shared Drive. Data is safe in
+        // localStorage and the Google Sheet tab, so we just skip Drive backup silently.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('storageQuotaExceeded') || msg.includes('do not have storage quota')) {
+            console.warn(`[FolderSync] Drive backup skipped (service account has no quota) for ${entityName}`);
+        } else {
+            console.warn(`[FolderSync] Drive backup failed for ${entityName}:`, msg);
+        }
     }
 }
+

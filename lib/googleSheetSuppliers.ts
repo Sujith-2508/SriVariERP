@@ -1,9 +1,10 @@
-/**
+﻿/**
  * Google Sheets Suppliers Service
  * 
  * Fetches "refined suppliers" from Google Sheets for the Purchase Management module.
  */
 
+// Update interface to include balance data
 export interface HistoricalVoucher {
     supplierName: string;
     date: string;
@@ -14,9 +15,15 @@ export interface HistoricalVoucher {
     credit: number;
 }
 
-import { SupplierData } from '@/types';
+export interface SyncData {
+    vouchers: HistoricalVoucher[];
+    supplierBalances: Record<string, number>;
+}
 
-const SPREADSHEET_ID = '1nQBRIzwiht43R9nXYzUj-M2EXp8qmWCXh9asC-GNJL0';
+import { SupplierData } from '@/types';
+import { normalizeSupplierName } from './purchaseService';
+
+const SPREADSHEET_ID = '1CxjsldaglA9AM0BIudjTjyX5E8mLTijMrLWw4oZ17PA';
 const SHEET_NAME = 'refined suppliers';
 const SHEETS_API_BASE = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
@@ -111,7 +118,7 @@ async function getAccessToken(): Promise<string> {
     const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
     const claims = base64url(JSON.stringify({
         iss: credentials.client_email,
-        scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+        scope: 'https://www.googleapis.com/auth/spreadsheets',
         aud: 'https://oauth2.googleapis.com/token',
         exp: now + 3600,
         iat: now,
@@ -150,38 +157,109 @@ async function getAccessToken(): Promise<string> {
 export async function fetchRefinedSuppliers(): Promise<SupplierData[]> {
     try {
         const token = await getAccessToken();
-        const response = await fetchWithRetry(
-            `${SHEETS_API_BASE}/values/${SHEET_NAME}!A:E`,
+
+        // 1. Get all tabs to ensure we have all 5 suppliers
+        const metadataResponse = await fetchWithRetry(
+            `${SHEETS_API_BASE}?fields=sheets.properties.title`,
             { headers: { 'Authorization': `Bearer ${token}` } }
         );
+        if (!metadataResponse.ok) return [];
+        const metadata = await metadataResponse.json();
+        const tabNames: string[] = metadata.sheets
+            ?.map((s: any) => s.properties.title)
+            .filter((title: string) => title !== 'Summary') || [];
 
-        if (!response.ok) {
-            console.error('[GoogleSheetSuppliers] API error:', await response.text());
-            return [];
-        }
+        // 2. Fetch Summary list for enriched metadata (Address, GST, Balances)
+        const summaryResponse = await fetchWithRetry(
+            `${SHEETS_API_BASE}/values/Summary!A15:E50`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        const summaryData = summaryResponse.ok ? await summaryResponse.json() : { values: [] };
+        const summaryRows = summaryData.values || [];
 
-        const data = await response.json();
-        const rows = data.values || [];
-        if (rows.length <= 1) return [];
+        const suppliers: SupplierData[] = [];
 
-        // Skip header row
-        const suppliers: SupplierData[] = rows.slice(1).map((row: any, index: number) => {
-            const name = (row[0] || '').trim();
-            const address = (row[1] || '').trim();
-            const gst = (row[2] || '').trim();
-            const phone = (row[3] || '').trim();
+        for (const tabName of tabNames) {
+            // Find in summary by normalized match
+            const summaryRow = summaryRows.find((row: any) => {
+                const summaryName = normalizeSupplierName(row[0] || '');
+                const tabNormalized = normalizeSupplierName(tabName);
+                return summaryName === tabNormalized || summaryName.includes(tabNormalized) || tabNormalized.includes(summaryName);
+            });
 
-            return {
-                id: `GS-${index + 1}`, // Temporary ID, will be matched/updated in purchaseService
-                name,
+            let address = '';
+            let city = '';
+            let gst = '';
+            let balance = 0;
+            let phone = '';
+
+            if (summaryRow) {
+                address = (summaryRow[1] || '').trim();
+                gst = (summaryRow[2] || '').trim();
+
+                // Try to extract city from address (usually "City, State" or just "City")
+                if (address.includes(',')) {
+                    city = address.split(',')[0].trim();
+                } else {
+                    city = address;
+                }
+
+                const cleanNum = (val: string) => parseFloat((val || '0').replace(/[â‚¹\s,]/g, '')) || 0;
+                const balanceStr = (summaryRow[3] || '0');
+                const balanceType = (summaryRow[4] || 'Cr').trim();
+                balance = cleanNum(balanceStr);
+                if (balanceType === 'Dr') balance = -balance;
+            }
+
+            // Always try to peek at the tab header for more precise info (Phone, Address)
+            try {
+                const headerRes = await fetchWithRetry(
+                    `${SHEETS_API_BASE}/values/'${tabName}'!A5:A8`,
+                    { headers: { 'Authorization': `Bearer ${token}` } }
+                );
+                if (headerRes.ok) {
+                    const hData = await headerRes.json();
+                    const hRows = hData.values || [];
+                    // Row 6 (Index 1) often has details: "ADDRESS | MOB: 9488... | Email: ..."
+                    // Row 7 (Index 2) might have GST: "GST: 33ADYP..."
+                    hRows.forEach((hRow: any) => {
+                        const line = (hRow[0] || '');
+                        if (line.includes('|')) {
+                            const parts = line.split('|');
+                            parts.forEach((part: string) => {
+                                const p = part.trim();
+                                if (p.includes('MOB:') || p.includes('CELL:')) {
+                                    phone = p.split(/:/)[1]?.trim() || '';
+                                }
+                                if (p.includes('GST:')) {
+                                    gst = p.split('GST:')[1]?.trim() || gst;
+                                }
+                            });
+                        }
+                    });
+
+                    // Specific check for city in header row 6 if address was not set
+                    if (hRows[1] && hRows[1][0] && !city) {
+                        const addrPart = hRows[1][0].split('|')[0] || '';
+                        if (addrPart.includes(',')) city = addrPart.split(',').pop()?.trim() || '';
+                    }
+                }
+            } catch (e) {
+                console.warn(`[GoogleSheetSuppliers] Could not fetch header for ${tabName}`, e);
+            }
+
+            suppliers.push({
+                id: `GS-${tabName.replace(/\s+/g, '-')}`,
+                name: tabName,
                 address,
+                city,
                 gstNumber: gst,
-                phone,
-                balance: 0,
+                phone: phone,
+                balance,
                 createdAt: new Date(),
-                updatedAt: new Date(),
-            } as SupplierData;
-        });
+                updatedAt: new Date()
+            });
+        }
 
         return suppliers;
     } catch (error) {
@@ -190,35 +268,478 @@ export async function fetchRefinedSuppliers(): Promise<SupplierData[]> {
     }
 }
 
-// Fetch historical vouchers from Google Sheet
-export async function fetchHistoricalVouchers(): Promise<HistoricalVoucher[]> {
+// Fetch historical vouchers and specific closing balances from individual supplier tabs
+export async function fetchHistoricalVouchers(): Promise<SyncData> {
     try {
         const token = await getAccessToken();
-        const response = await fetch(
-            `${SHEETS_API_BASE}/values/suppliers purchase bills and payments!A:G`,
+
+        const metadataResponse = await fetchWithRetry(
+            `${SHEETS_API_BASE}?fields=sheets.properties.title`,
             { headers: { 'Authorization': `Bearer ${token}` } }
         );
+        if (!metadataResponse.ok) return { vouchers: [], supplierBalances: {} };
+        const metadata = await metadataResponse.json();
+        const tabs: string[] = metadata.sheets
+            ?.map((s: any) => s.properties.title)
+            .filter((title: string) => title !== 'Summary') || [];
 
-        if (!response.ok) {
-            console.error('[GoogleSheetSuppliers] API error:', await response.text());
-            return [];
+        const allVouchers: HistoricalVoucher[] = [];
+        const supplierBalances: Record<string, number> = {};
+
+        for (const tabName of tabs) {
+            // Fetch a larger block to find where the header actually starts
+            const response = await fetchWithRetry(
+                `${SHEETS_API_BASE}/values/'${tabName}'!A1:I500`,
+                { headers: { 'Authorization': `Bearer ${token}` } }
+            );
+
+            if (!response.ok) continue;
+
+            const data = await response.json();
+            const rows = data.values || [];
+
+            // Find the header row (usually contains "Date" in column A)
+            let headerIndex = rows.findIndex((r: any) => r[0] === 'Date');
+            if (headerIndex === -1) {
+                console.warn(`[GoogleSheetSuppliers] Could not find 'Date' header in tab: ${tabName}`);
+                continue;
+            }
+
+            // Data starts after the header row
+            const dataRows = rows.slice(headerIndex + 1);
+            let lastBalance = 0;
+
+            const cleanNum = (val: string) => parseFloat((val || '0').replace(/[â‚¹\s,]/g, '')) || 0;
+
+            dataRows.forEach((row: any) => {
+                const date = String(row[0] || '').trim();
+                const particulars = (row[1] || '').trim();
+
+                // Track balance from column H (index 7) or I (index 8)
+                // Tally usually has Balance in Col H and Type in Col I
+                const balanceVal = cleanNum(row[7]);
+                const balanceType = (row[8] || '').trim();
+
+                if (row[7] !== undefined && row[7] !== '') {
+                    lastBalance = balanceVal;
+                    if (balanceType === 'Dr') lastBalance = -lastBalance;
+                }
+
+                // Skip empty rows or re-headers
+                if (!date || date === 'Date' || date.toLowerCase().includes('closing')) {
+                    if (date.toLowerCase().includes('closing') && row[7] !== undefined) {
+                        // Double check closing balance from this specific row if it exists
+                        lastBalance = cleanNum(row[7]);
+                        if ((row[8] || '').trim() === 'Dr') lastBalance = -lastBalance;
+                    }
+                    return;
+                }
+
+                const vchType = (row[2] || '').trim();
+                const vchNo = (row[4] || '').trim();
+                const debit = cleanNum(row[5]);
+                const credit = cleanNum(row[6]);
+
+                allVouchers.push({
+                    supplierName: tabName,
+                    date: date || '01 Apr 19',
+                    particulars,
+                    vchType,
+                    vchNo,
+                    debit,
+                    credit,
+                });
+            });
+
+            supplierBalances[tabName] = lastBalance;
+            console.log(`[GoogleSheetSuppliers] Tab: ${tabName}, Detected Closing Balance: ${lastBalance}`);
         }
 
-        const data = await response.json();
-        const rows = data.values || [];
-        if (rows.length <= 1) return [];
-
-        return rows.slice(1).map((row: any) => ({
-            supplierName: (row[0] || '').trim(),
-            date: (row[1] || '').trim(),
-            particulars: (row[2] || '').trim(),
-            vchType: (row[3] || '').trim(),
-            vchNo: (row[4] || '').trim(),
-            debit: parseFloat((row[5] || '0').replace(/,/g, '')) || 0,
-            credit: parseFloat((row[6] || '0').replace(/,/g, '')) || 0,
-        }));
+        return { vouchers: allVouchers, supplierBalances };
     } catch (error) {
         console.error('[GoogleSheetSuppliers] Failed to fetch historical vouchers:', error);
-        return [];
+        return { vouchers: [], supplierBalances: {} };
+    }
+}
+
+export interface SupplierSheetDetails {
+    supplierName: string;
+    supplierAddress?: string;
+    supplierCity?: string;
+    supplierGst?: string;
+    supplierPhone?: string;
+    supplierContactPerson?: string;
+}
+
+export interface CompanySheetDetails {
+    companyName?: string;
+    address?: string;
+    city?: string;
+    gstNumber?: string;
+    phone?: string;
+    email?: string;
+}
+
+/**
+ * Creates a new tab in the Supplier_Group3_Ledger spreadsheet
+ * for a newly added supplier, with full Tally-style header matching
+ * the existing tab format (company info â†’ supplier info â†’ column headers).
+ */
+export async function createSupplierSheetTab(
+    supplier: SupplierSheetDetails,
+    company: CompanySheetDetails = {}
+): Promise<boolean> {
+    try {
+        // Reset cached token so we always get a write-scoped one
+        cachedToken = null;
+        const token = await getAccessToken();
+
+        const supplierName = supplier.supplierName;
+
+        // 1. Add new sheet tab via batchUpdate
+        const addSheetRes = await fetchWithRetry(
+            `${SHEETS_API_BASE}:batchUpdate`,
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    requests: [{
+                        addSheet: {
+                            properties: {
+                                title: supplierName,
+                                gridProperties: { rowCount: 500, columnCount: 10 }
+                            }
+                        }
+                    }]
+                })
+            }
+        );
+
+        if (!addSheetRes.ok) {
+            const err = await addSheetRes.text();
+            // If tab already exists (400), still proceed to write headers
+            if (!err.includes('already exists')) {
+                console.error('[GoogleSheetSuppliers] Failed to create sheet tab:', err);
+                return false;
+            }
+        }
+
+        // 2. Build the header rows matching the exact Tally format in the screenshot
+        const today = new Date();
+        const periodEnd = today.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        // Row 1 â€“ Company name
+        const companyName = company.companyName || 'Sri Vari Enterprises';
+        // Row 2 â€“ Company address
+        const companyAddr = [company.address, company.city].filter(Boolean).join(', ') || 'POLLACHI';
+        // Row 3 â€“ GST | MOB | Email
+        const companyContact = [
+            company.gstNumber ? `GST IN: ${company.gstNumber}` : '',
+            company.phone ? `MOB: ${company.phone}` : '',
+            company.email ? `Email: ${company.email}` : ''
+        ].filter(Boolean).join(' | ');
+
+        // Row 5 â€“ Supplier name heading
+        const supplierHeading = `${supplierName} - Ledger Account`;
+        // Row 6 â€“ Supplier address
+        const supplierAddr = [supplier.supplierAddress, supplier.supplierCity].filter(Boolean).join(', ');
+        // Row 7 â€“ GST | CELL
+        const supplierContact = [
+            supplier.supplierGst ? `GST: ${supplier.supplierGst}` : '',
+            supplier.supplierPhone ? `CELL: ${supplier.supplierPhone}` : '',
+            supplier.supplierContactPerson ? `Contact: ${supplier.supplierContactPerson}` : ''
+        ].filter(Boolean).join(' | ');
+        // Row 8 â€“ Period
+        const period = `Period: 01 Apr 2019 To ${periodEnd}`;
+
+        // Build the rows array (10 rows before data starts at row 11)
+        const headerRows = [
+            [companyName],                                                              // Row 1
+            [companyAddr],                                                              // Row 2
+            [companyContact],                                                           // Row 3
+            [''],                                                                       // Row 4 (blank)
+            [supplierHeading],                                                          // Row 5
+            [supplierAddr || ''],                                                       // Row 6
+            [supplierContact || ''],                                                    // Row 7
+            [period],                                                                   // Row 8
+            [''],                                                                       // Row 9 (blank)
+            ['Date', 'Particulars', 'Vch Type', 'Vch Ref.', 'Vch No.', 'Debit (\u20b9)', 'Credit (\u20b9)', 'Balance (\u20b9)', 'Balance Type', '']  // Row 10 â€“ column headers
+        ];
+
+        const sheetRange = `'${supplierName}'!A1:J10`;
+        const writeRes = await fetchWithRetry(
+            `${SHEETS_API_BASE}/values/${encodeURIComponent(sheetRange)}?valueInputOption=RAW`,
+            {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ values: headerRows })
+            }
+        );
+
+        if (!writeRes.ok) {
+            const err = await writeRes.text();
+            console.warn('[GoogleSheetSuppliers] Tab created but header write failed:', err);
+        }
+
+        // 3. Bold + freeze the header row (row 10) using batchUpdate formatting
+        const addSheetData = !addSheetRes.ok ? null : await addSheetRes.json().catch(() => null);
+        const sheetId: number | null = addSheetData?.replies?.[0]?.addSheet?.properties?.sheetId ?? null;
+
+        if (sheetId !== null) {
+            await fetchWithRetry(
+                `${SHEETS_API_BASE}:batchUpdate`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        requests: [
+                            // Bold company name (row 1)
+                            {
+                                repeatCell: {
+                                    range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 1 },
+                                    cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } },
+                                    fields: 'userEnteredFormat.textFormat'
+                                }
+                            },
+                            // Bold supplier heading (row 5)
+                            {
+                                repeatCell: {
+                                    range: { sheetId, startRowIndex: 4, endRowIndex: 5, startColumnIndex: 0, endColumnIndex: 1 },
+                                    cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 11 } } },
+                                    fields: 'userEnteredFormat.textFormat'
+                                }
+                            },
+                            // Dark blue header row (row 10) â€” matches screenshot
+                            {
+                                repeatCell: {
+                                    range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 0, endColumnIndex: 10 },
+                                    cell: {
+                                        userEnteredFormat: {
+                                            backgroundColor: { red: 0.1, green: 0.18, blue: 0.34 },
+                                            textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontSize: 10 },
+                                            horizontalAlignment: 'CENTER'
+                                        }
+                                    },
+                                    fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                                }
+                            },
+                            // Freeze first 10 rows
+                            {
+                                updateSheetProperties: {
+                                    properties: {
+                                        sheetId,
+                                        gridProperties: { frozenRowCount: 10 }
+                                    },
+                                    fields: 'gridProperties.frozenRowCount'
+                                }
+                            }
+                        ]
+                    })
+                }
+            );
+        }
+
+        console.log(`[GoogleSheetSuppliers] Created new sheet tab: "${supplierName}" with full header`);
+        return true;
+    } catch (error) {
+        console.error('[GoogleSheetSuppliers] createSupplierSheetTab failed:', error);
+        return false;
+    }
+}
+
+
+export interface SheetRowData {
+    date: string;
+    particulars: string;
+    vchType: string;
+    vchRef: string;
+    vchNo: string;
+    debit: number;
+    credit: number;
+    balance: number;
+    balanceType: string;
+}
+
+async function getSheetIdByName(token: string, sheetName: string): Promise<number | null> {
+    try {
+        const res = await fetchWithRetry(`${SHEETS_API_BASE}?fields=sheets.properties`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+
+        const searchName = normalizeSupplierName(sheetName);
+
+        const sheet = data.sheets.find((s: any) =>
+            normalizeSupplierName(s.properties.title) === searchName ||
+            s.properties.title.toLowerCase().trim() === sheetName.toLowerCase().trim()
+        );
+
+        if (sheet) {
+            console.log(`[GoogleSheetSuppliers] Found sheetId ${sheet.properties.sheetId} for "${sheetName}" (tab: "${sheet.properties.title}")`);
+            return sheet.properties.sheetId;
+        }
+
+        console.warn(`[GoogleSheetSuppliers] Tab not found for "${sheetName}". Available tabs: ${data.sheets.map((s: any) => s.properties.title).join(', ')}`);
+        return null;
+    } catch (err) {
+        console.error('[GoogleSheetSuppliers] Error in getSheetIdByName:', err);
+        return null;
+    }
+}
+
+export async function appendToSupplierSheetTab(
+    supplierName: string,
+    row: SheetRowData
+): Promise<boolean> {
+    try {
+        const token = await getAccessToken();
+        const sheetId = await getSheetIdByName(token, supplierName);
+        if (sheetId === null) {
+            console.warn(`[GoogleSheetSuppliers] Skipping append: No tab found for "${supplierName}"`);
+            return false;
+        }
+
+        const debitStr = row.debit > 0 ? row.debit.toFixed(2) : '';
+        const creditStr = row.credit > 0 ? row.credit.toFixed(2) : '';
+        const balStr = Math.abs(row.balance).toFixed(2);
+
+        // Build the cells with explicit formatting (White background, Black text, Normal weight)
+        const cellFormat = {
+            backgroundColor: { red: 1, green: 1, blue: 1 },
+            textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 }, bold: false, fontSize: 10 },
+            horizontalAlignment: 'LEFT' as const
+        };
+
+        const rowData = {
+            values: [
+                { userEnteredValue: { stringValue: row.date }, userEnteredFormat: cellFormat },
+                { userEnteredValue: { stringValue: row.particulars }, userEnteredFormat: cellFormat },
+                { userEnteredValue: { stringValue: row.vchType }, userEnteredFormat: cellFormat },
+                { userEnteredValue: { stringValue: row.vchRef }, userEnteredFormat: cellFormat },
+                { userEnteredValue: { stringValue: row.vchNo }, userEnteredFormat: cellFormat },
+                { userEnteredValue: { stringValue: debitStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT' } },
+                { userEnteredValue: { stringValue: creditStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT' } },
+                { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: true } } },
+                { userEnteredValue: { stringValue: row.balanceType }, userEnteredFormat: cellFormat }
+            ]
+        };
+
+        const res = await fetchWithRetry(`${SHEETS_API_BASE}:batchUpdate`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                requests: [
+                    {
+                        appendCells: {
+                            sheetId: sheetId,
+                            rows: [rowData],
+                            fields: 'userEnteredValue,userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    }
+                ]
+            })
+        });
+
+        if (!res.ok) {
+            const errorText = await res.text();
+            console.error(`[GoogleSheetSuppliers] Final Append failed for "${supplierName}". Status: ${res.status}`, errorText);
+            return false;
+        }
+
+        console.log(`[GoogleSheetSuppliers] SUCCESS: Appended formatted ${row.vchType} row to "${supplierName}"`);
+        return true;
+    } catch (error: unknown) {
+        console.warn('[GoogleSheetSuppliers] appendToSupplierSheetTab error:', error);
+        return false;
+    }
+}
+
+/**
+ * Finds and deletes rows in a supplier's sheet tab that match a given vchNo (bill/payment number).
+ * Used when a bill or payment is deleted in the UI so the sheet is kept in sync.
+ */
+export async function deleteSheetRowByRef(
+    supplierName: string,
+    vchNo: string
+): Promise<boolean> {
+    try {
+        if (!supplierName || supplierName === 'Unknown' || !vchNo) return false;
+
+        const token = await getAccessToken();
+        const sheetId = await getSheetIdByName(token, supplierName);
+        if (sheetId === null) {
+            console.warn(`[GoogleSheetSuppliers] deleteSheetRowByRef: No tab for "${supplierName}"`);
+            return false;
+        }
+
+        // Fetch all rows to find the matching vchNo (column E, index 4)
+        const tabTitle = supplierName;
+        const rangeRes = await fetchWithRetry(
+            `${SHEETS_API_BASE}/values/'${encodeURIComponent(tabTitle)}'!A1:I500`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        if (!rangeRes.ok) return false;
+        const rangeData = await rangeRes.json();
+        const rows: any[][] = rangeData.values || [];
+
+        // Find 0-indexed row numbers where column E (index 4) equals the vchNo
+        const rowsToDelete: number[] = [];
+        rows.forEach((row, idx) => {
+            const cellVal = String(row[4] || '').trim();
+            if (cellVal === vchNo) {
+                rowsToDelete.push(idx);
+            }
+        });
+
+        if (rowsToDelete.length === 0) {
+            console.log(`[GoogleSheetSuppliers] deleteSheetRowByRef: No matching rows for vchNo "${vchNo}" in "${supplierName}"`);
+            return true; // Nothing to delete, not an error
+        }
+
+        // Delete from bottom to top to avoid index shifting
+        const deleteRequests = rowsToDelete.reverse().map(rowIdx => ({
+            deleteDimension: {
+                range: {
+                    sheetId,
+                    dimension: 'ROWS',
+                    startIndex: rowIdx,
+                    endIndex: rowIdx + 1
+                }
+            }
+        }));
+
+        const delRes = await fetchWithRetry(`${SHEETS_API_BASE}:batchUpdate`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ requests: deleteRequests })
+        });
+
+        if (!delRes.ok) {
+            const errText = await delRes.text();
+            console.error(`[GoogleSheetSuppliers] deleteSheetRowByRef failed for "${supplierName}" / "${vchNo}": ${errText}`);
+            return false;
+        }
+
+        console.log(`[GoogleSheetSuppliers] Deleted ${rowsToDelete.length} row(s) matching vchNo "${vchNo}" in tab "${supplierName}"`);
+        return true;
+    } catch (err) {
+        console.warn('[GoogleSheetSuppliers] deleteSheetRowByRef error:', err);
+        return false;
     }
 }

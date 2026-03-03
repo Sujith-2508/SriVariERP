@@ -18,6 +18,21 @@ const KEYS = {
     PRODUCTS: 'sve_products'
 };
 
+/**
+ * Normalizes supplier names for robust comparison.
+ * Trims, lowercases, and removes common noise (punctuation, "Limited", "Ltd", etc).
+ */
+export function normalizeSupplierName(name: string): string {
+    if (!name) return '';
+    return name.toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .replace(/limited$/g, '')
+        .replace(/ltd$/g, '')
+        .replace(/pvtltd$/g, '')
+        .replace(/pvt$/g, '')
+        .trim();
+}
+
 function getLocalData<T>(key: string): T[] {
     if (typeof window === 'undefined') return [];
     const data = localStorage.getItem(key);
@@ -33,71 +48,336 @@ function saveLocalData<T>(key: string, data: T[]) {
 // Supplier Operations
 // ============================================
 
-import { fetchRefinedSuppliers, fetchHistoricalVouchers } from './googleSheetSuppliers';
+import { fetchRefinedSuppliers, fetchHistoricalVouchers, HistoricalVoucher, SyncData, appendToSupplierSheetTab, SheetRowData, deleteSheetRowByRef } from './googleSheetSuppliers';
 import { syncAllStatements, syncLocalToDrive } from './folderSyncService';
 
-export async function getAllSuppliers(): Promise<SupplierData[]> {
-    let suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+export async function forceSyncPurchases(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    console.log('[PurchaseService] Starting unified force sync...');
 
-    // Sync with Google Sheets in background (if in browser)
-    if (typeof window !== 'undefined') {
-        try {
-            const refinedSuppliers = await fetchRefinedSuppliers();
-            if (refinedSuppliers.length > 0) {
-                // Determine the new authoritative list
-                const syncedSuppliers = refinedSuppliers.map(refined => {
-                    const existing = suppliers.find(
-                        s => s.name?.toLowerCase().trim() === refined.name?.toLowerCase().trim()
-                    );
+    try {
+        // 1. Sync Refined Suppliers (Meta & Balances)
+        const refinedSuppliers = await fetchRefinedSuppliers();
+        let currentSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
 
-                    // If it exists, keep the ID and balance, but update info from sheet
-                    if (existing) {
-                        return {
-                            ...existing,
-                            address: refined.address,
-                            gstNumber: refined.gstNumber,
-                            phone: refined.phone,
-                            updatedAt: new Date()
-                        };
-                    } else {
-                        // Brand new supplier from sheet
-                        return {
-                            ...refined,
-                            id: crypto.randomUUID(),
-                            balance: 0,
-                            createdAt: new Date(),
-                            updatedAt: new Date()
-                        };
-                    }
-                });
-
-                // Check if anything actually changed (ignoring timestamp differences for comparison)
-                const simplified = (list: SupplierData[]) => list.map(s => `${s.name}|${s.address}|${s.gstNumber}`).sort().join(',');
-                if (simplified(syncedSuppliers) !== simplified(suppliers)) {
-                    console.log('[PurchaseService] Authoritative sync: Updating local suppliers list from Google Sheet.');
-                    saveLocalData(KEYS.SUPPLIERS, syncedSuppliers);
-                    suppliers = syncedSuppliers;
+        if (refinedSuppliers.length > 0) {
+            currentSuppliers = refinedSuppliers.map(refined => {
+                const existing = currentSuppliers.find(s => s.name?.toLowerCase().trim() === refined.name?.toLowerCase().trim());
+                if (existing) {
+                    return {
+                        ...existing,
+                        address: refined.address || existing.address,
+                        city: refined.city || existing.city,
+                        gstNumber: refined.gstNumber || existing.gstNumber,
+                        phone: refined.phone || existing.phone,
+                        balance: (existing.balance === 0 || existing.balance === undefined) ? refined.balance : existing.balance,
+                        updatedAt: new Date()
+                    };
                 }
+                return { ...refined, id: crypto.randomUUID(), createdAt: new Date(), updatedAt: new Date() };
+            });
+            saveLocalData(KEYS.SUPPLIERS, currentSuppliers);
+        }
+
+        // 2. NEW: Merge Duplicates (by Name or GST)
+        await mergeDuplicateSuppliers();
+
+        // 3. Sync with Drive Folder (XLSX Statements)
+        await syncAllStatements();
+
+        // 4. Sync Historical Ledger (Individual Sheet Tabs)
+        const { vouchers, supplierBalances } = await fetchHistoricalVouchers();
+        if (vouchers.length > 0) {
+            let latestSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+            const enrichedSuppliers = latestSuppliers.map(s => {
+                const search = normalizeSupplierName(s.name);
+                // Find balance in tab that matches normalized name
+                const tabName = Object.keys(supplierBalances).find(k => normalizeSupplierName(k) === search);
+                const tabBalance = tabName ? supplierBalances[tabName] : undefined;
+                return tabBalance !== undefined ? { ...s, balance: tabBalance } : s;
+            });
+
+            await syncHistoricalVouchers(vouchers, enrichedSuppliers);
+            saveLocalData(KEYS.SUPPLIERS, enrichedSuppliers);
+        }
+
+        // 5. FIX: Repair broken links and populate missing Names
+        await repairBrokenLinks();
+
+        console.log('[PurchaseService] Unified force sync completed successfully.');
+        return true;
+    } catch (err) {
+        console.error('[PurchaseService] Unified force sync failed:', err);
+        return false;
+    }
+}
+
+/**
+ * Repairs "Unknown" supplier names by re-linking records by name if ID is lost,
+ * and populating the supplierName field for manual records.
+ */
+async function repairBrokenLinks() {
+    if (typeof window === 'undefined') return;
+
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    if (suppliers.length === 0) return;
+
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+
+    let billsModified = false;
+    let paymentsModified = false;
+
+    // Helper to find supplier by ID or Name
+    const findSupplier = (id?: string, name?: string) => {
+        if (id) {
+            const s = suppliers.find(s => s.id === id);
+            if (s) return s;
+        }
+        // If name is "Unknown", don't use it for lookup
+        if (name && name !== 'Unknown') {
+            const search = normalizeSupplierName(name);
+            const s = suppliers.find(s => normalizeSupplierName(s.name) === search);
+            if (s) return s;
+        }
+        return null;
+    };
+
+    // Helper to recover name from ID or Notes
+    const recoverName = (record: any): string | null => {
+        // 1. Check ID (HIST-Name-Date-...)
+        if (record.id?.startsWith('HIST-')) {
+            const parts = record.id.split('-');
+            if (parts.length >= 2 && parts[1] !== 'Unknown') {
+                const possibleName = parts[1];
+                const s = suppliers.find(s => (s.name || '').toLowerCase().trim() === possibleName.toLowerCase().trim());
+                if (s) return s.name;
             }
-        } catch (err) {
-            console.error('[PurchaseService] Auto-sync failed:', err);
+        }
+        // 2. Check Notes (Historical: Name - Particulars)
+        if (record.notes?.includes('Historical: ')) {
+            const noteName = record.notes.split('Historical: ')[1]?.split(' - ')[0];
+            if (noteName && noteName !== 'Unknown') {
+                const s = suppliers.find(s => (s.name || '').toLowerCase().trim() === noteName.toLowerCase().trim());
+                if (s) return s.name;
+            }
+        }
+        return null;
+    };
+
+    // 3. New: Match "Unknown" by Date + Amount (Heuristic)
+    const findSupplierByHeuristic = (date: Date, amount: number) => {
+        const dStr = new Date(date).toISOString().split('T')[0];
+        const normalizedAmount = Math.abs(amount);
+
+        // Look for any other bill/payment on the same day with same amount that HAS a name
+        // checking both local and sheet sources
+        const matchBill = bills.find(b =>
+            new Date(b.billDate).toISOString().split('T')[0] === dStr &&
+            Math.abs(b.amount - normalizedAmount) < 0.01 &&
+            b.supplierName && b.supplierName !== 'Unknown'
+        );
+        if (matchBill) return suppliers.find(s => s.id === matchBill.supplierId);
+
+        const matchPay = payments.find(p =>
+            new Date(p.paymentDate).toISOString().split('T')[0] === dStr &&
+            Math.abs(p.amount - normalizedAmount) < 0.01 &&
+            p.supplierName && p.supplierName !== 'Unknown'
+        );
+        if (matchPay) return suppliers.find(s => s.id === matchPay.supplierId);
+
+        return null;
+    };
+
+    // 4. Cross-reference: Match Unknown bills/payments using the OTHER type's ref on same/nearby date
+    const findSupplierByReference = (date: Date, ref: string) => {
+        if (!ref || ref === 'Unknown' || ref.length < 1) return null;
+
+        const dStr = new Date(date).toISOString().split('T')[0];
+        // Allow ±1 day matching since payment date may differ from bill date by one day
+        const dPrev = new Date(date); dPrev.setDate(dPrev.getDate() - 1);
+        const dNext = new Date(date); dNext.setDate(dNext.getDate() + 1);
+        const allowedDates = [dPrev.toISOString().split('T')[0], dStr, dNext.toISOString().split('T')[0]];
+
+        // Match bill's ref against payment records with valid name
+        const matchPayByRef = payments.find(p =>
+            (p.paymentNumber === ref || p.referenceNumber === ref) &&
+            allowedDates.includes(new Date(p.paymentDate).toISOString().split('T')[0]) &&
+            p.supplierName && p.supplierName !== 'Unknown'
+        );
+        if (matchPayByRef) return suppliers.find(s => s.id === matchPayByRef.supplierId);
+
+        // Match payment's ref against bill records with valid name
+        const matchBillByRef = bills.find(b =>
+            b.billNumber === ref &&
+            allowedDates.includes(new Date(b.billDate).toISOString().split('T')[0]) &&
+            b.supplierName && b.supplierName !== 'Unknown'
+        );
+        if (matchBillByRef) return suppliers.find(s => s.id === matchBillByRef.supplierId);
+
+        return null;
+    };
+
+    bills.forEach(bill => {
+        let supplier = findSupplier(bill.supplierId, bill.supplierName);
+
+        if (!supplier || bill.supplierName === 'Unknown') {
+            const recoveredName = recoverName(bill);
+            if (recoveredName) {
+                supplier = findSupplier(undefined, recoveredName);
+            }
+            // Heuristic match if still Unknown
+            if (!supplier && bill.supplierName === 'Unknown') {
+                supplier = findSupplierByReference(bill.billDate, bill.billNumber) ||
+                    findSupplierByHeuristic(bill.billDate, bill.amount) ||
+                    null;
+            }
         }
 
-        // Sync with Folder Statements (Authoritative for Lakshmi and others)
-        try {
-            await syncAllStatements();
-        } catch (err) {
-            console.error('[PurchaseService] Folder sync failed:', err);
+        if (supplier) {
+            if (bill.supplierId !== supplier.id) {
+                bill.supplierId = supplier.id;
+                billsModified = true;
+            }
+            if (!bill.supplierName || bill.supplierName !== supplier.name) {
+                bill.supplierName = supplier.name;
+                billsModified = true;
+            }
+        }
+    });
+
+    payments.forEach(payment => {
+        let supplier = findSupplier(payment.supplierId, payment.supplierName);
+
+        if (!supplier || payment.supplierName === 'Unknown') {
+            const recoveredName = recoverName(payment);
+            if (recoveredName) {
+                supplier = findSupplier(undefined, recoveredName);
+            }
+            // Heuristic match if still Unknown
+            if (!supplier && payment.supplierName === 'Unknown') {
+                supplier = findSupplierByReference(payment.paymentDate, payment.paymentNumber || payment.referenceNumber || '') ||
+                    findSupplierByHeuristic(payment.paymentDate, payment.amount) ||
+                    null;
+            }
         }
 
-        // Sync historical vouchers (Fallback/Legacy)
-        try {
-            await syncHistoricalVouchers();
-        } catch (err) {
-            console.error('[PurchaseService] Historical sync failed:', err);
+        if (supplier) {
+            if (payment.supplierId !== supplier.id) {
+                payment.supplierId = supplier.id;
+                paymentsModified = true;
+            }
+            if (!payment.supplierName || payment.supplierName !== supplier.name) {
+                payment.supplierName = supplier.name;
+                paymentsModified = true;
+            }
         }
+    });
+
+    if (billsModified) saveLocalData(KEYS.BILLS, bills);
+    if (paymentsModified) saveLocalData(KEYS.PAYMENTS, payments);
+
+    if (billsModified || paymentsModified) {
+        console.log(`[PurchaseService] Data Repair: Healed ${billsModified ? 'bills' : ''} ${paymentsModified ? 'payments' : ''} supplier links.`);
+    }
+}
+
+/**
+ * Merges duplicate suppliers that share the same normalized name or GST number.
+ * Consolidates all transactions under a single "master" record.
+ */
+export async function mergeDuplicateSuppliers() {
+    if (typeof window === 'undefined') return;
+
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    if (suppliers.length < 2) return;
+
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS);
+
+    const masterMap = new Map<string, SupplierData>(); // Key: Normalized Name or GST -> Master Supplier
+    const idRemap = new Map<string, string>(); // Key: Duplicate ID -> Master ID
+    const suppliersToRemove = new Set<string>();
+
+    suppliers.forEach(s => {
+        const normName = normalizeSupplierName(s.name);
+        const gst = s.gstNumber?.trim().toUpperCase();
+
+        let master: SupplierData | undefined;
+
+        // Try to find master by GST first (more accurate)
+        if (gst && gst.length > 5) {
+            master = masterMap.get(`GST-${gst}`);
+        }
+
+        // If not found, try by normalized name
+        if (!master) {
+            master = masterMap.get(`NAME-${normName}`);
+        }
+
+        if (master) {
+            // Already have a master for this entity, this is a duplicate.
+            idRemap.set(s.id, master.id);
+            suppliersToRemove.add(s.id);
+
+            // Merge metadata if master is missing it
+            if (!master.gstNumber && s.gstNumber) master.gstNumber = s.gstNumber;
+            if (!master.address && s.address) master.address = s.address;
+            if (!master.phone && s.phone) master.phone = s.phone;
+        } else {
+            // New entity, nominate as master
+            masterMap.set(`NAME-${normName}`, s);
+            if (gst && gst.length > 5) masterMap.set(`GST-${gst}`, s);
+        }
+    });
+
+    if (suppliersToRemove.size === 0) return;
+
+    console.log(`[PurchaseService] Merging ${suppliersToRemove.size} duplicate suppliers...`);
+
+    // 1. Update all transactions to use Master ID and Master Name
+    let txModified = false;
+
+    bills.forEach(b => {
+        const masterId = idRemap.get(b.supplierId);
+        if (masterId) {
+            const master = suppliers.find(s => s.id === masterId);
+            if (master) {
+                b.supplierId = master.id;
+                b.supplierName = master.name;
+                txModified = true;
+            }
+        }
+    });
+
+    payments.forEach(p => {
+        const masterId = idRemap.get(p.supplierId);
+        if (masterId) {
+            const master = suppliers.find(s => s.id === masterId);
+            if (master) {
+                p.supplierId = master.id;
+                p.supplierName = master.name;
+                txModified = true;
+            }
+        }
+    });
+
+    // 2. Clean up suppliers list
+    const finalSuppliers = suppliers.filter(s => !suppliersToRemove.has(s.id));
+
+    // Save changes
+    saveLocalData(KEYS.SUPPLIERS, finalSuppliers);
+    if (txModified) {
+        saveLocalData(KEYS.BILLS, bills);
+        saveLocalData(KEYS.PAYMENTS, payments);
     }
 
+    console.log(`[PurchaseService] Merge complete. Removed ${suppliersToRemove.size} duplicates.`);
+}
+
+export async function getAllSuppliers(): Promise<SupplierData[]> {
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
     return suppliers
         .map(s => ({
             ...s,
@@ -144,6 +424,23 @@ export async function updateSupplier(supplierId: string, updates: Partial<Suppli
     return updatedSupplier;
 }
 
+/**
+ * Suggests the next payment number based on highest existing number
+ */
+export async function suggestNextPaymentNumber(): Promise<string> {
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+    const manualPayments = payments
+        .filter(p => !p.id.startsWith('HIST-'))
+        .map(p => {
+            const match = p.paymentNumber?.match(/(\d+)$/);
+            return match ? parseInt(match[1]) : 0;
+        });
+
+    const highest = manualPayments.length > 0 ? Math.max(...manualPayments) : 0;
+    const next = highest + 1;
+    return `PAYMENT-${String(next).padStart(3, '0')}`;
+}
+
 export async function deleteSupplier(supplierId: string): Promise<boolean> {
     const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
     const filtered = suppliers.filter(s => s.id !== supplierId);
@@ -158,6 +455,44 @@ export async function deleteSupplier(supplierId: string): Promise<boolean> {
 // Purchase Bill Operations
 // ============================================
 
+// ============================================
+// Helpers
+// ============================================
+
+/**
+ * Converts Google Sheets serial date (e.g., 46083) or string to JS Date.
+ */
+function parseSheetDate(dateVal: any): Date {
+    if (!dateVal) return new Date();
+
+    // Handle JS Date objects
+    if (dateVal instanceof Date && !isNaN(dateVal.getTime())) return dateVal;
+
+    // Handle serial numbers from Google Sheets (e.g., 46083)
+    const num = Number(dateVal);
+    if (!isNaN(num) && typeof dateVal !== 'boolean' && num > 0) {
+        // Offset for Sheets/Excel epoch (1899-12-30) relative to Unix (1970-01-01)
+        return new Date((num - 25569) * 86400 * 1000);
+    }
+
+    // Handle strings
+    const str = String(dateVal).trim();
+    if (!str) return new Date();
+
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return d;
+
+    // Fallback: assume Today
+    return new Date();
+}
+
+/**
+ * MM/DD/YYYY format for Sheet/Display consistency
+ */
+function formatTableDate(date: Date): string {
+    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+}
+
 export async function createPurchaseBill(bill: {
     supplierId: string;
     billNumber: string;
@@ -168,10 +503,18 @@ export async function createPurchaseBill(bill: {
     notes?: string;
 }): Promise<PurchaseBillData | null> {
     const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplier = suppliers.find(s => s.id === bill.supplierId);
+
+    if (!supplier) {
+        console.error('[PurchaseService] Failed to create bill: Supplier not found for ID:', bill.supplierId);
+        return null;
+    }
 
     const newBill: PurchaseBillData = {
         id: crypto.randomUUID(),
         supplierId: bill.supplierId,
+        supplierName: supplier.name,
         billNumber: bill.billNumber,
         billDate: bill.billDate,
         amount: bill.amount,
@@ -188,7 +531,6 @@ export async function createPurchaseBill(bill: {
     saveLocalData(KEYS.BILLS, [newBill, ...bills]);
 
     // 2. Update supplier balance
-    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
     const supplierIndex = suppliers.findIndex(s => s.id === bill.supplierId);
     if (supplierIndex !== -1) {
         suppliers[supplierIndex].balance = (suppliers[supplierIndex].balance || 0) + bill.amount;
@@ -196,6 +538,7 @@ export async function createPurchaseBill(bill: {
         suppliers[supplierIndex].updatedAt = new Date();
         saveLocalData(KEYS.SUPPLIERS, suppliers);
     }
+
 
     // 3. Update Product Stock
     if (bill.items && Array.isArray(bill.items)) {
@@ -222,9 +565,32 @@ export async function createPurchaseBill(bill: {
     }
 
     // Track change to Drive
-    const supplier = suppliers.find(s => s.id === bill.supplierId);
     if (supplier) {
         syncLocalToDrive('PURCHASE', newBill, supplier.name);
+
+        // Fire-and-forget: append to Google Sheet tab for real-time sync
+        const newBalance = suppliers[supplierIndex !== -1 ? supplierIndex : 0]?.balance ?? 0;
+        const billDate = parseSheetDate(bill.billDate);
+        const dateStr = formatTableDate(billDate);
+
+        // Particulars: Include bill number and notes if any
+        const parts = [`Purchase Bill #${bill.billNumber}`];
+        if (bill.notes) parts.push(bill.notes);
+
+        const sheetRow: SheetRowData = {
+            date: dateStr,
+            particulars: parts.join(' - '),
+            vchType: 'Purchase',
+            vchRef: 'PURCHASE',
+            vchNo: bill.billNumber,
+            debit: 0,
+            credit: bill.amount,
+            balance: newBalance,
+            balanceType: newBalance >= 0 ? 'Cr' : 'Dr'
+        };
+        appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
+            console.warn('[PurchaseService] Sheet append failed for bill:', err)
+        );
     }
 
     return newBill;
@@ -295,10 +661,118 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
     const filteredAllocations = allocations.filter(a => a.billId !== billId);
     saveLocalData(KEYS.ALLOCATIONS, filteredAllocations);
 
-    // Track change to Drive
-    const supplier = suppliers.find(s => s.id === bill.supplierId);
-    if (supplier) {
+    // Track change to Drive & Sheet
+    const latestSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplier = latestSuppliers.find(s => s.id === bill.supplierId);
+    if (supplier && supplier.name !== 'Unknown') {
         syncLocalToDrive('PURCHASE', { ...bill, deleted: true }, supplier.name);
+
+        // DELETE the matching row(s) from Google Sheet (true deletion, not reversal)
+        deleteSheetRowByRef(supplier.name, bill.billNumber).catch(err =>
+            console.warn('[PurchaseService] Sheet row deletion failed for bill:', err)
+        );
+    }
+
+    return true;
+}
+
+export async function updatePurchaseBill(
+    billId: string,
+    updates: {
+        billNumber?: string;
+        billDate?: Date;
+        amount?: number;
+        dueDate?: Date;
+        items?: any[];
+        notes?: string;
+    }
+): Promise<boolean> {
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+    const index = bills.findIndex(b => b.id === billId);
+    if (index === -1) return false;
+
+    const oldBill = bills[index];
+    const oldAmount = oldBill.amount;
+    const supplierId = oldBill.supplierId;
+
+    // 1. Update bill fields
+    bills[index] = {
+        ...oldBill,
+        ...updates,
+        updatedAt: new Date()
+    };
+
+    // Recalculate bill balance if amount changed
+    if (updates.amount !== undefined && updates.amount !== oldAmount) {
+        const paid = bills[index].paidAmount || 0;
+        bills[index].balance = Math.max(0, updates.amount - paid);
+    }
+
+    saveLocalData(KEYS.BILLS, bills);
+
+    // 2. Revert product stock if items changed
+    if (updates.items && Array.isArray(updates.items)) {
+        const products = getLocalData<Product>(KEYS.PRODUCTS);
+        let modified = false;
+
+        // Revert old items
+        if (oldBill.items && Array.isArray(oldBill.items)) {
+            for (const item of oldBill.items) {
+                const pid = item.productId || item.product_id;
+                if (pid && item.quantity > 0) {
+                    const pi = products.findIndex(p => p.id === pid || p.productId === pid);
+                    if (pi !== -1) {
+                        products[pi].stock = Math.max(0, (products[pi].stock || 0) - item.quantity);
+                        modified = true;
+                    }
+                }
+            }
+        }
+        // Apply new items
+        for (const item of updates.items) {
+            const pid = item.productId || item.product_id;
+            if (pid && item.quantity > 0) {
+                const pi = products.findIndex(p => p.id === pid || p.productId === pid);
+                if (pi !== -1) {
+                    products[pi].stock = (products[pi].stock || 0) + item.quantity;
+                    products[pi].costPrice = item.unitPrice || item.unit_price;
+                    modified = true;
+                }
+            }
+        }
+        if (modified) {
+            saveLocalData(KEYS.PRODUCTS, products);
+            window.dispatchEvent(new Event('storage_products_updated'));
+        }
+    }
+
+    // 3. FIFO reallocation to update bill balance and supplier balance
+    await reallocateAllSupplierPayments(supplierId);
+
+    // Track change to Drive
+    const latestSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplier = latestSuppliers.find(s => s.id === supplierId);
+    if (supplier) {
+        syncLocalToDrive('PURCHASE', bills[index], supplier.name);
+
+        // If amount changed, append an adjustment row to Google Sheet
+        if (updates.amount !== undefined && Math.abs(updates.amount - oldAmount) > 0.01) {
+            const diff = updates.amount - oldAmount;
+            const sheetRow: SheetRowData = {
+                date: formatTableDate(new Date()),
+                particulars: `ADJUSTMENT for Bill #${bills[index].billNumber} (Amount changed from ${oldAmount} to ${updates.amount})`,
+                vchType: 'Adjustment',
+                vchRef: 'ADJ',
+                vchNo: bills[index].billNumber,
+                debit: diff < 0 ? Math.abs(diff) : 0, // debit if amount decreased
+                credit: diff > 0 ? diff : 0,         // credit if amount increased
+                balance: supplier.balance,
+                balanceType: supplier.balance >= 0 ? 'Cr' : 'Dr'
+            };
+            appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
+                console.warn('[PurchaseService] Sheet adjustment append failed for bill:', err)
+            );
+        }
     }
 
     return true;
@@ -307,6 +781,7 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
 // ============================================
 // Purchase Payment Operations with FIFO
 // ============================================
+
 
 export async function createPurchasePayment(payment: {
     supplierId: string;
@@ -318,10 +793,19 @@ export async function createPurchasePayment(payment: {
     notes?: string;
 }): Promise<PurchasePaymentData | null> {
     const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+
+    const supplier = suppliers.find(s => s.id === payment.supplierId);
+
+    if (!supplier) {
+        console.error('[PurchaseService] Failed to create payment: Supplier not found for ID:', payment.supplierId);
+        return null;
+    }
 
     const newPayment: PurchasePaymentData = {
         id: crypto.randomUUID(),
         supplierId: payment.supplierId,
+        supplierName: supplier.name,
         paymentNumber: payment.paymentNumber,
         paymentDate: payment.paymentDate,
         amount: payment.amount,
@@ -338,7 +822,6 @@ export async function createPurchasePayment(payment: {
     applyFIFOAllocationLocal(payment.supplierId, newPayment.id, newPayment.paymentNumber, newPayment.amount, newPayment.paymentDate);
 
     // 3. Update supplier balance
-    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
     const supplierIndex = suppliers.findIndex(s => s.id === payment.supplierId);
     if (supplierIndex !== -1) {
         suppliers[supplierIndex].balance = Math.max(0, suppliers[supplierIndex].balance - payment.amount);
@@ -348,9 +831,37 @@ export async function createPurchasePayment(payment: {
     }
 
     // Track change to Drive
-    const supplier = suppliers.find(s => s.id === payment.supplierId);
     if (supplier) {
         syncLocalToDrive('PAYMENT', newPayment, supplier.name);
+
+        // Fire-and-forget: append to Google Sheet tab for real-time sync
+        const newBalance = suppliers[supplierIndex !== -1 ? supplierIndex : 0]?.balance ?? 0;
+        const payDate = parseSheetDate(payment.paymentDate);
+        const dateStr = formatTableDate(payDate);
+        const modeLabel = payment.paymentMode === 'BANK_TRANSFER' ? 'Bank Transfer'
+            : payment.paymentMode === 'CASH' ? 'Cash'
+                : payment.paymentMode === 'CHEQUE' ? 'Cheque'
+                    : payment.paymentMode === 'UPI' ? 'UPI'
+                        : (payment.paymentMode || 'Payment');
+
+        const parts = [`By ${modeLabel}`];
+        if (payment.referenceNumber) parts.push(`Ref: ${payment.referenceNumber}`);
+        if (payment.notes) parts.push(payment.notes);
+
+        const sheetRow: SheetRowData = {
+            date: dateStr,
+            particulars: parts.join(' - '),
+            vchType: 'Payment',
+            vchRef: 'Payment',
+            vchNo: payment.paymentNumber,
+            debit: payment.amount,
+            credit: 0,
+            balance: newBalance,
+            balanceType: newBalance >= 0 ? 'Cr' : 'Dr'
+        };
+        appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
+            console.warn('[PurchaseService] Sheet append failed for payment:', err)
+        );
     }
 
     return newPayment;
@@ -426,11 +937,11 @@ export async function updatePurchasePayment(paymentId: string, updates: Partial<
 
     const payment = payments[index];
     const supplierId = payment.supplierId;
+    const oldAmount = payment.amount;
 
     payments[index] = {
         ...payment,
         ...updates,
-        // Ensure some fields aren't changed via partial updates if they shouldn't be
         id: payment.id,
         supplierId: payment.supplierId
     };
@@ -440,11 +951,30 @@ export async function updatePurchasePayment(paymentId: string, updates: Partial<
     // After updating payment, we MUST reallocate everything for this supplier to ensure FIFO correctness
     await reallocateAllSupplierPayments(supplierId);
 
-    // Track change to Drive
-    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
-    const supplier = suppliers.find(s => s.id === supplierId);
+    // Track change to Drive & Sheet
+    const latestSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplier = latestSuppliers.find(s => s.id === supplierId);
     if (supplier) {
         syncLocalToDrive('PAYMENT', payments[index], supplier.name);
+
+        // If amount changed, append adjustment row
+        if (updates.amount !== undefined && Math.abs(updates.amount - oldAmount) > 0.01) {
+            const diff = updates.amount - oldAmount;
+            const sheetRow: SheetRowData = {
+                date: formatTableDate(new Date()),
+                particulars: `ADJUSTMENT for Payment #${payment.paymentNumber} (Amount changed from ${oldAmount} to ${updates.amount})`,
+                vchType: 'Adjustment',
+                vchRef: 'ADJ',
+                vchNo: payment.paymentNumber,
+                debit: diff > 0 ? diff : 0,         // debit if payment increased
+                credit: diff < 0 ? Math.abs(diff) : 0, // credit if payment decreased
+                balance: supplier.balance,
+                balanceType: supplier.balance >= 0 ? 'Cr' : 'Dr'
+            };
+            appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
+                console.warn('[PurchaseService] Sheet adjustment append failed for payment:', err)
+            );
+        }
     }
 
     return true;
@@ -462,11 +992,16 @@ export async function deletePurchasePayment(paymentId: string): Promise<boolean>
     // After deleting payment, we MUST reallocate everything for this supplier
     await reallocateAllSupplierPayments(supplierId);
 
-    // Track change to Drive
-    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
-    const sObj = suppliers.find(s => s.id === supplierId);
-    if (sObj) {
+    // Track change to Drive & Sheet
+    const latestSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const sObj = latestSuppliers.find(s => s.id === supplierId);
+    if (sObj && sObj.name !== 'Unknown') {
         syncLocalToDrive('PAYMENT', { ...payment, deleted: true }, sObj.name);
+
+        // DELETE the matching row(s) from Google Sheet (true deletion, not reversal)
+        deleteSheetRowByRef(sObj.name, payment.paymentNumber).catch(err =>
+            console.warn('[PurchaseService] Sheet row deletion failed for payment:', err)
+        );
     }
 
     return true;
@@ -575,14 +1110,12 @@ export async function getBillAllocations(billId: string): Promise<PurchaseAlloca
         }))
         .sort((a, b) => b.allocationDate.getTime() - a.allocationDate.getTime());
 }
-export async function syncHistoricalVouchers(): Promise<void> {
+export async function syncHistoricalVouchers(vouchers: HistoricalVoucher[], suppliers: SupplierData[]): Promise<void> {
     try {
-        const vouchers = await fetchHistoricalVouchers();
         if (vouchers.length === 0) return;
 
         const currentBills = getLocalData<PurchaseBillData>(KEYS.BILLS);
         const currentPayments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS);
-        const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
 
         let billsModified = false;
         let paymentsModified = false;
@@ -590,42 +1123,52 @@ export async function syncHistoricalVouchers(): Promise<void> {
         // Track suppliers that need reallocation
         const suppliersToReallocate = new Set<string>();
 
-        // "Remove testing data" - as requested by user.
-        // Identify test data (non-HIST) and remove it.
-        const originalBillCount = currentBills.length;
-        const cleanBills = currentBills.filter(b => b.id.startsWith('HIST-'));
-        if (cleanBills.length !== originalBillCount) {
-            console.log(`[PurchaseService] Removed ${originalBillCount - cleanBills.length} test bills.`);
-            currentBills.length = 0;
-            currentBills.push(...cleanBills);
-            billsModified = true;
-        }
+        // To ensure fresh data (and fix bad dates from previous imports), 
+        // we clear all existing HIST- records and re-import them from the sheet.
+        // We preserve manual records (UUID-based).
+        const manualBills = currentBills.filter(b => !b.id.startsWith('HIST-'));
+        currentBills.length = 0;
+        currentBills.push(...manualBills);
 
-        const originalPaymentCount = currentPayments.length;
-        const cleanPayments = currentPayments.filter(p => p.id.startsWith('HIST-'));
-        if (cleanPayments.length !== originalPaymentCount) {
-            console.log(`[PurchaseService] Removed ${originalPaymentCount - cleanPayments.length} test payments.`);
-            currentPayments.length = 0;
-            currentPayments.push(...cleanPayments);
-            paymentsModified = true;
-        }
+        const manualPayments = currentPayments.filter(p => !p.id.startsWith('HIST-'));
+        currentPayments.length = 0;
+        currentPayments.push(...manualPayments);
 
-        vouchers.forEach((vch: any) => {
-            const supplier = suppliers.find(s => s.name?.toLowerCase().trim() === vch.supplierName.toLowerCase().trim());
+        console.log(`[PurchaseService] Sync: Cleared stale historical records. Processing ${vouchers.length} new vouchers...`);
+
+        console.log(`[PurchaseService] Processing ${vouchers.length} vouchers from Google Sheet tabs...`);
+
+        vouchers.forEach((vch) => {
+            const vchNormalized = normalizeSupplierName(vch.supplierName);
+            const supplier = suppliers.find(s =>
+                normalizeSupplierName(s.name) === vchNormalized
+            );
             if (!supplier) return;
 
+            const particulars = (vch.particulars || '').toLowerCase();
             const vchTypeLower = (vch.vchType || '').toLowerCase();
-            const deterministicId = `HIST-${vch.supplierName}-${vch.date}-${vch.vchType}-${vch.vchNo}`;
 
-            // Robust Purchase detection (catches PURSHASE, etc.)
-            if (vchTypeLower.includes('pur') || vchTypeLower.includes('pru') || vch.date === 'Opening') {
+            // Format date for deterministic ID (e.g., 03/05/2026 -> 20260305)
+            // Use String(vch.date) to handle numbers or strings safely
+            const vchDate = parseSheetDate(vch.date);
+            const dateStr = formatTableDate(vchDate).replace(/[^0-9]/g, '');
+            const deterministicId = `HIST-${vch.supplierName}-${dateStr}-${vch.vchType}-${vch.vchNo}`;
+
+            // 1. Detection: Purchase vs Payment vs Opening
+            const isPurchase = vchTypeLower.includes('pur') || vchTypeLower.includes('pru');
+            const isPayment = vchTypeLower.includes('pay') || vchTypeLower.includes('rec') ||
+                vchTypeLower.includes('jou') || (vch.debit > 0 && vch.credit === 0);
+            const isOpening = particulars.includes('opening balance');
+
+            if (isPurchase || (isOpening && vch.credit > 0)) {
                 const existing = currentBills.find(b => b.id === deterministicId);
                 if (!existing) {
-                    const billDate = vch.date === 'Opening' ? new Date('2019-04-01') : new Date(vch.date);
+                    const billDate = isOpening ? new Date('2019-04-01') : vchDate;
                     currentBills.push({
                         id: deterministicId,
                         supplierId: supplier.id,
-                        billNumber: vch.vchNo || (vch.date === 'Opening' ? 'OPENING' : `P-${vch.date.replace(/-/g, '')}`),
+                        supplierName: supplier.name,
+                        billNumber: vch.vchNo || (isOpening ? 'OPENING' : `P-${dateStr}`),
                         billDate: billDate,
                         amount: vch.credit || vch.debit || 0,
                         paidAmount: 0,
@@ -637,18 +1180,26 @@ export async function syncHistoricalVouchers(): Promise<void> {
                     billsModified = true;
                     suppliersToReallocate.add(supplier.id);
                 }
-            }
-            // Robust Payment detection (catches PAY, REC, journaling)
-            else if (vchTypeLower.includes('pay') || vchTypeLower.includes('rec') || vchTypeLower.includes('journal') || (vch.debit > 0 && vch.credit === 0)) {
+            } else if (isPayment || (isOpening && vch.debit > 0)) {
                 const existing = currentPayments.find(p => p.id === deterministicId);
                 if (!existing) {
+                    const payDate = isOpening ? new Date('2019-04-01') : vchDate;
+
+                    // Detect Payment Mode from Particulars
+                    let paymentMode: any = 'OTHER';
+                    if (particulars.includes('cash')) paymentMode = 'CASH';
+                    if (particulars.includes('cheque')) paymentMode = 'CHEQUE';
+                    if (particulars.includes('bank') || particulars.includes('neft') || particulars.includes('transfer')) paymentMode = 'BANK_TRANSFER';
+                    if (particulars.includes('upi') || particulars.includes('gpay')) paymentMode = 'UPI';
+
                     currentPayments.push({
                         id: deterministicId,
                         supplierId: supplier.id,
-                        paymentNumber: vch.vchNo || `PMT-${vch.date.replace(/-/g, '')}`,
-                        paymentDate: new Date(vch.date),
+                        supplierName: supplier.name,
+                        paymentNumber: vch.vchNo || (isOpening ? 'OPENING-PMT' : `PMT-${dateStr}`),
+                        paymentDate: payDate,
                         amount: vch.debit || vch.credit || 0,
-                        paymentMode: 'OTHERS' as any,
+                        paymentMode: paymentMode,
                         notes: `Historical: ${vch.particulars}`,
                         createdAt: new Date()
                     });

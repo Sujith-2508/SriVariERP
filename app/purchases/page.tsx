@@ -15,6 +15,7 @@ import {
     updateSupplier,
     deleteSupplier,
     createPurchaseBill,
+    updatePurchaseBill,
     getPurchaseBills,
     deletePurchaseBill,
     createPurchasePayment,
@@ -24,8 +25,11 @@ import {
     getSupplierStatement,
     SupplierStatementEntry,
     recalculateSupplierBalance,
-    getBillAllocations
+    getBillAllocations,
+    forceSyncPurchases,
+    suggestNextPaymentNumber
 } from '@/lib/purchaseService';
+import { createSupplierSheetTab, SupplierSheetDetails, CompanySheetDetails } from '@/lib/googleSheetSuppliers';
 import { syncAllStatements } from '@/lib/folderSyncService';
 import {
     Search,
@@ -43,6 +47,7 @@ import {
     Download
 } from 'lucide-react';
 import SearchableSelect from '@/components/SearchableSelect';
+import { supabase } from '@/lib/supabase';
 
 type TabType = 'bills' | 'payments' | 'suppliers';
 
@@ -67,11 +72,25 @@ export default function PurchasesPage() {
 
     const [editingSupplier, setEditingSupplier] = useState<SupplierData | null>(null);
     const [editingPayment, setEditingPayment] = useState<PurchasePaymentData | null>(null);
+    const [editingBill, setEditingBill] = useState<PurchaseBillData | null>(null);
     const [selectedSupplier, setSelectedSupplier] = useState<SupplierData | null>(null);
     const [selectedBill, setSelectedBill] = useState<PurchaseBillData | null>(null);
     const [statementData, setStatementData] = useState<SupplierStatementEntry[]>([]);
     const [billAllocations, setBillAllocations] = useState<PurchaseAllocationData[]>([]);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+    const [sheetTabStatus, setSheetTabStatus] = useState<string | null>(null);
+
+    // Helper: format payment mode enum to human-readable
+    const formatPaymentMode = (mode: string): string => {
+        const map: Record<string, string> = {
+            CASH: 'Cash',
+            CHEQUE: 'Cheque',
+            BANK_TRANSFER: 'Bank Transfer',
+            UPI: 'UPI',
+            OTHER: 'Other'
+        };
+        return map[mode] || mode;
+    };
 
     // Form states
     const [supplierForm, setSupplierForm] = useState({
@@ -99,6 +118,7 @@ export default function PurchasesPage() {
         quantity: 0,
         unitPrice: 0
     });
+    const [showItemsSection, setShowItemsSection] = useState(true);
 
     const [paymentForm, setPaymentForm] = useState({
         supplierId: '',
@@ -208,7 +228,7 @@ export default function PurchasesPage() {
         const autoSync = async () => {
             setIsSyncing(true);
             try {
-                await syncAllStatements();
+                await forceSyncPurchases();
             } catch (error) {
                 console.error('Auto-sync failed:', error);
             } finally {
@@ -224,7 +244,46 @@ export default function PurchasesPage() {
         if (editingSupplier) {
             await updateSupplier(editingSupplier.id, supplierForm);
         } else {
-            await createSupplier(supplierForm);
+            const newSupplier = await createSupplier(supplierForm);
+            // Create corresponding Google Sheet tab for new supplier
+            if (newSupplier) {
+                setSheetTabStatus('Creating Google Sheet tab...');
+
+                // Load company settings from Supabase (set in the Settings page)
+                let company: CompanySheetDetails = {};
+                try {
+                    const { data: compData } = await supabase
+                        .from('company_settings')
+                        .select('company_name, address_line1, address_line2, city, gst_number, phone, email')
+                        .limit(1);
+                    if (compData && compData.length > 0) {
+                        const c = compData[0];
+                        company = {
+                            companyName: c.company_name,
+                            address: [c.address_line1, c.address_line2].filter(Boolean).join(', '),
+                            city: c.city,
+                            gstNumber: c.gst_number,
+                            phone: c.phone,
+                            email: c.email
+                        };
+                    }
+                } catch { /* ignore — company info is optional */ }
+
+                const supplierDetails: SupplierSheetDetails = {
+                    supplierName: supplierForm.name,
+                    supplierAddress: supplierForm.address,
+                    supplierCity: supplierForm.city,
+                    supplierGst: supplierForm.gstNumber,
+                    supplierPhone: supplierForm.phone,
+                    supplierContactPerson: supplierForm.contactPerson
+                };
+
+                const ok = await createSupplierSheetTab(supplierDetails, company).catch(() => false);
+                setSheetTabStatus(ok
+                    ? `✓ Sheet tab "${supplierForm.name}" created in Supplier_Group3_Ledger`
+                    : '⚠ Supplier saved. Sheet tab creation failed (check network/permissions)');
+                setTimeout(() => setSheetTabStatus(null), 6000);
+            }
         }
         setIsSupplierModalOpen(false);
         resetSupplierForm();
@@ -264,6 +323,14 @@ export default function PurchasesPage() {
 
     const handleBillSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Validation: Prevent "Unknown"
+        const supplier = suppliers.find(s => s.id === billForm.supplierId);
+        if (!supplier || supplier.name === 'Unknown') {
+            alert('Please select a valid supplier (not "Unknown").');
+            return;
+        }
+
         let finalItems = [...billItems];
         if (currentBillItem.productId && currentBillItem.quantity > 0) {
             const total = currentBillItem.quantity * currentBillItem.unitPrice;
@@ -274,18 +341,45 @@ export default function PurchasesPage() {
         if (finalItems.length > 0) {
             finalAmount = finalItems.reduce((sum, item) => sum + item.total, 0);
         }
-        await createPurchaseBill({
-            supplierId: billForm.supplierId,
-            billNumber: billForm.billNumber,
-            billDate: new Date(billForm.billDate),
-            amount: finalAmount,
-            dueDate: billForm.dueDate ? new Date(billForm.dueDate) : undefined,
-            items: finalItems,
-            notes: billForm.notes
-        });
+        if (editingBill) {
+            await updatePurchaseBill(editingBill.id, {
+                billNumber: billForm.billNumber,
+                billDate: new Date(billForm.billDate),
+                amount: finalAmount,
+                dueDate: billForm.dueDate ? new Date(billForm.dueDate) : undefined,
+                items: finalItems,
+                notes: billForm.notes
+            });
+        } else {
+            await createPurchaseBill({
+                supplierId: billForm.supplierId,
+                billNumber: billForm.billNumber,
+                billDate: new Date(billForm.billDate),
+                amount: finalAmount,
+                dueDate: billForm.dueDate ? new Date(billForm.dueDate) : undefined,
+                items: finalItems,
+                notes: billForm.notes
+            });
+        }
         setIsBillModalOpen(false);
         resetBillForm();
         loadData();
+    };
+
+    const openEditBill = (bill: PurchaseBillData) => {
+        setEditingBill(bill);
+        setBillForm({
+            supplierId: bill.supplierId,
+            billNumber: bill.billNumber,
+            billDate: new Date(bill.billDate).toISOString().split('T')[0],
+            amount: bill.amount,
+            dueDate: bill.dueDate ? new Date(bill.dueDate).toISOString().split('T')[0] : '',
+            notes: bill.notes || ''
+        });
+        const existingItems = bill.items || [];
+        setBillItems(existingItems);
+        setShowItemsSection(existingItems.length > 0);
+        setIsBillModalOpen(true);
     };
 
     const handleDeleteBill = async (id: string) => {
@@ -295,6 +389,7 @@ export default function PurchasesPage() {
     };
 
     const resetBillForm = () => {
+        setEditingBill(null);
         setBillForm({
             supplierId: '',
             billNumber: '',
@@ -310,6 +405,7 @@ export default function PurchasesPage() {
             quantity: 0,
             unitPrice: 0
         });
+        setShowItemsSection(true);
     };
 
     const handleAddBillItem = () => {
@@ -330,6 +426,14 @@ export default function PurchasesPage() {
 
     const handlePaymentSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Validation: Prevent "Unknown"
+        const supplier = suppliers.find(s => s.id === paymentForm.supplierId);
+        if (!supplier || supplier.name === 'Unknown') {
+            alert('Please select a valid supplier (not "Unknown").');
+            return;
+        }
+
         if (editingPayment) {
             await updatePurchasePayment(editingPayment.id, {
                 paymentNumber: paymentForm.paymentNumber,
@@ -375,11 +479,12 @@ export default function PurchasesPage() {
         setIsPaymentModalOpen(true);
     };
 
-    const resetPaymentForm = () => {
+    const resetPaymentForm = async () => {
+        const nextNo = await suggestNextPaymentNumber();
         setEditingPayment(null);
         setPaymentForm({
             supplierId: '',
-            paymentNumber: '',
+            paymentNumber: nextNo,
             paymentDate: new Date().toISOString().split('T')[0],
             amount: 0,
             paymentMode: 'CASH',
@@ -551,10 +656,12 @@ export default function PurchasesPage() {
 
     const filteredSuppliers = useMemo(() => {
         const searchTermLower = searchTerm.toLowerCase();
-        return suppliers.filter(s =>
-            (s.name || '').toLowerCase().includes(searchTermLower) ||
-            (s.city || '').toLowerCase().includes(searchTermLower)
-        );
+        return suppliers
+            .filter(s => s.name !== 'Unknown')
+            .filter(s =>
+                (s.name || '').toLowerCase().includes(searchTermLower) ||
+                (s.city || '').toLowerCase().includes(searchTermLower)
+            );
     }, [suppliers, searchTerm]);
 
     const filteredBills = useMemo(() => {
@@ -584,7 +691,7 @@ export default function PurchasesPage() {
                 </div>
                 <div className="flex gap-2">
                     <button
-                        onClick={() => {
+                        onClick={async () => {
                             if (activeTab === 'suppliers') {
                                 resetSupplierForm();
                                 setIsSupplierModalOpen(true);
@@ -592,7 +699,7 @@ export default function PurchasesPage() {
                                 resetBillForm();
                                 setIsBillModalOpen(true);
                             } else {
-                                resetPaymentForm();
+                                await resetPaymentForm();
                                 setIsPaymentModalOpen(true);
                             }
                         }}
@@ -603,6 +710,18 @@ export default function PurchasesPage() {
                     </button>
                 </div>
             </div>
+
+            {/* Sheet tab status toast */}
+            {sheetTabStatus && (
+                <div className={`mb-4 px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 ${sheetTabStatus.startsWith('✓')
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : sheetTabStatus.startsWith('Creating')
+                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}>
+                    <span>{sheetTabStatus}</span>
+                </div>
+            )}
 
             <div className="flex gap-2 mb-6">
                 <button
@@ -738,8 +857,8 @@ export default function PurchasesPage() {
                                     return (
                                         <tr key={b.id} className="hover:bg-slate-50">
                                             <td className="p-4 font-mono font-bold text-slate-800">{b.billNumber}</td>
-                                            <td className="p-4 font-medium text-slate-700">{supplier?.name}</td>
-                                            <td className="p-4 text-slate-600">{b.billDate.toLocaleDateString()}</td>
+                                            <td className="p-4 font-medium text-slate-700">{supplier?.name || b.supplierName || 'Unknown'}</td>
+                                            <td className="p-4 text-slate-600">{b.billDate.toLocaleDateString('en-US')}</td>
                                             <td className="p-4 text-right font-medium">₹{(b.amount || 0).toLocaleString()}</td>
                                             <td className="p-4 text-right text-green-600">₹{(b.paidAmount || 0).toLocaleString()}</td>
                                             <td className="p-4 text-right font-bold text-red-600">₹{(b.balance || 0).toLocaleString()}</td>
@@ -752,6 +871,16 @@ export default function PurchasesPage() {
                                                     >
                                                         <FileText size={16} />
                                                     </button>
+                                                    {/* Only allow editing manually-created bills (not HIST- synced) */}
+                                                    {!b.id.startsWith('HIST-') && (
+                                                        <button
+                                                            onClick={() => openEditBill(b)}
+                                                            className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                                            title="Edit Bill"
+                                                        >
+                                                            <Edit2 size={16} />
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => handleDeleteBill(b.id)}
                                                         className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
@@ -786,9 +915,13 @@ export default function PurchasesPage() {
                                     return (
                                         <tr key={p.id} className="hover:bg-slate-50">
                                             <td className="p-4 font-mono font-bold text-slate-800">{p.paymentNumber}</td>
-                                            <td className="p-4 font-medium text-slate-700">{supplier?.name}</td>
-                                            <td className="p-4 text-slate-600">{p.paymentDate.toLocaleDateString()}</td>
-                                            <td className="p-4 text-slate-600">{p.paymentMode}</td>
+                                            <td className="p-4 font-medium text-slate-700">{supplier?.name || p.supplierName || 'Unknown'}</td>
+                                            <td className="p-4 text-slate-600">{p.paymentDate.toLocaleDateString('en-US')}</td>
+                                            <td className="p-4 text-slate-600">
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
+                                                    {formatPaymentMode(p.paymentMode)}
+                                                </span>
+                                            </td>
                                             <td className="p-4 text-right font-bold text-green-600">₹{p.amount.toLocaleString()}</td>
                                             <td className="p-4 text-center">
                                                 <div className="flex items-center justify-center gap-1">
@@ -937,7 +1070,9 @@ export default function PurchasesPage() {
                         />
                         <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
                             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                                <h2 className="text-xl font-bold text-slate-800">New Purchase Bill</h2>
+                                <h2 className="text-xl font-bold text-slate-800">
+                                    {editingBill ? 'Edit Purchase Bill' : 'New Purchase Bill'}
+                                </h2>
                                 <button onClick={() => setIsBillModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                                     <X size={24} />
                                 </button>
@@ -947,7 +1082,7 @@ export default function PurchasesPage() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
                                         <SearchableSelect
-                                            options={suppliers}
+                                            options={suppliers.filter(s => s.name !== 'Unknown')}
                                             value={billForm.supplierId}
                                             onChange={(val) => setBillForm({ ...billForm, supplierId: val })}
                                             placeholder="Search Supplier"
@@ -982,100 +1117,132 @@ export default function PurchasesPage() {
                                     </div>
                                 </div>
 
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                    <h3 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">Add Items</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                                        <div className="md:col-span-5">
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Product</label>
-                                            <SearchableSelect
-                                                options={products}
-                                                value={currentBillItem.productId}
-                                                onChange={(val: string) => {
-                                                    const prod = products.find(p => p.id === val);
-                                                    setCurrentBillItem({
-                                                        ...currentBillItem,
-                                                        productId: val,
-                                                        productName: prod?.name || '',
-                                                        unitPrice: prod?.costPrice || prod?.price || 0
-                                                    });
-                                                }}
-                                                placeholder="Search Product"
-                                                className="w-full"
-                                                ref={billProductRef}
-                                                onKeyDown={(e: React.KeyboardEvent) => handleProductEntryKeyDown(e, 'product')}
-                                            />
+                                {/* Items Section - Optional Toggle */}
+                                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowItemsSection(prev => !prev)}
+                                        className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Add Items</h3>
+                                            <span className="text-[10px] font-medium bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wider">Optional</span>
+                                            {billItems.length > 0 && (
+                                                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                                                    {billItems.length} item{billItems.length > 1 ? 's' : ''} added
+                                                </span>
+                                            )}
                                         </div>
-                                        <div className="md:col-span-2">
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Quantity</label>
-                                            <input
-                                                ref={billQtyRef}
-                                                onKeyDown={(e) => handleProductEntryKeyDown(e, 'qty')}
-                                                type="number"
-                                                min="1"
-                                                className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                                value={currentBillItem.quantity || ''}
-                                                onChange={e => setCurrentBillItem({ ...currentBillItem, quantity: parseFloat(e.target.value) || 0 })}
-                                            />
-                                        </div>
-                                        <div className="md:col-span-3">
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Unit Cost</label>
-                                            <input
-                                                ref={billCostRef}
-                                                onKeyDown={(e) => handleProductEntryKeyDown(e, 'cost')}
-                                                type="number"
-                                                className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
-                                                value={currentBillItem.unitPrice || ''}
-                                                onChange={e => setCurrentBillItem({ ...currentBillItem, unitPrice: parseFloat(e.target.value) || 0 })}
-                                            />
-                                        </div>
-                                        <div className="md:col-span-2">
-                                            <button
-                                                ref={billAddBtnRef}
-                                                type="button"
-                                                onClick={handleAddBillItem}
-                                                className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold hover:bg-slate-700 transition-colors"
-                                            >
-                                                Add
-                                            </button>
-                                        </div>
-                                    </div>
+                                        <span className="text-slate-400 text-xs font-medium">
+                                            {showItemsSection ? '▲ Hide' : '▼ Show'}
+                                        </span>
+                                    </button>
 
-                                    {billItems.length > 0 && (
-                                        <div className="mt-4 border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                            <table className="w-full text-xs">
-                                                <thead className="bg-slate-100 text-slate-600 font-bold">
-                                                    <tr>
-                                                        <th className="p-2 text-left">Product</th>
-                                                        <th className="p-2 text-center">Qty</th>
-                                                        <th className="p-2 text-right">Cost</th>
-                                                        <th className="p-2 text-right">Total</th>
-                                                        <th className="p-2 text-center">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-100">
-                                                    {billItems.map((item, idx) => (
-                                                        <tr key={idx}>
-                                                            <td className="p-2">{item.productName}</td>
-                                                            <td className="p-2 text-center">{item.quantity}</td>
-                                                            <td className="p-2 text-right">₹{item.unitPrice.toLocaleString()}</td>
-                                                            <td className="p-2 text-right font-bold">₹{item.total.toLocaleString()}</td>
-                                                            <td className="p-2 text-center">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        const newItems = billItems.filter((_, i) => i !== idx);
-                                                                        setBillItems(newItems);
-                                                                        setBillForm(prev => ({ ...prev, amount: newItems.reduce((sum, item) => sum + item.total, 0) }));
-                                                                    }}
-                                                                    className="text-red-500 hover:text-red-700 p-1"
-                                                                >
-                                                                    <X size={14} />
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                                    {!showItemsSection && (
+                                        <div className="px-4 py-3 bg-amber-50 border-t border-amber-100 flex items-start gap-2">
+                                            <span className="text-amber-500 text-base leading-none mt-0.5">💡</span>
+                                            <p className="text-xs text-amber-700">
+                                                <strong>Bill without products</strong> — Useful for packaging materials (boxes, covers) or other miscellaneous purchases. Enter the total amount below directly.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {showItemsSection && (
+                                        <div className="p-4 space-y-3 bg-white">
+                                            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                                <div className="md:col-span-5">
+                                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Product</label>
+                                                    <SearchableSelect
+                                                        options={products}
+                                                        value={currentBillItem.productId}
+                                                        onChange={(val: string) => {
+                                                            const prod = products.find(p => p.id === val);
+                                                            setCurrentBillItem({
+                                                                ...currentBillItem,
+                                                                productId: val,
+                                                                productName: prod?.name || '',
+                                                                unitPrice: prod?.costPrice || prod?.price || 0
+                                                            });
+                                                        }}
+                                                        placeholder="Search Product"
+                                                        className="w-full"
+                                                        ref={billProductRef}
+                                                        onKeyDown={(e: React.KeyboardEvent) => handleProductEntryKeyDown(e, 'product')}
+                                                    />
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Quantity</label>
+                                                    <input
+                                                        ref={billQtyRef}
+                                                        onKeyDown={(e) => handleProductEntryKeyDown(e, 'qty')}
+                                                        type="number"
+                                                        min="1"
+                                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                                        value={currentBillItem.quantity || ''}
+                                                        onChange={e => setCurrentBillItem({ ...currentBillItem, quantity: parseFloat(e.target.value) || 0 })}
+                                                    />
+                                                </div>
+                                                <div className="md:col-span-3">
+                                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Unit Cost</label>
+                                                    <input
+                                                        ref={billCostRef}
+                                                        onKeyDown={(e) => handleProductEntryKeyDown(e, 'cost')}
+                                                        type="number"
+                                                        className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                                        value={currentBillItem.unitPrice || ''}
+                                                        onChange={e => setCurrentBillItem({ ...currentBillItem, unitPrice: parseFloat(e.target.value) || 0 })}
+                                                    />
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <button
+                                                        ref={billAddBtnRef}
+                                                        type="button"
+                                                        onClick={handleAddBillItem}
+                                                        className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold hover:bg-slate-700 transition-colors"
+                                                    >
+                                                        Add
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {billItems.length > 0 && (
+                                                <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                                    <table className="w-full text-xs">
+                                                        <thead className="bg-slate-100 text-slate-600 font-bold">
+                                                            <tr>
+                                                                <th className="p-2 text-left">Product</th>
+                                                                <th className="p-2 text-center">Qty</th>
+                                                                <th className="p-2 text-right">Cost</th>
+                                                                <th className="p-2 text-right">Total</th>
+                                                                <th className="p-2 text-center">Action</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-slate-100">
+                                                            {billItems.map((item, idx) => (
+                                                                <tr key={idx}>
+                                                                    <td className="p-2">{item.productName}</td>
+                                                                    <td className="p-2 text-center">{item.quantity}</td>
+                                                                    <td className="p-2 text-right">₹{item.unitPrice.toLocaleString()}</td>
+                                                                    <td className="p-2 text-right font-bold">₹{item.total.toLocaleString()}</td>
+                                                                    <td className="p-2 text-center">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                const newItems = billItems.filter((_, i) => i !== idx);
+                                                                                setBillItems(newItems);
+                                                                                setBillForm(prev => ({ ...prev, amount: newItems.reduce((sum, item) => sum + item.total, 0) }));
+                                                                            }}
+                                                                            className="text-red-500 hover:text-red-700 p-1"
+                                                                        >
+                                                                            <X size={14} />
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -1083,13 +1250,28 @@ export default function PurchasesPage() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Total Bill Amount *</label>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                                Total Bill Amount *
+                                                {billItems.length === 0 && (
+                                                    <span className="ml-2 text-[10px] font-medium text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">
+                                                        Enter manually
+                                                    </span>
+                                                )}
+                                                {billItems.length > 0 && (
+                                                    <span className="ml-2 text-[10px] font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                                        Auto-calculated from items
+                                                    </span>
+                                                )}
+                                            </label>
                                             <input
                                                 ref={billTotalRef}
                                                 onKeyDown={(e) => handleBillKeyDown(e)}
                                                 type="number"
                                                 required
-                                                className="w-full p-3 border-2 border-slate-200 rounded-xl focus:border-emerald-500 outline-none text-2xl font-bold text-emerald-600"
+                                                className={`w-full p-3 border-2 rounded-xl outline-none text-2xl font-bold text-emerald-600 transition-colors ${billItems.length > 0
+                                                        ? 'border-emerald-300 bg-emerald-50 focus:border-emerald-500'
+                                                        : 'border-blue-300 bg-blue-50 focus:border-blue-500'
+                                                    }`}
                                                 value={billForm.amount || ''}
                                                 onChange={e => setBillForm({ ...billForm, amount: parseFloat(e.target.value) || 0 })}
                                             />
@@ -1281,7 +1463,7 @@ export default function PurchasesPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Supplier *</label>
                                     <SearchableSelect
-                                        options={suppliers.map(s => ({ ...s, name: `${s.name} (Bal: ₹${s.balance.toLocaleString()})` }))}
+                                        options={suppliers.filter(s => s.name !== 'Unknown').map(s => ({ ...s, name: `${s.name} (Bal: ₹${s.balance.toLocaleString()})` }))}
                                         value={paymentForm.supplierId}
                                         onChange={(val: string) => setPaymentForm({ ...paymentForm, supplierId: val })}
                                         placeholder="Search Supplier"
@@ -1333,19 +1515,31 @@ export default function PurchasesPage() {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Mode</label>
-                                        <select
-                                            ref={paymentModeRef}
-                                            onKeyDown={(e) => handlePaymentKeyDown(e)}
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium"
-                                            value={paymentForm.paymentMode}
-                                            onChange={e => setPaymentForm({ ...paymentForm, paymentMode: e.target.value as any })}
-                                        >
-                                            <option value="CASH">CASH</option>
-                                            <option value="BANK_TRANSFER">BANK TRANSFER</option>
-                                            <option value="UPI">UPI</option>
-                                            <option value="CHEQUE">CHEQUE</option>
-                                            <option value="OTHER">OTHER</option>
-                                        </select>
+                                        {/* HIST- payments are synced from Google Sheet ledger — show raw particulars as read-only */}
+                                        {editingPayment && editingPayment.id.startsWith('HIST-') ? (
+                                            <div className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50">
+                                                <p className="text-sm font-medium text-slate-700">
+                                                    {editingPayment.notes
+                                                        ? editingPayment.notes.replace('Historical: ', '')
+                                                        : formatPaymentMode(paymentForm.paymentMode)}
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 mt-0.5">Synced from ledger — mode cannot be changed</p>
+                                            </div>
+                                        ) : (
+                                            <select
+                                                ref={paymentModeRef}
+                                                onKeyDown={(e) => handlePaymentKeyDown(e)}
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium"
+                                                value={paymentForm.paymentMode}
+                                                onChange={e => setPaymentForm({ ...paymentForm, paymentMode: e.target.value as any })}
+                                            >
+                                                <option value="CASH">Cash</option>
+                                                <option value="BANK_TRANSFER">Bank Transfer</option>
+                                                <option value="UPI">UPI</option>
+                                                <option value="CHEQUE">Cheque</option>
+                                                <option value="OTHER">Other / As per Ledger</option>
+                                            </select>
+                                        )}
                                     </div>
                                 </div>
                                 <div>

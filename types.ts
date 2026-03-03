@@ -244,13 +244,14 @@ export interface SupplierData {
 export interface PurchaseBillData {
   id: string;
   supplierId: string;
+  supplierName?: string;  // denormalized for reliable display
   billNumber: string;
   billDate: Date;
   amount: number;
   paidAmount: number;
   balance: number;
   dueDate?: Date;
-  items?: any[]; // JSONB array of purchase items
+  items?: any[];
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -260,6 +261,7 @@ export interface PurchaseBillData {
 export interface PurchasePaymentData {
   id: string;
   supplierId: string;
+  supplierName?: string;  // denormalized for reliable display
   paymentNumber: string;
   paymentDate: Date;
   amount: number;
@@ -331,6 +333,10 @@ declare global {
         getStatus: () => Promise<string>;
         logout: () => Promise<{ success: boolean }>;
         reconnect: () => Promise<{ status: string }>;
+      };
+      printer?: {
+        getPrinters: () => Promise<{ name: string; displayName: string; isDefault: boolean; status: number; description: string }[]>;
+        print: (printerName: string) => Promise<{ success: boolean }>;
       };
     };
   }

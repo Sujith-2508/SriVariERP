@@ -352,6 +352,20 @@ export async function uploadInvoicePDF(
     return uploadPdfToFolder(token, base64Data, fileName, folders.invoices);
 }
 
+/**
+ * Upload a payment receipt PDF to Google Drive under the dealer's Receipts folder.
+ */
+export async function uploadReceiptPDF(
+    base64Data: string,
+    fileName: string,
+    dealerName: string
+): Promise<{ id: string; webViewLink: string }> {
+    const token = await getDriveAccessToken();
+    const folders = await getDealerFolders(token, dealerName);
+
+    return uploadPdfToFolder(token, base64Data, fileName, folders.receipts);
+}
+
 /** Internal: upload a PDF to a specific folder */
 async function uploadPdfToFolder(
     token: string,

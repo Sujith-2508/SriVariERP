@@ -41,7 +41,8 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
     const globalSGSTAmount = (subtotal * globalSGST) / 100;
     const globalIGSTAmount = (subtotal * globalIGST) / 100;
 
-    const grandTotal = subtotal + totalTax - globalDiscountAmount +
+    // Product-level totalTax is for the taxable summary table only — not added to the printed grand total
+    const grandTotal = subtotal - globalDiscountAmount +
         globalCGSTAmount + globalSGSTAmount + globalIGSTAmount +
         transportCharges + roundOffAmount;
 
@@ -375,11 +376,12 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                     <div className="w-[65%] border-r-2 border-black flex flex-col font-medium">
                         {/* Bank Details */}
                         <div className="p-1 px-2 text-[8px] flex-1">
-                            <div className="mb-[2px]">Account Type: {company.accountType || 'Current A/c'}</div>
-                            <div className="mb-[2px]">Bank: {company.bankName}</div>
-                            <div className="mb-[2px]">Account Number: {company.accountNumber}</div>
-                            <div className="mb-[2px]">IFSC: {company.ifscCode}</div>
-                            <div className="mb-[2px]">Branch: {company.bankBranch}</div>
+                            <div className="font-bold text-[9px] text-black mb-[3px]">Bank Details</div>
+                            <div className="mb-[2px] font-bold text-black">Account Type: <span className="font-extrabold">{company.accountType || 'Current A/c'}</span></div>
+                            <div className="mb-[2px] font-bold text-black">Bank: <span className="font-extrabold">{company.bankName}</span></div>
+                            <div className="mb-[2px] font-bold text-black">Account No: <span className="font-extrabold">{company.accountNumber}</span></div>
+                            <div className="mb-[2px] font-bold text-black">IFSC: <span className="font-extrabold">{company.ifscCode}</span></div>
+                            <div className="mb-[2px] font-bold text-black">Branch: <span className="font-extrabold">{company.bankBranch}</span></div>
                         </div>
 
                         {/* Declaration */}

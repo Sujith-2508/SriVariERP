@@ -177,6 +177,20 @@ export function calculateInvoiceProfit(
     products: Product[],
     agentExpenses: number = 0
 ): ProfitCalculation {
+    // Cheque returns are reversals of bounced payments — zero profit, zero revenue impact
+    const isChequeReturn = (() => {
+        const notes = invoice.notes || '';
+        if (notes.startsWith('Cheque Return')) return true;
+        try {
+            const parsed = JSON.parse(notes);
+            return typeof parsed === 'object' && String(parsed.isChequeReturn) === 'true';
+        } catch { return false; }
+    })();
+
+    if (isChequeReturn) {
+        return { revenue: 0, cogs: 0, serviceCharges: 0, agentExpenses: 0, grossProfit: 0, dealerDiscount: 0, netProfit: 0, profitPercentage: 0 };
+    }
+
     const revenue = invoice.amount;
     // Prefer stored COGS if available, fallback to recalculation
     const cogs = (invoice.cogs && invoice.cogs > 0) ? invoice.cogs : calculateCOGS(invoice.items || [], products);

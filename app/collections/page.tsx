@@ -7,9 +7,11 @@ import { Dealer } from '@/types';
 import { calculateDealerStatement } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
+import { generateReceiptPDFBase64 } from '@/lib/pdfGenerator';
+import { uploadReceiptPDF } from '@/lib/googleDriveService';
 
 export default function Collections() {
-    const { dealers, transactions, agents, recordPayment } = useData();
+    const { dealers, transactions, agents, recordPayment, createInvoice } = useData();
     const [searchTerm, setSearchTerm] = useState('');
     const [activeDealer, setActiveDealer] = useState<Dealer | null>(null);
     const [amount, setAmount] = useState('');
@@ -17,6 +19,14 @@ export default function Collections() {
     const [selectedAgent, setSelectedAgent] = useState(agents[0]?.name || 'Admin');
     const [isProcessing, setIsProcessing] = useState(false);
     const [companySettings, setCompanySettings] = useState<any>(null);
+
+    // Cheque Return State
+    const [showChequeReturnModal, setShowChequeReturnModal] = useState(false);
+    const [chequeReturnAmount, setChequeReturnAmount] = useState('');
+    const [chequeReturnReason, setChequeReturnReason] = useState('Insufficient Funds');
+    const [chequeReturnRef, setChequeReturnRef] = useState('');
+    const [chequeReturnProcessing, setChequeReturnProcessing] = useState(false);
+    const [chequeReturnSuccess, setChequeReturnSuccess] = useState(false);
 
     // Load Company Settings
     useEffect(() => {
@@ -96,6 +106,31 @@ export default function Collections() {
             console.error('[Collections] Sheets Sync Failed:', syncError);
         }
 
+        // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
+        if (companySettings && activeDealer) {
+            // Background process to avoid blocking UI success screen
+            (async () => {
+                try {
+                    const receiptBase64 = await generateReceiptPDFBase64(
+                        activeDealer!,
+                        amountNum,
+                        method,
+                        selectedAgent,
+                        receiptId,
+                        companySettings
+                    );
+
+                    const fileName = `Receipt_${receiptId}_${activeDealer!.businessName.replace(/\s+/g, '_')}_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}.pdf`;
+
+                    console.log('[Collections] Starting automatic Drive upload:', fileName);
+                    await uploadReceiptPDF(receiptBase64, fileName, activeDealer!.businessName);
+                    console.log('[Collections] Automatic Drive upload success!');
+                } catch (driveErr) {
+                    console.error('[Collections] Automatic Drive upload failed:', driveErr);
+                }
+            })();
+        }
+
         setSuccessData({
             dealerName: activeDealer.businessName,
             amountPaid: amountNum,
@@ -111,6 +146,57 @@ export default function Collections() {
 
     const handleCloseSuccess = () => {
         setSuccessData(null);
+    };
+
+    // Cheque Return: creates an INVOICE to increase balance back
+    const handleChequeReturn = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!activeDealer) return;
+        const amountNum = parseFloat(chequeReturnAmount);
+        if (isNaN(amountNum) || amountNum <= 0) return;
+
+        setChequeReturnProcessing(true);
+        try {
+            const refNote = chequeReturnRef ? ` (Ref: ${chequeReturnRef})` : '';
+            const noteText = `Cheque Return${refNote} – Reason: ${chequeReturnReason}`;
+
+            // Create a zero-item invoice for the bounced amount
+            await createInvoice(
+                activeDealer.id,
+                [], // no items for a cheque return
+                amountNum,
+                { notes: noteText }
+            );
+
+            // Sync to Google Sheets
+            try {
+                const { syncPaymentToSheets } = await import('@/lib/googleSheetWriter');
+                // Log as a debit (increases balance) with a Cheque Return label
+                await syncPaymentToSheets(
+                    activeDealer.businessName,
+                    chequeReturnRef || 'CHQ-RETURN',
+                    -amountNum, // negative so it shows as debit/owed
+                    'Cheque Return',
+                    'System'
+                );
+            } catch (syncErr) {
+                console.warn('[Collections] Cheque Return sheet sync failed:', syncErr);
+            }
+
+            setChequeReturnSuccess(true);
+            setTimeout(() => {
+                setShowChequeReturnModal(false);
+                setChequeReturnSuccess(false);
+                setChequeReturnAmount('');
+                setChequeReturnRef('');
+                setChequeReturnReason('Insufficient Funds');
+            }, 1800);
+        } catch (err) {
+            console.error('[Collections] Cheque Return failed:', err);
+            alert('Failed to record cheque return. Please try again.');
+        } finally {
+            setChequeReturnProcessing(false);
+        }
     };
 
     // Success / Receipt View
@@ -303,89 +389,188 @@ export default function Collections() {
                             </div>
                         </div>
 
-                        {/* Payment Form */}
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-fit">
-                            <div className="bg-emerald-600 text-white p-4">
-                                <h3 className="font-bold">Record Payment</h3>
-                                <p className="text-emerald-100 text-sm mt-1">Outstanding: ₹{activeDealer.balance.toLocaleString()}</p>
-                            </div>
-                            <form onSubmit={handleSubmitPayment} className="p-4 space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">Amount</label>
-                                    <div className="relative">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
-                                        <input
-                                            type="text"
-                                            inputMode="decimal"
-                                            className="w-full pl-8 pr-4 py-3 rounded-lg border-2 border-slate-200 focus:border-emerald-500 focus:ring-0 outline-none text-lg font-bold text-slate-800"
-                                            placeholder="0"
-                                            value={amount}
-                                            onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                                            required
-                                        />
-                                    </div>
+                        {/* Payment Form + Cheque Return Button */}
+                        <div className="space-y-4">
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-fit">
+                                <div className="bg-emerald-600 text-white p-4">
+                                    <h3 className="font-bold">Record Payment</h3>
+                                    <p className="text-emerald-100 text-sm mt-1">Outstanding: ₹{activeDealer.balance.toLocaleString()}</p>
                                 </div>
-
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">Mode</label>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {['Cash', 'Cheque', 'UPI'].map(m => (
-                                            <button
-                                                key={m}
-                                                type="button"
-                                                onClick={() => setMethod(m)}
-                                                className={`py-2 rounded-lg border-2 font-bold text-xs transition-all ${method === m
-                                                    ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
-                                                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                                                    }`}
-                                            >
-                                                {m}
-                                            </button>
-                                        ))}
+                                <form onSubmit={handleSubmitPayment} className="p-4 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Amount</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                                            <input
+                                                type="text"
+                                                inputMode="decimal"
+                                                className="w-full pl-8 pr-4 py-3 rounded-lg border-2 border-slate-200 focus:border-emerald-500 focus:ring-0 outline-none text-lg font-bold text-slate-800"
+                                                placeholder="0"
+                                                value={amount}
+                                                onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                                                required
+                                            />
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                                        <User size={14} />
-                                        Collected By
-                                    </label>
-                                    <select
-                                        className="w-full p-2.5 border-2 border-slate-200 rounded-lg focus:border-emerald-500 outline-none bg-white font-medium"
-                                        value={selectedAgent}
-                                        onChange={e => setSelectedAgent(e.target.value)}
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Mode</label>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {['Cash', 'Cheque', 'UPI'].map(m => (
+                                                <button
+                                                    key={m}
+                                                    type="button"
+                                                    onClick={() => setMethod(m)}
+                                                    className={`py-2 rounded-lg border-2 font-bold text-xs transition-all ${method === m
+                                                        ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
+                                                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                                                        }`}
+                                                >
+                                                    {m}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                                            <User size={14} />
+                                            Collected By
+                                        </label>
+                                        <select
+                                            className="w-full p-2.5 border-2 border-slate-200 rounded-lg focus:border-emerald-500 outline-none bg-white font-medium"
+                                            value={selectedAgent}
+                                            onChange={e => setSelectedAgent(e.target.value)}
+                                        >
+                                            <option value="Admin">Admin</option>
+                                            {agents.map(agent => (
+                                                <option key={agent.id} value={agent.name}>{agent.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={isProcessing || !amount}
+                                        className="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-emerald-700 disabled:bg-slate-300 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
                                     >
-                                        <option value="Admin">Admin</option>
-                                        {agents.map(agent => (
-                                            <option key={agent.id} value={agent.name}>{agent.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
+                                        {isProcessing ? (
+                                            <span className="flex items-center gap-2">
+                                                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                                </svg>
+                                                Processing...
+                                            </span>
+                                        ) : (
+                                            <>
+                                                <Check size={18} />
+                                                Confirm Payment
+                                            </>
+                                        )}
+                                    </button>
+                                </form>
+                            </div>
 
-                                <button
-                                    type="submit"
-                                    disabled={isProcessing || !amount}
-                                    className="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-emerald-700 disabled:bg-slate-300 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
-                                >
-                                    {isProcessing ? (
-                                        <span className="flex items-center gap-2">
-                                            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                            </svg>
-                                            Processing...
-                                        </span>
-                                    ) : (
-                                        <>
-                                            <Check size={18} />
-                                            Confirm Payment
-                                        </>
-                                    )}
-                                </button>
-                            </form>
+                            {/* ── Cheque Return Card ── */}
+                            <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
+                                <div className="bg-red-50 border-b border-red-200 p-3 flex items-center justify-between">
+                                    <div>
+                                        <p className="font-bold text-red-700 text-sm">Cheque Bounced?</p>
+                                        <p className="text-red-500 text-xs">Add back to outstanding balance</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowChequeReturnModal(true)}
+                                        className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-700 transition-colors"
+                                    >
+                                        Record Cheque Return
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                {/* ╔══ Cheque Return Modal ══╗ */}
+                {showChequeReturnModal && (
+                    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-red-100 overflow-hidden">
+                            <div className="bg-red-600 text-white p-5 flex justify-between items-start">
+                                <div>
+                                    <h2 className="text-lg font-bold">Record Cheque Return</h2>
+                                    <p className="text-red-200 text-sm mt-1">{activeDealer?.businessName}</p>
+                                </div>
+                                <button onClick={() => setShowChequeReturnModal(false)} className="text-red-200 hover:text-white">✕</button>
+                            </div>
+                            {chequeReturnSuccess ? (
+                                <div className="p-8 text-center">
+                                    <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <CheckCircle size={32} className="text-emerald-600" />
+                                    </div>
+                                    <p className="font-bold text-slate-800 text-lg">Cheque Return Recorded!</p>
+                                    <p className="text-slate-500 text-sm mt-1">Balance has been updated</p>
+                                </div>
+                            ) : (
+                                <form onSubmit={handleChequeReturn} className="p-5 space-y-4">
+                                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                                        <strong>⚠️ Cheque Return</strong> — This will increase the dealer's outstanding balance back by the entered amount.
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">Bounced Amount *</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                                            <input type="text" inputMode="decimal"
+                                                className="w-full pl-8 pr-4 py-3 rounded-lg border-2 border-slate-200 focus:border-red-500 outline-none font-bold"
+                                                placeholder="Enter bounced cheque amount"
+                                                value={chequeReturnAmount}
+                                                onChange={e => setChequeReturnAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                                                required autoFocus />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">Original Receipt / Cheque No</label>
+                                        <input type="text"
+                                            className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 focus:border-red-500 outline-none font-mono"
+                                            placeholder="e.g. R001, Cheque #123456"
+                                            value={chequeReturnRef}
+                                            onChange={e => setChequeReturnRef(e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">Reason for Return</label>
+                                        <select className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 focus:border-red-500 outline-none bg-white font-medium"
+                                            value={chequeReturnReason} onChange={e => setChequeReturnReason(e.target.value)}>
+                                            <option>Insufficient Funds</option>
+                                            <option>Signature Mismatch</option>
+                                            <option>Account Closed</option>
+                                            <option>Date Mismatch</option>
+                                            <option>Payment Stopped by Drawer</option>
+                                            <option>Other</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex gap-3 pt-2">
+                                        <button type="button" onClick={() => setShowChequeReturnModal(false)}
+                                            className="flex-1 py-3 rounded-lg border-2 border-slate-200 text-slate-600 font-bold hover:bg-slate-50">
+                                            Cancel
+                                        </button>
+                                        <button type="submit" disabled={chequeReturnProcessing || !chequeReturnAmount}
+                                            className="flex-[2] bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 disabled:bg-slate-300 flex items-center justify-center gap-2">
+                                            {chequeReturnProcessing ? (
+                                                <>
+                                                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                                    </svg>
+                                                    Recording...
+                                                </>
+                                            ) : '📋 Record Cheque Return'}
+                                        </button>
+                                    </div>
+                                </form>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }
@@ -462,3 +647,14 @@ export default function Collections() {
         </div>
     );
 }
+
+// ---- Cheque Return Modal (overlay, rendered inline) ----
+// Note: This component is intentionally written as a named export for clarity
+// but is referenced inline in the Collections component via showChequeReturnModal state.
+// The modal is rendered as a portal-like overlay inside the active dealer view.
+// Implementation: added directly into the Collections component JSX tree via the
+// showChequeReturnModal state flag. The modal markup is appended to the bottom
+// of the activeDealer view block just before the closing tag.
+//
+// The actual modal JSX is embedded inside the activeDealer return block above.
+// This file ends here.

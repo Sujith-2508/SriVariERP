@@ -1,0 +1,632 @@
+{
+  "tabs": [
+    "Summary",
+    "LAKSHMI COOKWARE",
+    "PNB Kitchenmate",
+    "Arun Rubber Products",
+    "Rao Rubber Industries",
+    "Muthu Metal"
+  ],
+  "data": {
+    "Summary": [
+      [
+        "SUPPLIER GROUP 3 - SUMMARY"
+      ],
+      [],
+      [
+        "Sri Vari Enterprises | GST: 33DIGPM0162N1Z6 | Pollachi 642001"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Supplier",
+        "Address",
+        "GST No.",
+        "Closing Balance (₹)",
+        "Balance Type",
+        "Remarks"
+      ],
+      [
+        "PNB Kitchenmate Limited",
+        "Kundli, Haryana",
+        "06AADCS9633D1ZE",
+        "203,580.00",
+        "Cr",
+        "Payable to supplier"
+      ],
+      [
+        "Arun Rubber Products",
+        "Coimbatore",
+        "33CSYPS2445D1ZE",
+        "114,873.02",
+        "Cr",
+        "Payable to supplier"
+      ],
+      [
+        "Rao Rubber Industries",
+        "Delhi",
+        "07ABYPY5337K1ZK",
+        "28,320.00",
+        "Dr",
+        "Receivable from supplier"
+      ],
+      [
+        "Muthu Metal",
+        "Pollachi",
+        "33ABTPT3174G1Z9",
+        "2,909,511.09",
+        "Dr",
+        "Receivable from supplier"
+      ],
+      [],
+      [
+        "Total Payable (Cr)",
+        "",
+        "",
+        "318,453.02",
+        "Cr"
+      ],
+      [
+        "Total Receivable (Dr)",
+        "",
+        "",
+        "2,937,831.09",
+        "Dr"
+      ]
+    ],
+    "LAKSHMI COOKWARE": [
+      [
+        "SRI VARI ENTERPRISES"
+      ],
+      [
+        "T.S.NO:609, BLOCK NO:9, PALANIYAPPAN STREET, POLLACHI 642001"
+      ],
+      [
+        "GST IN: 33DIGPM0162N1Z6 | MOB: 9488075194 | Email: maharajagrouppvtltd@gmail.com"
+      ],
+      [],
+      [
+        "LAKSHMI COOKWARE - Ledger Account"
+      ],
+      [
+        "NO.28, SIDCO INDUSTRIAL ESTATE, TIRUNELVELI | CELL: 9487211000 | GST: 33ADYPR9635D1ZY"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Date",
+        "Particulars",
+        "Vch Type",
+        "Vch Ref.",
+        "Vch No.",
+        "Debit (₹)",
+        "Credit (₹)",
+        "Balance (₹)"
+      ],
+      [
+        "01 Apr 19",
+        "Opening Balance",
+        "",
+        "",
+        "",
+        "0",
+        "0",
+        "0"
+      ],
+      [
+        "01 Apr 19",
+        "CASH",
+        "Payment",
+        "",
+        "1",
+        "0",
+        "400,000.00",
+        "400,000.00"
+      ],
+      [
+        "03 Apr 19",
+        "CATHOLIC SYRIAN BANK",
+        "Payment",
+        "",
+        "2",
+        "0",
+        "200,000.00",
+        "600,000.00"
+      ],
+      [
+        "01 Jun 19",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "1",
+        "612,582.00",
+        "0",
+        "12,582.00"
+      ],
+      [
+        "14 Jun 19",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "2",
+        "523,585.00",
+        "0",
+        "536,167.00"
+      ],
+      [
+        "18 Jun 19",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "3",
+        "322,717.00",
+        "0",
+        "858,884.00"
+      ],
+      [
+        "26 Jun 19",
+        "CATHOLIC SYRIAN BANK",
+        "Payment",
+        "",
+        "3",
+        "0",
+        "95,000.00",
+        "763,884.00"
+      ],
+      [
+        "04 Jul 19",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "4",
+        "126,270.00",
+        "0",
+        "890,154.00"
+      ],
+      [
+        "09 Jul 19",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "6",
+        "9,335.00",
+        "0",
+        "899,489.00"
+      ],
+      [
+        "09 Jul 19",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "7",
+        "183,694.00",
+        "0",
+        "1,083,183.00"
+      ],
+      [
+        "09 Jul 19",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "8",
+        "313,547.00",
+        "0",
+        "1,396,730.00"
+      ]
+    ],
+    "PNB Kitchenmate": [
+      [
+        "SRI VARI ENTERPRISES"
+      ],
+      [
+        "T.S.NO:609, BLOCK NO:9, PALANIYAPPAN STREET, POLLACHI 642001"
+      ],
+      [
+        "GST IN: 33DIGPM0162N1Z6 | MOB: 9488075194 | Email: maharajagrouppvtltd@gmail.com"
+      ],
+      [],
+      [
+        "PNB KITCHENMATE LIMITED - Ledger Account"
+      ],
+      [
+        "NO.118 H, PHASE-V HSIIDC, SECTOR-56, INDUSTRIAL ESTATE, KUNDLI, HARYANA-131028"
+      ],
+      [
+        "GST: 06AADCS9633D1ZE | CELL: N/A"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Date",
+        "Particulars",
+        "Vch Type",
+        "Vch Ref.",
+        "Vch No.",
+        "Debit (₹)",
+        "Credit (₹)",
+        "Balance (₹)"
+      ],
+      [
+        "01 Apr 19",
+        "Opening Balance",
+        "",
+        "",
+        "",
+        "0",
+        "0",
+        "0"
+      ],
+      [
+        "11 Jul 25",
+        "TMB OD",
+        "Payment",
+        "",
+        "0",
+        "450,000.00",
+        "0",
+        "450,000.00"
+      ],
+      [
+        "21 Jul 25",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "K118",
+        "0",
+        "434,205.00",
+        "15,795.00"
+      ],
+      [
+        "11 Dec 25",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "26/095",
+        "0",
+        "81,295.00",
+        "65,500.00"
+      ],
+      [
+        "29 Dec 25",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "26/156",
+        "0",
+        "138,080.00",
+        "203,580.00"
+      ],
+      [
+        "",
+        "Closing Balance",
+        "",
+        "",
+        "",
+        "450,000.00",
+        "653,580.00",
+        "203,580.00"
+      ]
+    ],
+    "Arun Rubber Products": [
+      [
+        "SRI VARI ENTERPRISES"
+      ],
+      [
+        "T.S.NO:609, BLOCK NO:9, PALANIYAPPAN STREET, POLLACHI 642001"
+      ],
+      [
+        "GST IN: 33DIGPM0162N1Z6 | MOB: 9488075194 | Email: maharajagrouppvtltd@gmail.com"
+      ],
+      [],
+      [
+        "ARUN RUBBER PRODUCTS - Ledger Account"
+      ],
+      [
+        "11, MURUGAN NAGAR, CHINNAVEDAMPATTI, COIMBATORE"
+      ],
+      [
+        "GST: 33CSYPS2445D1ZE | CELL: 8248044070"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Date",
+        "Particulars",
+        "Vch Type",
+        "Vch Ref.",
+        "Vch No.",
+        "Debit (₹)",
+        "Credit (₹)",
+        "Balance (₹)"
+      ],
+      [
+        "01 Apr 19",
+        "Opening Balance",
+        "",
+        "",
+        "",
+        "0",
+        "0",
+        "0"
+      ],
+      [
+        "21 Jul 23",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "233",
+        "0",
+        "27,435.00",
+        "27,435.00"
+      ],
+      [
+        "30 Sep 23",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "248",
+        "0",
+        "18,585.00",
+        "46,020.00"
+      ],
+      [
+        "16 Dec 23",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "261",
+        "0",
+        "19,036.36",
+        "65,056.36"
+      ],
+      [
+        "18 Dec 23",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "262",
+        "0",
+        "23,266.66",
+        "88,323.02"
+      ],
+      [
+        "25 Jan 24",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "269",
+        "0",
+        "13,275.00",
+        "101,598.02"
+      ],
+      [
+        "13 Mar 24",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "279",
+        "0",
+        "13,275.00",
+        "114,873.02"
+      ],
+      [
+        "",
+        "Closing Balance",
+        "",
+        "",
+        "",
+        "0",
+        "114,873.02",
+        "114,873.02"
+      ]
+    ],
+    "Rao Rubber Industries": [
+      [
+        "SRI VARI ENTERPRISES"
+      ],
+      [
+        "T.S.NO:609, BLOCK NO:9, PALANIYAPPAN STREET, POLLACHI 642001"
+      ],
+      [
+        "GST IN: 33DIGPM0162N1Z6 | MOB: 9488075194 | Email: maharajagrouppvtltd@gmail.com"
+      ],
+      [],
+      [
+        "RAO RUBBER INDUSTRIES - Ledger Account"
+      ],
+      [
+        "K-2/57, DDA MARKET JAHANGIR PURI, DELHI 110033, INDIA"
+      ],
+      [
+        "GST: 07ABYPY5337K1ZK | CELL: 8700038958"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Date",
+        "Particulars",
+        "Vch Type",
+        "Vch Ref.",
+        "Vch No.",
+        "Debit (₹)",
+        "Credit (₹)",
+        "Balance (₹)"
+      ],
+      [
+        "01 Apr 19",
+        "Opening Balance",
+        "",
+        "",
+        "",
+        "0",
+        "0",
+        "0"
+      ],
+      [
+        "24 Aug 21",
+        "TMB OD",
+        "Payment",
+        "",
+        "",
+        "28,320.00",
+        "0",
+        "28,320.00"
+      ],
+      [
+        "",
+        "Closing Balance",
+        "",
+        "",
+        "",
+        "28,320.00",
+        "0",
+        "28,320.00"
+      ]
+    ],
+    "Muthu Metal": [
+      [
+        "SRI VARI ENTERPRISES"
+      ],
+      [
+        "T.S.NO:609, BLOCK NO:9, PALANIYAPPAN STREET, POLLACHI 642001"
+      ],
+      [
+        "GST IN: 33DIGPM0162N1Z6 | MOB: 9488075194 | Email: maharajagrouppvtltd@gmail.com"
+      ],
+      [],
+      [
+        "MUTHU METAL - Ledger Account"
+      ],
+      [
+        "297, MARKET ROAD POLLACHI"
+      ],
+      [
+        "GST: 33ABTPT3174G1Z9 | CELL: 9487685194 / 7904733162"
+      ],
+      [
+        "Period: 01 Apr 2019 To 20 Feb 2026"
+      ],
+      [],
+      [
+        "Date",
+        "Particulars",
+        "Vch Type",
+        "Vch Ref.",
+        "Vch No.",
+        "Debit (₹)",
+        "Credit (₹)",
+        "Balance (₹)"
+      ],
+      [
+        "01 Apr 19",
+        "Opening Balance",
+        "",
+        "",
+        "",
+        "0",
+        "0",
+        "0"
+      ],
+      [
+        "04 Jan 20",
+        "SALES",
+        "Sales",
+        "",
+        "713",
+        "30,512.50",
+        "0",
+        "30,512.50"
+      ],
+      [
+        "04 Jan 20",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "52",
+        "0",
+        "50,771.90",
+        "20,259.40"
+      ],
+      [
+        "08 Jan 20",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "53",
+        "0",
+        "5,439.74",
+        "25,699.14"
+      ],
+      [
+        "01 Mar 20",
+        "SALES",
+        "Sales",
+        "",
+        "817",
+        "2,882.28",
+        "0",
+        "22,816.86"
+      ],
+      [
+        "16 Mar 20",
+        "Purchase",
+        "Purchase",
+        "PURSHASE",
+        "61",
+        "0",
+        "48,920.38",
+        "71,737.24"
+      ],
+      [
+        "01 Apr 20",
+        "Opening Balance",
+        "",
+        "",
+        "",
+        "0",
+        "0",
+        "71,737.24"
+      ],
+      [
+        "10 Jul 20",
+        "SALES",
+        "Sales",
+        "",
+        "11111",
+        "3,110.80",
+        "0",
+        "68,626.44"
+      ],
+      [
+        "21 Jul 20",
+        "SALES",
+        "Sales",
+        "",
+        "11111",
+        "6,003.06",
+        "0",
+        "62,623.38"
+      ],
+      [
+        "23 Jul 20",
+        "SALES",
+        "Sales",
+        "",
+        "11111",
+        "14,063.80",
+        "0",
+        "48,559.58"
+      ]
+    ]
+  }
+}
