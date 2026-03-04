@@ -13,7 +13,7 @@ import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { calculateDealerStatement } from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
-import { uploadInvoicePDF, buildInvoiceFileName } from '@/lib/googleDriveService';
+import { uploadInvoicePDFByMonth, buildInvoiceFileName } from '@/lib/googleDriveService';
 
 export default function Billing() {
     const { dealers, products, createInvoice, updateInvoice, addDealer, transactions } = useData();
@@ -492,14 +492,21 @@ export default function Billing() {
     const globalIGSTAmount = useMemo(() => (subTotal * parseFloat(globalIGST || '0')) / 100, [subTotal, globalIGST]);
 
     const roundOffAmount = useMemo(() => parseFloat(roundOff || '0'), [roundOff]);
+
+    // Helper: round a value to exactly 2 decimal places to avoid JS floating-point drift
+    // e.g. 657.14 + 16.43 + 16.43 + 14.50 = 704.4999999... → rounds to 704.50
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+
     // Product-level totalTax is excluded from invoice total — only global GST counts
-    const invoiceTotal = useMemo(() => subTotal - totalDiscount - globalDiscountAmount +
-        globalCGSTAmount + globalSGSTAmount + globalIGSTAmount +
-        parseFloat(transportCharges || '0') + roundOffAmount,
-        [subTotal, totalDiscount, globalDiscountAmount, globalCGSTAmount, globalSGSTAmount, globalIGSTAmount, transportCharges, roundOffAmount]
-    );
-    const previousBalance = selectedDealer ? selectedDealer.balance : 0;
-    const grandTotal = invoiceTotal + previousBalance;
+    const invoiceTotal = useMemo(() => {
+        const raw = subTotal - totalDiscount - globalDiscountAmount +
+            globalCGSTAmount + globalSGSTAmount + globalIGSTAmount +
+            parseFloat(transportCharges || '0') + roundOffAmount;
+        return r2(raw);
+    }, [subTotal, totalDiscount, globalDiscountAmount, globalCGSTAmount, globalSGSTAmount, globalIGSTAmount, transportCharges, roundOffAmount]);
+
+    const previousBalance = selectedDealer ? r2(selectedDealer.balance) : 0;
+    const grandTotal = r2(invoiceTotal + previousBalance);
 
     const handleAddItem = useCallback(() => {
         if (!itemProduct || !selectedDealer) return;
@@ -745,19 +752,8 @@ export default function Billing() {
             setCreatedInvoiceId(id);
         }
 
-        // Real-time Sync to Google Sheets
-        try {
-            const { syncInvoiceToSheets } = await import('@/lib/googleSheetWriter');
-            await syncInvoiceToSheets(
-                selectedDealer.businessName,
-                (manualInvoiceNo ? `INV${manualInvoiceNo}` : (editInvoiceId || 'NEW')),
-                invoiceTotal,
-                invoiceDate,
-                invoiceItems
-            );
-        } catch (syncError) {
-            console.error('[Billing] Sheets Sync Failed:', syncError);
-        }
+        // Real-time Sync to Google Sheets (disabled — month-wise Drive storage is used instead)
+        // syncInvoiceToSheets has been removed as ERP Invoices tab is no longer needed.
 
         // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
         if (companySettings && selectedDealer) {
@@ -796,12 +792,17 @@ export default function Billing() {
                     const driveFileName = buildInvoiceFileName(
                         invoiceData.referenceId,
                         selectedDealer!.businessName,
-                        new Date(invoiceData.date)
+                        new Date(invoiceDate) // use invoice date → correct month folder
                     );
 
                     console.log('[Billing] Starting automatic Drive upload:', driveFileName);
-                    await uploadInvoicePDF(invoiceBase64, driveFileName, selectedDealer!.businessName);
-                    console.log('[Billing] Automatic Drive upload success!');
+                    // Upload to ERP Invoices / {Month YYYY} / filename.pdf
+                    await uploadInvoicePDFByMonth(
+                        invoiceBase64,
+                        driveFileName,
+                        new Date(invoiceDate)
+                    );
+                    console.log('[Billing] Automatic Drive upload success (month-wise)!');
                 } catch (driveErr) {
                     console.error('[Billing] Automatic Drive upload failed:', driveErr);
                 }

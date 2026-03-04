@@ -16,7 +16,9 @@ export default function SettingsPage() {
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-    const [driveEmail, setDriveEmail] = useState('');
+    const [driveConnected, setDriveConnected] = useState(false);
+    const [driveConnecting, setDriveConnecting] = useState(false);
+    const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
     // â”€â”€â”€ Company & Bank Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [companySettingsId, setCompanySettingsId] = useState<string | null>(null);
@@ -43,8 +45,12 @@ export default function SettingsPage() {
     useEffect(() => {
         const storedUsername = localStorage.getItem('adminUsername') || 'SVadmin';
         setCurrentUsername(storedUsername);
-        const storedDriveEmail = localStorage.getItem('googleDriveEmail') || '';
-        setDriveEmail(storedDriveEmail);
+
+        // Check if Drive is already connected via Electron IPC
+        const electron = (window as any).electron;
+        if (electron?.drive?.isConnected) {
+            electron.drive.isConnected().then((connected: boolean) => setDriveConnected(connected));
+        }
 
         // Load company settings from Supabase
         const loadCompany = async () => {
@@ -118,17 +124,57 @@ export default function SettingsPage() {
         }
     };
 
-    const handleSaveDriveEmail = (e: React.FormEvent) => {
-        e.preventDefault();
-        const trimmed = driveEmail.trim();
-        if (trimmed) {
-            localStorage.setItem('googleDriveEmail', trimmed);
-        } else {
-            localStorage.removeItem('googleDriveEmail');
+    const handleConnectDrive = async () => {
+        const electron = (window as any).electron;
+        if (!electron?.drive?.connect) {
+            setDriveMessage({ type: 'error', text: 'Drive OAuth is only available in the desktop app.' });
+            return;
         }
-        setMessage({ type: 'success', text: trimmed ? 'Google Drive email saved!' : 'Google Drive email cleared.' });
-        setTimeout(() => setMessage(null), 3000);
+
+        const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
+        if (!clientId) {
+            setDriveMessage({ type: 'error', text: 'NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID is not set in .env.local' });
+            return;
+        }
+
+        const redirectUri = 'urn:ietf:wg:oauth:2.0:oob'; // out-of-band (desktop)
+        setDriveConnecting(true);
+        setDriveMessage(null);
+
+        try {
+            // Step 1: Open OAuth window — main process handles loopback redirect automatically
+            const result = await electron.drive.connect(clientId);
+            if (!result) { setDriveMessage({ type: 'error', text: 'Drive connection cancelled.' }); return; }
+
+            const { code, redirectUri: callbackUri } = result;
+
+            // Step 2: Exchange code for tokens via Google
+            const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || '';
+            const resp = await fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    code,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                    redirect_uri: callbackUri,
+                    grant_type: 'authorization_code'
+                })
+            });
+            const tokens = await resp.json();
+            if (tokens.error) throw new Error(tokens.error_description || tokens.error);
+
+            // Step 3: Save tokens to disk via IPC
+            await electron.drive.saveTokens(tokens);
+            setDriveConnected(true);
+            setDriveMessage({ type: 'success', text: 'Google Drive connected! Invoices will now be saved automatically.' });
+        } catch (err: any) {
+            setDriveMessage({ type: 'error', text: err.message || 'Failed to connect Google Drive.' });
+        } finally {
+            setDriveConnecting(false);
+        }
     };
+
 
     const validatePassword = (pwd: string): { valid: boolean; message: string } => {
         if (pwd.length < 8) return { valid: false, message: 'Password must be at least 8 characters' };
@@ -297,29 +343,58 @@ export default function SettingsPage() {
 
                 {/* Google Drive Settings */}
                 <div className="bg-white rounded-xl border border-slate-200 p-6">
-                    <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
                         <HardDrive size={20} className="text-blue-500" />
                         Google Drive
                     </h2>
-                    <p className="text-sm text-slate-500 mb-3">
-                        Enter your Google email to access invoices saved to Drive.
+                    <p className="text-sm text-slate-500 mb-4">
+                        Connect your Google account once to automatically save invoice PDFs to your Drive.
                     </p>
-                    <form onSubmit={handleSaveDriveEmail} className="space-y-4">
-                        <div>
-                            <label className={labelCls}>Google Email</label>
-                            <input
-                                type="email"
-                                value={driveEmail}
-                                onChange={(e) => setDriveEmail(e.target.value)}
-                                className={inputCls}
-                                placeholder="e.g. yourname@gmail.com"
-                            />
-                        </div>
-                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors">
-                            Save Email
+
+                    <div className="flex items-center gap-4">
+                        {driveConnected ? (
+                            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 flex-1">
+                                <Check size={18} className="text-emerald-600 shrink-0" />
+                                <div>
+                                    <p className="text-sm font-semibold text-emerald-700">Google Drive Connected</p>
+                                    <p className="text-xs text-emerald-600">Invoices will be saved to <strong>ERP Invoices / Month Year /</strong> automatically.</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex-1">
+                                <AlertCircle size={18} className="text-amber-600 shrink-0" />
+                                <div>
+                                    <p className="text-sm font-semibold text-amber-700">Not Connected</p>
+                                    <p className="text-xs text-amber-600">Click Connect to enable automatic PDF backup to Google Drive.</p>
+                                </div>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={handleConnectDrive}
+                            disabled={driveConnecting}
+                            className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${driveConnected
+                                ? 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 border border-slate-200'
+                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}
+                        >
+                            {driveConnecting ? (
+                                <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Connecting...</>
+                            ) : driveConnected ? (
+                                <>Reconnect</>
+                            ) : (
+                                <><HardDrive size={16} />Connect Google Drive</>
+                            )}
                         </button>
-                    </form>
+                    </div>
+
+                    {driveMessage && (
+                        <p className={`mt-3 text-sm ${driveMessage.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {driveMessage.text}
+                        </p>
+                    )}
                 </div>
+
 
                 {/* Admin Header */}
                 <div className="flex items-center gap-3">

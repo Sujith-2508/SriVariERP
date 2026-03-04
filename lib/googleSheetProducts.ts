@@ -11,7 +11,48 @@ import { Product } from '@/types';
 
 const PRODUCTS_CACHE_KEY = 'sve_products';
 const CACHE_TIMESTAMP_KEY = 'sve_products_cache_ts';
+const CACHE_TAB_KEY = 'sve_products_tab';          // tracks which tab the cache came from
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+
+// The active sheet tab name — must match googleSheetWriter.ts SHEET_NAME
+const ACTIVE_TAB = 'CurrentProducts';
+
+// If the cache was built from a different tab, wipe it
+function clearStaleTabCache(): void {
+    if (typeof window === 'undefined') return;
+    const cachedTab = localStorage.getItem(CACHE_TAB_KEY);
+    if (cachedTab !== ACTIVE_TAB) {
+        console.log('[Cache] Tab changed from', cachedTab, '→', ACTIVE_TAB, '— clearing stale product cache');
+        localStorage.removeItem(PRODUCTS_CACHE_KEY);
+        localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+        localStorage.setItem(CACHE_TAB_KEY, ACTIVE_TAB);
+    }
+}
+
+// Get cached products from localStorage
+export const getLocalProducts = (): Product[] => {
+    if (typeof window === 'undefined') return [];
+    clearStaleTabCache(); // evict if tab changed
+    const data = localStorage.getItem(PRODUCTS_CACHE_KEY);
+    return data ? JSON.parse(data) : [];
+};
+
+// Save products to localStorage cache (tag with current tab name)
+export const saveLocalProducts = (products: Product[]) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(products));
+    localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+    localStorage.setItem(CACHE_TAB_KEY, ACTIVE_TAB);
+};
+
+// Check if cache is still fresh
+const isCacheFresh = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    clearStaleTabCache(); // evict if tab changed
+    const ts = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+    if (!ts) return false;
+    return (Date.now() - parseInt(ts)) < CACHE_DURATION_MS;
+};
 
 // Known category names from Tally export (these won't be treated as products)
 const KNOWN_CATEGORIES = new Set([
@@ -29,27 +70,6 @@ const SKIP_ENTRIES = new Set([
     'empty box', 'office table', 'old balance',
 ]);
 
-// Get cached products from localStorage
-export const getLocalProducts = (): Product[] => {
-    if (typeof window === 'undefined') return [];
-    const data = localStorage.getItem(PRODUCTS_CACHE_KEY);
-    return data ? JSON.parse(data) : [];
-};
-
-// Save products to localStorage cache
-export const saveLocalProducts = (products: Product[]) => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(products));
-    localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-};
-
-// Check if cache is still fresh
-const isCacheFresh = (): boolean => {
-    if (typeof window === 'undefined') return false;
-    const ts = localStorage.getItem(CACHE_TIMESTAMP_KEY);
-    if (!ts) return false;
-    return (Date.now() - parseInt(ts)) < CACHE_DURATION_MS;
-};
 
 // Parse CSV text into rows
 const parseCSV = (csvText: string): string[][] => {
@@ -192,17 +212,20 @@ const parseTallyFormat = (rows: string[][]): Product[] => {
 };
 
 // Parse structured sheet (with proper column headers)
+// Expected column order: A=Product ID, B=Product Name, C=HSN Code, D=Unit,
+//                        E=Cost Price, F=Selling Price, G=GST%, H=Stock, I=Category
 const parseStructuredFormat = (rows: string[][], headerIndex: number): Product[] => {
     const headers = rows[headerIndex].map(h => h.toLowerCase().trim());
     const colMap = {
         productId: headers.findIndex(h => h.includes('product id')),
-        category: headers.findIndex(h => h.includes('category')),
-        productName: headers.findIndex(h => h.includes('product name')),
+        productName: headers.findIndex(h => h.includes('product name') || h === 'name'),
         hsnCode: headers.findIndex(h => h.includes('hsn')),
-        unit: headers.findIndex(h => h.includes('unit')),
+        unit: headers.findIndex(h => h === 'unit'),
         costPrice: headers.findIndex(h => h.includes('cost')),
-        sellingPrice: headers.findIndex(h => h.includes('selling') || h.includes('price')),
+        sellingPrice: headers.findIndex(h => h.includes('selling')), // must NOT match 'cost price'
         gstRate: headers.findIndex(h => h.includes('gst')),
+        stock: headers.findIndex(h => h === 'stock'),
+        category: headers.findIndex(h => h.includes('category')),
     };
 
     console.log('[GoogleSheet] Column mapping:', colMap);
@@ -214,23 +237,25 @@ const parseStructuredFormat = (rows: string[][], headerIndex: number): Product[]
         if (!productName) continue;
 
         const productId = colMap.productId >= 0 ? row[colMap.productId]?.trim() : `P${String(i - headerIndex).padStart(3, '0')}`;
+        const fallbackId = `P${String(i - headerIndex).padStart(3, '0')}`;
 
         products.push({
-            id: productId || `P${String(i - headerIndex).padStart(3, '0')}`,
-            productId: productId || `P${String(i - headerIndex).padStart(3, '0')}`,
+            id: productId || fallbackId,
+            productId: productId || fallbackId,
             name: productName,
-            category: colMap.category >= 0 ? row[colMap.category]?.trim() || 'Castiron' : 'Castiron',
+            category: colMap.category >= 0 ? row[colMap.category]?.trim() || 'General' : 'General',
             price: colMap.sellingPrice >= 0 ? parseFloat(row[colMap.sellingPrice]) || 0 : 0,
             costPrice: colMap.costPrice >= 0 ? parseFloat(row[colMap.costPrice]) || 0 : 0,
-            stock: 0,
+            stock: colMap.stock >= 0 ? parseInt(row[colMap.stock]) || 0 : 0,
             gstRate: (() => {
                 const rawGst = colMap.gstRate >= 0 ? parseFloat(row[colMap.gstRate]) || 0 : 0;
-                // Normalize: if value > 1 (like 18), it's a percentage; divide by 100 to store as decimal.
+                // Normalize: if value > 1 (like 18), it's a percentage; divide by 100
                 return rawGst > 1 ? rawGst / 100 : rawGst;
             })(),
             hsnCode: colMap.hsnCode >= 0 ? row[colMap.hsnCode]?.trim() || '' : '',
             unit: colMap.unit >= 0 ? row[colMap.unit]?.trim() || 'nos' : 'nos',
-        });
+            rowIndex: i + 1, // 1-indexed sheet row — used for accurate updates/deletes
+        } as Product & { rowIndex: number });
     }
 
     return products;

@@ -1,0 +1,83 @@
+{
+  "rows": [
+    [
+      "RAJA COOKWARES - PRODUCT LIST"
+    ],
+    [
+      "Product Name",
+      "Unit",
+      "Cost Price",
+      "Selling Price",
+      "GST%",
+      "Stock",
+      "Category"
+    ],
+    [
+      "  COOKER"
+    ],
+    [
+      "3L COOKER",
+      "PCS",
+      "0",
+      "657.14",
+      "5",
+      "0",
+      "Cooker"
+    ],
+    [
+      "5L COOKER",
+      "PCS",
+      "0",
+      "838.10",
+      "5",
+      "0",
+      "Cooker"
+    ],
+    [
+      "7.5L COOKER",
+      "PCS",
+      "0",
+      "1,166.67",
+      "5",
+      "0",
+      "Cooker"
+    ],
+    [
+      "10L COOKER",
+      "PCS",
+      "0",
+      "1,285.71",
+      "5",
+      "0",
+      "Cooker"
+    ],
+    [
+      "12L COOKER",
+      "PCS",
+      "0",
+      "1,366.67",
+      "5",
+      "0",
+      "Cooker"
+    ],
+    [
+      "2L SUB JUNIOR P.PAN",
+      "PCS",
+      "0",
+      "647.62",
+      "5",
+      "0",
+      "Cooker"
+    ],
+    [
+      "4L JUNIOR P.PAN",
+      "PCS",
+      "0",
+      "819.05",
+      "5",
+      "0",
+      "Cooker"
+    ]
+  ],
+  "error": null
+}

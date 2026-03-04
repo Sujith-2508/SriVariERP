@@ -57,14 +57,42 @@ export const generateInvoicePDFBase64 = async (
         return words.trim() + ' Only';
     };
 
+    // Helper: clip text to fit within a given mm width at the current font/size
+    const fitText = (text: string, maxWidthMm: number): string => {
+        if (!text) return '';
+        if (doc.getTextWidth(text) <= maxWidthMm) return text;
+        let t = text;
+        while (t.length > 1 && doc.getTextWidth(t) > maxWidthMm) t = t.slice(0, -1);
+        return t;
+    };
+
+    // Helper: short date format DD/MM/YY to save space in narrow cells
+    const shortDate = (dateStr: string): string => {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yy = String(d.getFullYear()).slice(-2);
+        return `${dd}/${mm}/${yy}`;
+    };
+
     // --- Helper for drawing everything BUT the items table ---
     const drawPageTemplate = (pageNum: number, totalPages: number) => {
-        // 1. OUTER BORDER BOX
+        // 1. OUTER BORDER BOX — drawn on EVERY page
         doc.setDrawColor(0);
         doc.setLineWidth(0.5);
         doc.rect(10, 10, 190, 277);
 
-        // 2. HEADER SECTION - Left Side (Company Info)
+        // Page number at bottom of every page
+        const bY = 287;
+        doc.setFontSize(6);
+        doc.setFont('helvetica', 'italic');
+        doc.text(`Page ${pageNum} of ${totalPages}`, 195, bY - 2, { align: 'right' });
+
+        // Pages 2+ — just the outer box, no header
+        if (pageNum > 1) return;
+
+        // 2. HEADER SECTION - Left Side (Company Info) — page 1 only
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.text(company.companyName.toUpperCase(), 12, 16);
@@ -128,11 +156,12 @@ export const generateInvoicePDFBase64 = async (
         doc.setFont('helvetica', 'normal');
         doc.text('Invoice No.', metadataStartX + 2, mY + 4);
         doc.setFont('helvetica', 'bold');
-        doc.text(notes.manualInvoiceNo || invoice.referenceId || '', metadataStartX + 42, mY + 4);
+        doc.text(fitText(notes.manualInvoiceNo || invoice.referenceId || '', 23), metadataStartX + 42, mY + 4);
         doc.setFont('helvetica', 'normal');
         doc.text('Dated', metadataStartX + 67, mY + 4);
+        doc.setFontSize(6);
         doc.setFont('helvetica', 'bold');
-        doc.text(new Date(invoice.date).toLocaleDateString('en-GB'), metadataStartX + 82, mY + 4);
+        doc.text(shortDate(invoice.date?.toString() || ''), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 2: Delivery Note
@@ -140,17 +169,17 @@ export const generateInvoicePDFBase64 = async (
         doc.rect(metadataStartX + 40, mY, 25, rowHeight);
         doc.rect(metadataStartX + 65, mY, 15, rowHeight);
         doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.text('Delivery Note', metadataStartX + 2, mY + 4);
         doc.setFont('helvetica', 'bold');
-        doc.text(notes.deliveryNote || '', metadataStartX + 42, mY + 4);
+        doc.text(fitText(notes.deliveryNote || '', 23), metadataStartX + 42, mY + 4);
         doc.setFontSize(6);
         doc.setFont('helvetica', 'normal');
         doc.text('Mode/Terms of', metadataStartX + 66, mY + 3);
         doc.text('Payment', metadataStartX + 66, mY + 5.5);
-        doc.setFontSize(7);
         doc.setFont('helvetica', 'bold');
-        doc.text(invoice.paymentTerms || 'Immediate', metadataStartX + 82, mY + 4);
+        doc.text(fitText(invoice.paymentTerms || 'Immediate', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 3: Supplier's Ref
@@ -158,16 +187,17 @@ export const generateInvoicePDFBase64 = async (
         doc.rect(metadataStartX + 40, mY, 25, rowHeight);
         doc.rect(metadataStartX + 65, mY, 15, rowHeight);
         doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.text("Supplier's Ref.", metadataStartX + 2, mY + 4);
         doc.setFont('helvetica', 'bold');
-        doc.text(notes.supplierRef || '', metadataStartX + 42, mY + 4);
-        doc.setFontSize(6);
+        doc.text(fitText(notes.supplierRef || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFontSize(5.5);
         doc.setFont('helvetica', 'normal');
-        doc.text('Other Reference(s)', metadataStartX + 66, mY + 4);
-        doc.setFontSize(7);
+        doc.text('Other', metadataStartX + 67, mY + 2.5);
+        doc.text('Reference(s)', metadataStartX + 67, mY + 5);
         doc.setFont('helvetica', 'bold');
-        doc.text(notes.otherRef || '', metadataStartX + 82, mY + 4);
+        doc.text(fitText(notes.otherRef || '', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 4: Buyer's Order No
@@ -175,14 +205,16 @@ export const generateInvoicePDFBase64 = async (
         doc.rect(metadataStartX + 40, mY, 25, rowHeight);
         doc.rect(metadataStartX + 65, mY, 15, rowHeight);
         doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.text("Buyer's Order No.", metadataStartX + 2, mY + 4);
         doc.setFont('helvetica', 'bold');
-        doc.text(notes.buyerOrderNo || '', metadataStartX + 42, mY + 4);
+        doc.text(fitText(notes.buyerOrderNo || '', 23), metadataStartX + 42, mY + 4);
         doc.setFont('helvetica', 'normal');
         doc.text('Dated', metadataStartX + 67, mY + 4);
+        doc.setFontSize(6);
         doc.setFont('helvetica', 'bold');
-        doc.text(notes.buyerOrderDate ? new Date(notes.buyerOrderDate).toLocaleDateString('en-GB') : '', metadataStartX + 82, mY + 4);
+        doc.text(notes.buyerOrderDate ? shortDate(notes.buyerOrderDate) : '', metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 5: Despatch Doc No
@@ -193,13 +225,14 @@ export const generateInvoicePDFBase64 = async (
         doc.setFontSize(6);
         doc.setFont('helvetica', 'normal');
         doc.text('Despatch Document No.', metadataStartX + 2, mY + 4);
-        doc.setFontSize(7);
         doc.setFont('helvetica', 'bold');
-        doc.text(notes.dispatchDocNo || '', metadataStartX + 42, mY + 4);
+        doc.text(fitText(notes.dispatchDocNo || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFontSize(5.5);
         doc.setFont('helvetica', 'normal');
-        doc.text('Vehicle Number', metadataStartX + 67, mY + 4);
+        doc.text('Vehicle', metadataStartX + 67, mY + 2.5);
+        doc.text('Number', metadataStartX + 67, mY + 5);
         doc.setFont('helvetica', 'bold');
-        doc.text(invoice.vehicleNumber || '', metadataStartX + 82, mY + 4);
+        doc.text(fitText(invoice.vehicleNumber || '', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 6: Despatched through
@@ -210,13 +243,12 @@ export const generateInvoicePDFBase64 = async (
         doc.setFontSize(6);
         doc.setFont('helvetica', 'normal');
         doc.text('Despatched through', metadataStartX + 2, mY + 4);
-        doc.setFontSize(7);
         doc.setFont('helvetica', 'bold');
-        doc.text(invoice.vehicleName || '', metadataStartX + 42, mY + 4);
+        doc.text(fitText(invoice.vehicleName || '', 23), metadataStartX + 42, mY + 4);
         doc.setFont('helvetica', 'normal');
         doc.text('Destination', metadataStartX + 67, mY + 4);
         doc.setFont('helvetica', 'bold');
-        doc.text(invoice.destination || dealer.city || '', metadataStartX + 82, mY + 4);
+        doc.text(fitText(invoice.destination || dealer.city || '', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 7: Terms of Delivery
@@ -230,13 +262,6 @@ export const generateInvoicePDFBase64 = async (
         // Vertical divider for the header
         doc.line(105, 18, 105, mY + 10);
         doc.line(10, mY + 10, 200, mY + 10);
-
-        // Footer at the bottom of the page
-        const bY = 287;
-        doc.setFontSize(6);
-        doc.setFont('helvetica', 'italic');
-        doc.text('This is a Computer Generated Invoice', 105, bY - 2, { align: 'center' });
-        doc.text(`Page ${pageNum} of ${totalPages}`, 195, bY - 2, { align: 'right' });
     };
 
     // Prepare item rows
@@ -271,8 +296,17 @@ export const generateInvoicePDFBase64 = async (
     const grandTotal = subtotal + totalTax + transportCharges + roundOffAmount +
         globalCGSTAmount + globalSGSTAmount + globalIGSTAmount;
 
+    // ------------------------------------------------------------------
+    // LAYOUT: calculate where buyer section ends so table starts below it
+    // Metadata right-side always ends at y≈64 (header 8 + 6 rows×6 + terms 10)
+    const HEADER_BOTTOM_Y = 66;
+    const buyerAddrLines = doc.splitTextToSize(dealer.address || '', 90);
+    const estimatedBuyerBottom = 55 + (buyerAddrLines.length * 4) + 4 + (dealer.gstNumber ? 4 : 0);
+    const tableStartY = Math.max(HEADER_BOTTOM_Y, estimatedBuyerBottom + 2);
+    // ------------------------------------------------------------------
+
     autoTable(doc, {
-        startY: 60, // Start later to account for header
+        startY: tableStartY,
         head: [['Sl\nNo.', 'Description of Goods', 'HSN', 'GST', 'Quantity', 'Rate', 'per', 'Disc. %', 'Amount']],
         body: bodyRows,
         theme: 'grid',
@@ -304,7 +338,7 @@ export const generateInvoicePDFBase64 = async (
             7: { cellWidth: 15, halign: 'center' },
             8: { cellWidth: 30, halign: 'right' }
         },
-        margin: { top: 60, bottom: 60, left: 10, right: 10 },
+        margin: { top: 15, bottom: 60, left: 10, right: 10 },
         didDrawPage: (data) => {
             // Draw header on every page
             const totalPages = (doc as any).internal.getNumberOfPages();
@@ -371,7 +405,12 @@ export const generateInvoicePDFBase64 = async (
         headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontSize: 7, lineWidth: 0.3, halign: 'center', fontStyle: 'bold' },
         styles: { fontSize: 7, cellPadding: 1.5, lineColor: [0, 0, 0], lineWidth: 0.3, textColor: [0, 0, 0] },
         columnStyles: { 1: { halign: 'right' }, 5: { halign: 'right' } },
-        margin: { left: 10, right: 10, bottom: 40 }
+        margin: { left: 10, right: 10, bottom: 40, top: 15 }, // top: 15 = just inside outer border on page 2+
+        didDrawPage: (data) => {
+            // Ensure outer border + full header appear on every page this table spans
+            const totalPages = (doc as any).internal.getNumberOfPages();
+            drawPageTemplate(data.pageNumber, totalPages);
+        }
     });
 
     currentY = (doc as any).lastAutoTable.finalY + 5;
@@ -395,11 +434,21 @@ export const generateInvoicePDFBase64 = async (
     doc.setFontSize(6.5); doc.setFont('helvetica', 'normal');
     doc.text('We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.', 12, fY + 28, { maxWidth: 110 });
 
-    doc.line(130, fY - 3, 130, 287);
+    const footerBottom = fY + 36; // total footer block height
+    doc.line(130, fY - 3, 130, footerBottom);   // vertical divider — only content height
     doc.setFontSize(8); doc.setFont('helvetica', 'bold');
     doc.text(`for ${company.companyName.toUpperCase()}`, 165, fY + 2, { align: 'center' });
     try { doc.addImage('/signature.png', 'PNG', 148, fY + 6, 35, 15); } catch { }
-    doc.text('Authorised Signatory', 165, 280, { align: 'center' });
+    doc.text('Authorised Signatory', 165, fY + 24, { align: 'center' });  // just below signature
+
+    // Bottom border to close the footer box
+    doc.setLineWidth(0.3);
+    doc.line(10, footerBottom, 200, footerBottom);
+    doc.line(10, fY - 3, 200, fY - 3);
+
+    // Computer generated footer note
+    doc.setFontSize(7); doc.setFont('helvetica', 'italic');
+    doc.text('This is a Computer Generated Invoice', 105, footerBottom + 4, { align: 'center' });
 
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
@@ -663,7 +712,7 @@ export const generateStatementPDFBase64 = async (
             entry.ref,
             entry.type,
             entry.type === 'Invoice' ? formatCurrencyPDF(entry.amount) : '-',
-            entry.paid > 0 ? formatCurrencyPDF(entry.paid) : '-',
+            entry.type === 'Receipt' ? formatCurrencyPDF(entry.paid) : '-',
             (entry as any).agent || '-'
         ]),
         theme: 'grid',

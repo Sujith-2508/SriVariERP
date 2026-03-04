@@ -17,9 +17,12 @@ const DRIVE_API = 'https://www.googleapis.com/drive/v3/files';
 // Caches
 let cachedDriveToken: { token: string; expires: number } | null = null;
 let cachedRootFolderId: string | null = null;
+let cachedErpInvoicesFolderId: string | null = null;
 const dealerFolderCache: Record<string, { invoices: string; receipts: string }> = {};
+const monthFolderCache: Record<string, string> = {}; // "February 2026" → folderId
 
 const ROOT_FOLDER_NAME = 'SriVari Invoices';
+const ERP_INVOICES_FOLDER = 'ERP Invoices';
 const SUPPLIER_STATEMENTS_FOLDER = 'Supplier Statements';
 const DEALER_STATEMENTS_FOLDER = 'Dealer Statements';
 const DRIVE_EMAIL_KEY = 'googleDriveEmail';
@@ -114,6 +117,23 @@ async function getDriveAccessToken(): Promise<string> {
 
     console.log('[DriveService] Got access token');
     return cachedDriveToken.token;
+}
+
+/**
+ * Get a Drive OAuth token from Electron IPC (user's own account = has storage quota).
+ * Returns null if not running in Electron or Drive not connected yet.
+ */
+async function getOAuthAccessToken(): Promise<string | null> {
+    try {
+        const electron = (window as any).electron;
+        if (electron?.drive?.getAccessToken) {
+            const token = await electron.drive.getAccessToken();
+            if (token) return token;
+        }
+    } catch (e) {
+        // Not in Electron or IPC failed
+    }
+    return null;
 }
 
 // --- Folder Management ---
@@ -439,6 +459,65 @@ export async function uploadTextFile(
     if (!res.ok) throw new Error(`Text upload failed: ${await res.text()}`);
     const data = await res.json();
     return data.id;
+}
+
+/**
+ * Get or create the root "ERP Invoices" folder (shared with configured email).
+ */
+async function getErpInvoicesFolder(token: string): Promise<string> {
+    if (cachedErpInvoicesFolderId) return cachedErpInvoicesFolderId;
+    cachedErpInvoicesFolderId = await findOrCreateSubFolder(token, ERP_INVOICES_FOLDER, null);
+    await shareFolderWithEmail(token, cachedErpInvoicesFolderId);
+    return cachedErpInvoicesFolderId;
+}
+
+/** Month names for folder naming */
+const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+/**
+ * Get or create the month subfolder inside ERP Invoices.
+ * Folder name format: "February 2026", "March 2026", etc.
+ * Uses the invoice date (not today) so backdated invoices land in the right month.
+ */
+async function getMonthFolderId(token: string, invoiceDate: Date): Promise<string> {
+    const monthName = MONTH_NAMES[invoiceDate.getMonth()];
+    const year = invoiceDate.getFullYear();
+    const folderLabel = `${monthName} ${year}`; // e.g. "February 2026"
+
+    if (monthFolderCache[folderLabel]) return monthFolderCache[folderLabel];
+
+    const erpRoot = await getErpInvoicesFolder(token);
+    const monthId = await findOrCreateSubFolder(token, folderLabel, erpRoot);
+    monthFolderCache[folderLabel] = monthId;
+    console.log(`[DriveService] Month folder '${folderLabel}':`, monthId);
+    return monthId;
+}
+
+/**
+ * Upload an invoice PDF to Google Drive organised by invoice month.
+ * Structure: ERP Invoices / {Month YYYY} / filename.pdf
+ *
+ * Uses the user's OAuth token (personal Drive quota) instead of the service
+ * account (which has no storage quota). Falls back with a clear error if the
+ * user hasn't connected their Google Drive account yet.
+ */
+export async function uploadInvoicePDFByMonth(
+    base64Data: string,
+    fileName: string,
+    invoiceDate: Date
+): Promise<{ id: string; webViewLink: string }> {
+    // Prefer user OAuth token (has storage quota) over service account
+    const oauthToken = await getOAuthAccessToken();
+    if (!oauthToken) {
+        throw new Error(
+            'Google Drive not connected. Please go to Settings → Connect Google Drive and sign in once.'
+        );
+    }
+    const monthFolderId = await getMonthFolderId(oauthToken, invoiceDate);
+    return uploadPdfToFolder(oauthToken, base64Data, fileName, monthFolderId);
 }
 
 /**

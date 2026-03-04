@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld('electron', {
     printer: {
         getPrinters: () => ipcRenderer.invoke('printer:get-printers'),
         print: (printerName) => ipcRenderer.invoke('printer:print', { printerName, silent: true })
+    },
+    drive: {
+        isConnected: () => ipcRenderer.invoke('drive:is-connected'),
+        getAccessToken: () => ipcRenderer.invoke('drive:get-access-token'),
+        connect: (clientId) => ipcRenderer.invoke('drive:connect', { clientId }),
+        saveTokens: (tokens) => ipcRenderer.invoke('drive:save-tokens', tokens)
     }
 });
+
 
