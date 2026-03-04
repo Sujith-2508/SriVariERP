@@ -516,16 +516,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: `P${String(productCount).padStart(3, '0')}`,
         };
 
-        // Update local state immediately
+        // Update local state immediately for snappy UX
         const updatedProducts = [newProduct, ...products];
         setProducts(updatedProducts);
         setProductCount(prev => prev + 1);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet directly
-        addProductToSheet(newProduct).catch(e =>
-            console.warn('[DataContext] Could not sync product add to Google Sheet:', e)
-        );
+        // Sync to Google Sheet, then re-read to get authoritative data (with rowIndex)
+        try {
+            await addProductToSheet(newProduct);
+            const { products: sheetProducts } = await readProductsFromSheet();
+            if (sheetProducts.length > 0) {
+                setProducts(sheetProducts);
+                setProductCount(sheetProducts.length + 1);
+                saveLocalProducts(sheetProducts);
+            }
+        } catch (e) {
+            console.warn('[DataContext] Could not sync product add to Google Sheet:', e);
+        }
     };
 
     const updateProduct = async (updatedProduct: Product) => {
@@ -534,18 +542,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return;
         }
 
-        // Update local state immediately
+        // Update local state immediately for snappy UX
         const updatedProducts = products.map(p => p.id === updatedProduct.id ? updatedProduct : p);
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet directly
-        const productIndex = products.findIndex(p => p.id === updatedProduct.id);
-        const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
-        if (rowIndex > 0) {
-            updateProductInSheet(rowIndex, updatedProduct).catch(e =>
-                console.warn('[DataContext] Could not sync product update to Google Sheet:', e)
-            );
+        // Sync to Google Sheet (search by name if rowIndex missing), then re-read
+        try {
+            const productIndex = products.findIndex(p => p.id === updatedProduct.id);
+            const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
+            await updateProductInSheet(rowIndex, updatedProduct);
+            const { products: sheetProducts } = await readProductsFromSheet();
+            if (sheetProducts.length > 0) {
+                setProducts(sheetProducts);
+                saveLocalProducts(sheetProducts);
+            }
+        } catch (e) {
+            console.warn('[DataContext] Could not sync product update to Google Sheet:', e);
         }
     };
 
@@ -554,17 +567,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const product = products.find(p => p.id === id);
         const productIndex = products.findIndex(p => p.id === id);
 
-        // Update local state immediately
+        // Update local state immediately for snappy UX
         const updatedProducts = products.filter(p => p.id !== id);
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet directly
-        const rowIndex = (product as any)?.rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
-        if (rowIndex > 0 || product?.name) {
-            deleteProductFromSheet(rowIndex, product?.name).catch(e =>
-                console.warn('[DataContext] Could not sync product delete to Google Sheet:', e)
-            );
+        // Sync deletion to Google Sheet (physically removes the row), then re-read
+        try {
+            const rowIndex = (product as any)?.rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
+            if (rowIndex > 0 || product?.name) {
+                await deleteProductFromSheet(rowIndex, product?.name);
+            }
+            const { products: sheetProducts } = await readProductsFromSheet();
+            if (sheetProducts.length > 0) {
+                setProducts(sheetProducts);
+                setProductCount(sheetProducts.length + 1);
+                saveLocalProducts(sheetProducts);
+            }
+        } catch (e) {
+            console.warn('[DataContext] Could not sync product delete to Google Sheet:', e);
         }
     };
 
@@ -716,9 +737,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 vehicle_name: invoiceData?.vehicleName,
                 vehicle_number: invoiceData?.vehicleNumber,
                 destination: invoiceData?.destination,
-                transport_charges: transportCharges,
+                transport_charges: invoiceData?.transportCharges || 0,
                 payment_terms: invoiceData?.paymentTerms,
-                discount_percent: discountPercent,
+                discount_percent: invoiceData?.discountPercent || 0,
                 notes: invoiceData?.notes,
                 // Persist calculation results
                 cogs: totalCOGS,

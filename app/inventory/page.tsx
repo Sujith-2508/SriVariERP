@@ -1,14 +1,20 @@
 'use client';
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
-import { Search, Edit2, Trash2, Plus, X, Package, RefreshCw } from 'lucide-react';
+import { Search, Edit2, Trash2, Plus, X, Package, RefreshCw, ChevronDown, Tag } from 'lucide-react';
 import { Product } from '@/types';
 
 export default function Inventory() {
     const { products, addProduct, updateProduct, deleteProduct } = useData();
     const [searchTerm, setSearchTerm] = useState('');
+    const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
+
+    // Category dropdown state
+    const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+    const [categorySearch, setCategorySearch] = useState('');
+    const categoryDropdownRef = useRef<HTMLDivElement>(null);
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -63,6 +69,12 @@ export default function Inventory() {
         gstRef
     ];
     const { handleKeyDown: handleProductKeyDown } = useEnterKeyNavigation(productFieldRefs);
+
+    // Derive unique categories from loaded products
+    const uniqueCategories = useMemo(() => {
+        const cats = new Set(products.map(p => p.category).filter(Boolean));
+        return Array.from(cats).sort();
+    }, [products]);
 
     const filteredProducts = useMemo(() => {
         return products
@@ -121,7 +133,10 @@ export default function Inventory() {
 
     const handleDelete = (id: string) => {
         if (window.confirm('Are you sure you want to delete this product?')) {
-            deleteProduct(id);
+            setSyncStatus('syncing');
+            deleteProduct(id)
+                .then(() => { setSyncStatus('done'); setTimeout(() => setSyncStatus('idle'), 2000); })
+                .catch(() => { setSyncStatus('error'); setTimeout(() => setSyncStatus('idle'), 3000); });
         }
     };
 
@@ -149,11 +164,11 @@ export default function Inventory() {
             gstRate: (Number(formData.gstRate) || 0) / 100, // Convert percentage back to decimal
         } as Product;
 
-        if (editingProduct) {
-            updateProduct(finalData);
-        } else {
-            addProduct(finalData);
-        }
+        setSyncStatus('syncing');
+        const op = editingProduct ? updateProduct(finalData) : addProduct(finalData);
+        op
+            .then(() => { setSyncStatus('done'); setTimeout(() => setSyncStatus('idle'), 2000); })
+            .catch(() => { setSyncStatus('error'); setTimeout(() => setSyncStatus('idle'), 3000); });
         setIsModalOpen(false);
     };
 
@@ -177,6 +192,19 @@ export default function Inventory() {
 
     return (
         <div className="p-6 h-full overflow-y-auto relative" >
+
+            {/* Sync status toast */}
+            {syncStatus !== 'idle' && (
+                <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-xl text-sm font-semibold flex items-center gap-2 transition-all animate-in fade-in slide-in-from-bottom-2 ${syncStatus === 'syncing' ? 'bg-blue-600 text-white' :
+                    syncStatus === 'done' ? 'bg-emerald-600 text-white' :
+                        'bg-red-500 text-white'
+                    }`}>
+                    {syncStatus === 'syncing' && <RefreshCw size={15} className="animate-spin" />}
+                    {syncStatus === 'syncing' ? 'Syncing to Google Sheet…' :
+                        syncStatus === 'done' ? '✓ Synced to Google Sheet' :
+                            '✗ Sync failed (saved locally)'}
+                </div>
+            )}
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800">Inventory & Stock</h1>
@@ -214,57 +242,69 @@ export default function Inventory() {
                             <tr>
                                 <th className="p-4">Product ID</th>
                                 <th className="p-4">Product Name</th>
+                                <th className="p-4">HSN Code</th>
                                 <th className="p-4">Category</th>
                                 <th className="p-4 text-right">Price</th>
                                 <th className="p-4 text-center">Stock</th>
-                                <th className="p-4 text-center">Status</th>
+                                <th className="p-4 text-center">GST%</th>
                                 <th className="p-4 text-center">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {filteredProducts.map(p => (
-                                <tr key={p.id} className="hover:bg-slate-50">
-                                    <td className="p-4 font-mono text-slate-600 font-bold">{p.productId}</td>
-                                    <td className="p-4 font-medium text-slate-800">{p.name}</td>
-                                    <td className="p-4 text-slate-600">
-                                        <span className="bg-slate-100 px-2 py-1 rounded text-xs">{p.category}</span>
-                                    </td>
-                                    <td className="p-4 text-right font-medium">₹{p.price.toLocaleString()}</td>
-                                    <td className="p-4 text-center font-bold">{p.stock}</td>
-                                    <td className="p-4 text-center">
-                                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${p.stock > 50 ? 'bg-green-100 text-green-700' :
-                                            p.stock > 0 ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'
-                                            }`}>
-                                            {p.stock > 50 ? 'In Stock' : p.stock > 0 ? 'Low Stock' : 'Out of Stock'}
-                                        </span>
-                                    </td>
-                                    <td className="p-4">
-                                        <div className="flex items-center justify-center gap-1">
-                                            <button
-                                                onClick={() => handleOpenStockUpdate(p)}
-                                                className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                                                title="Update Stock"
-                                            >
-                                                <RefreshCw size={16} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleOpenEdit(p)}
-                                                className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                                title="Edit Product"
-                                            >
-                                                <Edit2 size={16} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDelete(p.id)}
-                                                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                title="Delete Product"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                            {filteredProducts.map(p => {
+                                // Normalise GST for display: stored as decimal (0.05) or whole (5)
+                                const gstDisplay = p.gstRate > 0 && p.gstRate < 1
+                                    ? (p.gstRate * 100).toFixed(0)
+                                    : p.gstRate.toFixed(0);
+                                return (
+                                    <tr key={p.id} className="hover:bg-slate-50">
+                                        <td className="p-4 font-mono text-slate-600 font-bold">{p.productId}</td>
+                                        <td className="p-4 font-medium text-slate-800">{p.name}</td>
+                                        <td className="p-4 text-slate-500 font-mono text-xs">
+                                            {p.hsnCode ? (
+                                                <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded font-medium">{p.hsnCode}</span>
+                                            ) : (
+                                                <span className="text-slate-300">—</span>
+                                            )}
+                                        </td>
+                                        <td className="p-4 text-slate-600">
+                                            <span className="bg-slate-100 px-2 py-1 rounded text-xs">{p.category}</span>
+                                        </td>
+                                        <td className="p-4 text-right font-medium">₹{p.price.toLocaleString()}</td>
+                                        <td className="p-4 text-center font-bold">{p.stock}</td>
+                                        <td className="p-4 text-center">
+                                            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-semibold">
+                                                {gstDisplay}%
+                                            </span>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <button
+                                                    onClick={() => handleOpenStockUpdate(p)}
+                                                    className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                                    title="Update Stock"
+                                                >
+                                                    <RefreshCw size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleOpenEdit(p)}
+                                                    className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                    title="Edit Product"
+                                                >
+                                                    <Edit2 size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(p.id)}
+                                                    className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                    title="Delete Product"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -301,17 +341,80 @@ export default function Inventory() {
                                 />
                             </div>
 
-                            <div>
+                            {/* Category — Custom Themed Dropdown */}
+                            <div className="relative" ref={categoryDropdownRef}>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                                <input
-                                    ref={categoryRef}
-                                    type="text"
-                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                    value={formData.category}
-                                    onChange={e => setFormData({ ...formData, category: e.target.value })}
-                                    onKeyDown={(e) => handleProductKeyDown(e, 1)}
-                                    placeholder="Enter Category"
-                                />
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowCategoryDropdown(!showCategoryDropdown); setCategorySearch(''); }}
+                                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white flex items-center justify-between text-left"
+                                >
+                                    <span className={formData.category ? 'text-slate-900' : 'text-slate-400'}>
+                                        {formData.category || 'Select or create a category'}
+                                    </span>
+                                    <ChevronDown size={16} className={`text-slate-500 transition-transform ${showCategoryDropdown ? 'rotate-180' : ''}`} />
+                                </button>
+
+                                {showCategoryDropdown && (
+                                    <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+                                        {/* Search inside dropdown */}
+                                        <div className="p-2 border-b border-slate-100">
+                                            <input
+                                                autoFocus
+                                                type="text"
+                                                placeholder="Search or type new category…"
+                                                value={categorySearch}
+                                                onChange={e => setCategorySearch(e.target.value)}
+                                                onKeyDown={e => {
+                                                    if (e.key === 'Enter' && categorySearch.trim()) {
+                                                        e.preventDefault();
+                                                        setFormData({ ...formData, category: categorySearch.trim() });
+                                                        setShowCategoryDropdown(false);
+                                                    }
+                                                    if (e.key === 'Escape') setShowCategoryDropdown(false);
+                                                }}
+                                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-400"
+                                            />
+                                        </div>
+
+                                        {/* Existing categories */}
+                                        <ul className="max-h-48 overflow-y-auto py-1">
+                                            {uniqueCategories
+                                                .filter(c => c.toLowerCase().includes(categorySearch.toLowerCase()))
+                                                .map(cat => (
+                                                    <li key={cat}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setFormData({ ...formData, category: cat }); setShowCategoryDropdown(false); }}
+                                                            className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-emerald-50 hover:text-emerald-700 transition-colors ${formData.category === cat ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-700'
+                                                                }`}
+                                                        >
+                                                            <Tag size={12} className="opacity-50" />
+                                                            {cat}
+                                                        </button>
+                                                    </li>
+                                                ))}
+
+                                            {uniqueCategories.filter(c => c.toLowerCase().includes(categorySearch.toLowerCase())).length === 0 && (
+                                                <li className="px-4 py-2 text-sm text-slate-400 italic">No matching categories</li>
+                                            )}
+                                        </ul>
+
+                                        {/* Create new */}
+                                        {categorySearch.trim() && !uniqueCategories.find(c => c.toLowerCase() === categorySearch.toLowerCase()) && (
+                                            <div className="border-t border-slate-100 p-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setFormData({ ...formData, category: categorySearch.trim() }); setShowCategoryDropdown(false); }}
+                                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg font-medium transition-colors"
+                                                >
+                                                    <Plus size={14} />
+                                                    Create &ldquo;{categorySearch.trim()}&rdquo;
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             <div>

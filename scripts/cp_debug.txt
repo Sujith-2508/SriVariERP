@@ -1,0 +1,24 @@
+=== ALL TABS ===
+  [1373735349] "List of Stock Items "
+  [516973764] "Updated Stock Items"
+  [1824736360] "CurrentProducts"
+  [1982125554] "ERP Invoices"
+
+=== TAB: "List of Stock Items " (first 5 rows) ===
+Total rows: 301
+
+=== TAB: "Updated Stock Items" (first 5 rows) ===
+Row 1: ["Product Name","","","Unit","Cost Price","Selling Price","GST%","Stock","Category"]
+Row 2: ["10\"single Handle Castiron Tawa","","","nos","0","0","0","0","Castiron"]
+Row 3: ["12\"castiron Grillpan","","","nos","0","0","0","0","Castiron"]
+Row 4: ["12\"double Handle Dosa Tawa","","","nos","0","0","0","0","Castiron"]
+Row 5: ["5 \"castiron Thalip Karandi","","","nos","0","0","0","0","Castiron"]
+Total rows: 270
+
+=== TAB: "CurrentProducts" (first 5 rows) ===
+Row 1: ["RAJA COOKWARES - PRODUCT LIST"]
+Row 2: ["Product Name","Unit","Cost Price","Selling Price","GST%","Stock","Category"]
+Row 3: ["  COOKER"]
+Row 4: ["3L COOKER","PCS","0","657.14","5","0","Cooker"]
+Row 5: ["5L COOKER","PCS","0","838.10","5","0","Cooker"]
+Total rows: 81

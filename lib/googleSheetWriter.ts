@@ -4,26 +4,26 @@
  * Direct client-side Google Sheets API write operations using service account JWT auth.
  * Works with static Next.js export (no API routes needed).
  * 
- * Sheet structure (ProdData tab):
+ * Sheet structure (CurrentProducts tab):
  * Column A: Product Name
- * Column B: Category
- * Column C: HSN Code
- * Column D: Unit
- * Column E: Cost Price
- * Column F: Selling Price
- * Column G: GST%
- * Column H: Stock
+ * Column B: HSN Code
+ * Column C: Unit
+ * Column D: Cost Price
+ * Column E: Selling Price
+ * Column F: GST%
+ * Column G: Stock
+ * Column H: Category
  */
 
 import { Product } from '@/types';
 
 const SPREADSHEET_ID = '1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0';
-let SHEET_NAME = 'Updated Stock Items';
+let SHEET_NAME = 'CurrentProducts';
 const SHEETS_API_BASE = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
-// Column Layout: A:Name, D:Unit, E:Cost, F:Price, G:GST, H:Stock, I:Category
-const HEADER_ROW = ['Product Name', '', '', 'Unit', 'Cost Price', 'Selling Price', 'GST%', 'Stock', 'Category'];
+// Column Layout: A:Product ID, B:Name, C:HSN Code, D:Unit, E:Cost Price, F:Selling Price, G:GST%, H:Stock, I:Category
+const HEADER_ROW = ['Product ID', 'Product Name', 'HSN Code', 'Unit', 'Cost Price', 'Selling Price', 'GST%', 'Stock', 'Category'];
 
-// Check if the "Updated Stock Items" tab exists, if not create it
+// Check if the "CurrentProducts" tab exists, if not create it
 async function ensureTabExists(): Promise<string> {
     try {
         const token = await getAccessToken();
@@ -50,9 +50,9 @@ async function ensureTabExists(): Promise<string> {
                         }]
                     }
                 );
-                // Add headers to the new sheet
+                const headerRange = `${SHEET_NAME}!A1:I1`;
                 await sheetsRequest(
-                    `/values/${SHEET_NAME}!A1:I1?valueInputOption=USER_ENTERED`,
+                    `/values/${headerRange}?valueInputOption=USER_ENTERED`,
                     'PUT',
                     { values: [HEADER_ROW] }
                 );
@@ -64,28 +64,62 @@ async function ensureTabExists(): Promise<string> {
     return SHEET_NAME;
 }
 
-// Resolver for backward compatibility or dynamic needs
+// Return the sheet name directly — "Current Products" tab already exists
 async function getSheetName(): Promise<string> {
-    await ensureTabExists();
     return SHEET_NAME;
 }
 
-// Find a row index by product name in Column A
+// Find a row index by product name in Column B (1-indexed, since A=Product ID now)
 async function findRowByName(name: string): Promise<number> {
     try {
         const sheetName = await getSheetName();
-        const data = await sheetsRequest(`/values/${sheetName}!A:A`);
+        const data = await sheetsRequest(`/values/${sheetName}!B:B`);
         const rows = data.values || [];
 
-        // Skip potential top headers, find the exact match
         for (let i = 0; i < rows.length; i++) {
-            if (rows[i][0]?.trim() === name.trim()) {
+            if (rows[i][0]?.trim().toLowerCase() === name.trim().toLowerCase()) {
                 return i + 1; // Return 1-indexed row number
             }
         }
         return -1;
     } catch (e) {
         console.error('[SheetsWriter] Failed to find row by name:', e);
+        return -1;
+    }
+}
+
+// Get the sheet's numeric ID (needed for row deletion)
+async function getSheetId(): Promise<number> {
+    const token = await getAccessToken();
+    const response = await fetch(
+        `${SHEETS_API_BASE}?fields=sheets.properties`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    if (!response.ok) throw new Error('Could not fetch sheet properties');
+    const data = await response.json();
+    const sheet = (data.sheets || []).find((s: any) => s.properties.title === SHEET_NAME);
+    if (!sheet) throw new Error(`Sheet "${SHEET_NAME}" not found`);
+    return sheet.properties.sheetId;
+}
+
+// Find the last row index (1-indexed) belonging to a given category
+// Looks at column I (index 8 → 0-based col 8) for the category value
+async function findLastRowOfCategory(category: string): Promise<number> {
+    try {
+        const sheetName = await getSheetName();
+        const data = await sheetsRequest(`/values/${sheetName}!A:I`);
+        const rows: string[][] = data.values || [];
+
+        let lastMatchRow = -1;
+        for (let i = 0; i < rows.length; i++) {
+            const rowCategory = rows[i][8]?.trim().toLowerCase() || '';
+            if (rowCategory === category.trim().toLowerCase()) {
+                lastMatchRow = i + 1; // 1-indexed
+            }
+        }
+        return lastMatchRow;
+    } catch (e) {
+        console.error('[SheetsWriter] Failed to find last row of category:', e);
         return -1;
     }
 }
@@ -227,47 +261,79 @@ async function sheetsRequest(path: string, method: string = 'GET', body?: any): 
     return response.json();
 }
 
-// Convert product to sheet row values (Dedicated ERP layout)
+// Convert product to sheet row — matches CurrentProducts tab 9-column layout:
+// A:Product ID, B:Name, C:HSN Code, D:Unit, E:Cost Price, F:Selling Price, G:GST%, H:Stock, I:Category
 function productToRow(product: Product | any): string[] {
-    // GST should be written as a whole number (e.g., 5 instead of 0.05)
-    // If it's a decimal like 0.05, convert it to 5
+    // GST stored as decimal (0.05) → write as whole number (5)
     let gstValue = parseFloat(product.gstRate || 0);
-    if (gstValue > 0 && gstValue < 1) {
-        gstValue = gstValue * 100;
-    }
+    if (gstValue > 0 && gstValue < 1) gstValue = gstValue * 100;
 
-    const row = [];
-    row[0] = product.name || ''; // Column A
-    row[1] = product.productId || ''; // Column B (Product ID)
-    row[2] = product.hsnCode || ''; // Column C (HSN Code)
-    row[3] = product.unit || 'nos'; // Column D
-    row[4] = String(product.costPrice || 0); // Column E
-    row[5] = String(product.price || 0); // Column F
-    row[6] = String(gstValue); // Column G
-    row[7] = String(product.stock || 0); // Column H
-    row[8] = product.category || 'General'; // Column I
-
-    return row;
+    return [
+        product.productId || product.id || '',  // A: Product ID
+        product.name || '',                     // B: Product Name
+        product.hsnCode || '',                  // C: HSN Code
+        product.unit || 'nos',                  // D: Unit
+        String(product.costPrice || 0),         // E: Cost Price
+        String(product.price || 0),             // F: Selling Price
+        String(gstValue),                       // G: GST%
+        String(product.stock || 0),             // H: Stock
+        product.category || 'General',          // I: Category
+    ];
 }
 
-// Add a new product (Search for existing name first, then update or append)
+// Add a new product, inserting after the last row of its category for grouping
 export async function addProductToSheet(product: Product | any): Promise<boolean> {
     try {
+        // If the product already exists, update it instead
         const existingRowIndex = await findRowByName(product.name);
-        const sheetName = await getSheetName();
-
         if (existingRowIndex > 0) {
             console.log('[SheetsWriter] Product already exists, updating row', existingRowIndex);
             return await updateProductInSheet(existingRowIndex, product);
         }
 
-        await sheetsRequest(
-            `/values/${sheetName}!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-            'POST',
-            { values: [productToRow(product)] }
-        );
+        const sheetName = await getSheetName();
+        const row = productToRow(product);
 
-        console.log('[SheetsWriter] Product added to sheet:', product.name);
+        // Try to insert after the last product of the same category
+        const lastCategoryRow = product.category
+            ? await findLastRowOfCategory(product.category)
+            : -1;
+
+        if (lastCategoryRow > 0) {
+            // Insert a new row after the last product in this category using batchUpdate
+            const sheetId = await getSheetId();
+            // Insert blank row after lastCategoryRow (0-indexed: lastCategoryRow)
+            await sheetsRequest(':batchUpdate', 'POST', {
+                requests: [{
+                    insertDimension: {
+                        range: {
+                            sheetId,
+                            dimension: 'ROWS',
+                            startIndex: lastCategoryRow,   // 0-indexed (insert after 1-indexed row)
+                            endIndex: lastCategoryRow + 1,
+                        },
+                        inheritFromBefore: true,
+                    }
+                }]
+            });
+            // Write product data to the newly inserted row
+            const newRow = lastCategoryRow + 1; // 1-indexed
+            await sheetsRequest(
+                `/values/${sheetName}!A${newRow}:I${newRow}?valueInputOption=USER_ENTERED`,
+                'PUT',
+                { values: [row] }
+            );
+            console.log('[SheetsWriter] Product added under category', product.category, 'at row', newRow);
+        } else {
+            // Category not found or no category – append at the end
+            await sheetsRequest(
+                `/values/${sheetName}!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+                'POST',
+                { values: [row] }
+            );
+            console.log('[SheetsWriter] Product appended (category not found):', product.name);
+        }
+
         return true;
     } catch (error: any) {
         console.error('[SheetsWriter] Failed to add product:', error.message);
@@ -305,7 +371,7 @@ export async function updateProductInSheet(rowIndex: number, product: Product | 
     }
 }
 
-// Delete a product (clear the row, search by name if rowIndex missing)
+// Delete a product by physically removing its row from the sheet
 export async function deleteProductFromSheet(rowIndex: number, productName?: string): Promise<boolean> {
     try {
         let finalRowIndex = rowIndex;
@@ -322,14 +388,24 @@ export async function deleteProductFromSheet(rowIndex: number, productName?: str
             return true; // Already gone or not found
         }
 
-        const sheetName = await getSheetName();
-        await sheetsRequest(
-            `/values/${sheetName}!A${finalRowIndex}:I${finalRowIndex}?valueInputOption=USER_ENTERED`,
-            'PUT',
-            { values: [['', '', '', '', '', '', '', '', '']] }
-        );
+        // Get the numeric sheet ID (needed for batchUpdate deleteDimension)
+        const sheetId = await getSheetId();
 
-        console.log('[SheetsWriter] Product deleted from sheet at row', finalRowIndex);
+        // Use deleteDimension to physically remove the row (0-indexed range)
+        await sheetsRequest(':batchUpdate', 'POST', {
+            requests: [{
+                deleteDimension: {
+                    range: {
+                        sheetId,
+                        dimension: 'ROWS',
+                        startIndex: finalRowIndex - 1,  // 0-indexed
+                        endIndex: finalRowIndex,         // exclusive
+                    }
+                }
+            }]
+        });
+
+        console.log('[SheetsWriter] Product row deleted from sheet:', productName, '(row', finalRowIndex, ')');
         return true;
     } catch (error: any) {
         console.error('[SheetsWriter] Failed to delete product:', error.message);
@@ -337,51 +413,91 @@ export async function deleteProductFromSheet(rowIndex: number, productName?: str
     }
 }
 
-// Read all products via Sheets API (more reliable than CSV for structured data)
+// Read all products via Sheets API — matches CurrentProducts tab layout:
+// A=Product ID, B=Product Name, C=HSN Code, D=Unit, E=Cost Price, F=Selling Price, G=GST%, H=Stock, I=Category
 export async function readProductsFromSheet(): Promise<{ products: Product[]; format: string }> {
     try {
         const sheetName = await getSheetName();
-        const data = await sheetsRequest(`/values/${sheetName}!A:I`);
-        const rows = data.values || [];
+        const data = await sheetsRequest(`/values/${sheetName}!A:I`);  // include all 9 columns
+        const rows: string[][] = data.values || [];
 
         if (rows.length < 2) {
             return { products: [], format: 'empty' };
         }
 
-        // Find header row (usually index 0 in the clean tab)
+        // Find header row: the first row containing "product name" or "product id"
         let headerIndex = -1;
         for (let i = 0; i < Math.min(rows.length, 5); i++) {
-            const row = rows[i].map((c: string) => c?.toLowerCase().trim() || '');
-            if (row.some((c: string) => c.includes('product name'))) {
+            const lower = rows[i].map((c: string) => (c || '').toLowerCase().trim());
+            if (lower.some((c: string) => c.includes('product name') || c.includes('product id'))) {
                 headerIndex = i;
                 break;
             }
         }
-
         if (headerIndex === -1) headerIndex = 0;
 
+        // Build column index map from header row names
+        // New layout: A=Product ID(0), B=Name(1), C=HSN(2), D=Unit(3),
+        //             E=Cost Price(4), F=Selling Price(5), G=GST%(6), H=Stock(7), I=Category(8)
+        const headers = (rows[headerIndex] || []).map((c: string) => (c || '').toLowerCase().trim());
+        const col = {
+            productId: headers.findIndex((h: string) => h.includes('product id')),
+            name: headers.findIndex((h: string) => h.includes('product name') || h === 'name'),
+            hsn: headers.findIndex((h: string) => h.includes('hsn')),
+            unit: headers.findIndex((h: string) => h === 'unit'),
+            cost: headers.findIndex((h: string) => h.includes('cost')),
+            price: headers.findIndex((h: string) => h.includes('selling')),  // 'selling price' only
+            gst: headers.findIndex((h: string) => h.includes('gst')),
+            stock: headers.findIndex((h: string) => h === 'stock'),
+            category: headers.findIndex((h: string) => h.includes('category')),
+        };
+
+        console.log('[SheetsWriter] Column map:', col);
+
+        const parseNum = (val: string) => parseFloat((val || '').replace(/,/g, '')) || 0;
+
         const products: Product[] = [];
+        let productNum = 1;
+
         for (let i = headerIndex + 1; i < rows.length; i++) {
             const row = rows[i];
-            const name = row[0]?.trim();
+            const name = col.name >= 0 ? (row[col.name] || '').trim() : '';
             if (!name) continue;
 
-            // Updated Mapping: A:Name, D:Unit, E:Cost, f:Price, G:GST, H:Stock, I:Category
+            // Skip category section header rows (only one cell has content, rest empty)
+            const hasData = (col.unit >= 0 && (row[col.unit] || '').trim())
+                || (col.price >= 0 && (row[col.price] || '').trim())
+                || (col.category >= 0 && (row[col.category] || '').trim());
+            if (!hasData) {
+                console.log('[SheetsWriter] Skipping section header:', name);
+                continue;
+            }
+
+            const sheetProductId = col.productId >= 0 ? (row[col.productId] || '').trim() : '';
+            const productId = sheetProductId || `P${String(productNum).padStart(3, '0')}`;
+
+            const rawGst = col.gst >= 0 ? parseNum(row[col.gst]) : 0;
+            // Normalize GST: whole number (e.g. 5) stays as-is; decimal (0.05) → 5
+            const gstRate = rawGst > 0 && rawGst < 1 ? rawGst * 100 : rawGst;
+
             products.push({
-                id: `P${String(i - headerIndex).padStart(3, '0')}`,
-                productId: `P${String(i - headerIndex).padStart(3, '0')}`,
-                name: name,
-                category: row[8]?.trim() || row[1]?.trim() || 'General',
-                hsnCode: row[2]?.trim() || '',
-                unit: row[3]?.trim() || 'nos',
-                costPrice: parseFloat(row[4]) || 0,
-                price: parseFloat(row[5]) || 0,
-                gstRate: parseFloat(row[6]) || 0,
-                stock: parseInt(row[7]) || 0,
+                id: productId,
+                productId,
+                name,
+                category: col.category >= 0 ? (row[col.category] || '').trim() || 'General' : 'General',
+                unit: col.unit >= 0 ? (row[col.unit] || '').trim() || 'nos' : 'nos',
+                hsnCode: col.hsn >= 0 ? (row[col.hsn] || '').trim() : '',
+                costPrice: col.cost >= 0 ? parseNum(row[col.cost]) : 0,
+                price: col.price >= 0 ? parseNum(row[col.price]) : 0,
+                gstRate,
+                stock: col.stock >= 0 ? parseInt((row[col.stock] || '').replace(/,/g, '')) || 0 : 0,
                 rowIndex: i + 1,
             } as Product & { rowIndex: number });
+
+            productNum++;
         }
 
+        console.log('[SheetsWriter] Loaded', products.length, 'products from', sheetName);
         return { products, format: 'structured' };
     } catch (error: any) {
         console.error('[SheetsWriter] Failed to read products:', error.message);
