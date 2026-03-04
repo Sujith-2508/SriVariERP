@@ -12,6 +12,7 @@ import PrintableInvoice from '@/components/PrintableInvoice';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { calculateDealerStatement } from '@/lib/utils';
+import { getISTDateString } from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
 import { uploadInvoicePDFByMonth, buildInvoiceFileName } from '@/lib/googleDriveService';
 
@@ -184,7 +185,7 @@ export default function Billing() {
     const [manualInvoiceNo, setManualInvoiceNo] = useState('');
 
     // Invoice Date
-    const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+    const [invoiceDate, setInvoiceDate] = useState(getISTDateString());
     const [invoiceNoExists, setInvoiceNoExists] = useState(false);
 
     const checkInvoiceNumberExists = (no: string) => {
@@ -511,7 +512,7 @@ export default function Billing() {
     const handleAddItem = useCallback(() => {
         if (!itemProduct || !selectedDealer) return;
 
-        const qty = parseInt(itemQty) || 1;
+        const qty = parseFloat(itemQty) || 1;
 
         // Check available stock (total stock minus what's already in this invoice)
         const alreadyReserved = reservedStock[itemProduct.id] || 0;
@@ -615,7 +616,7 @@ export default function Billing() {
             return;
         }
 
-        const qty = parseInt(value);
+        const qty = parseFloat(value);
         if (isNaN(qty) || qty < 0) return;
 
         const newItems = [...invoiceItems];
@@ -960,12 +961,26 @@ export default function Billing() {
             const noteText = `Cheque Return${refNote} – Reason: ${crReason}`;
 
             // Create invoice to increase balance
-            await createInvoice(
+            const { refId: newInvoiceRef } = await createInvoice(
                 crDealer.id,
                 [],
                 amountNum,
                 { notes: noteText } as any
             );
+
+            // Sync to Google Sheets ERP Payments (global list)
+            try {
+                const { syncPaymentToSheets } = await import('@/lib/googleSheetWriter');
+                await syncPaymentToSheets(
+                    crDealer.businessName,
+                    newInvoiceRef,
+                    -amountNum, // negative so it shows as debit/bounced
+                    'Cheque Return',
+                    'System'
+                );
+            } catch (syncErr) {
+                console.warn('[Billing] Cheque Return sheet sync failed:', syncErr);
+            }
 
             // Send WhatsApp statement with updated balance
             if (companySettings && crDealer.phone && window.electron?.whatsapp) {
@@ -979,7 +994,7 @@ export default function Billing() {
                             type: TransactionType.INVOICE,
                             amount: amountNum,
                             date: new Date(),
-                            referenceId: `CHQ-RETURN`,
+                            referenceId: newInvoiceRef,
                             notes: noteText
                         };
                         const filteredTxns = transactions.filter(t => t.customerId === crDealer.id);
@@ -1153,7 +1168,7 @@ export default function Billing() {
                             Cheque Return
                         </button>
                         <button
-                            onClick={handleNewInvoice}
+                            onClick={() => handleNewInvoice()}
                             className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl hover:bg-emerald-700 transition-all flex items-center gap-2 font-bold shadow-lg shadow-emerald-100 h-fit"
                         >
                             <Plus size={20} />
@@ -1326,8 +1341,10 @@ export default function Billing() {
                                         placeholder="Qty"
                                         value={itemQty}
                                         onChange={(e) => {
-                                            const val = e.target.value.replace(/[^0-9]/g, '');
-                                            setItemQty(val);
+                                            const val = e.target.value.replace(/[^0-9.]/g, '');
+                                            if ((val.match(/\./g) || []).length <= 1) {
+                                                setItemQty(val);
+                                            }
                                             setQtyError(null);
                                         }}
                                         onKeyDown={(e) => {
@@ -1346,7 +1363,7 @@ export default function Billing() {
                                 </div>
                                 <button
                                     ref={addItemButtonRef}
-                                    onClick={handleAddItem}
+                                    onClick={() => handleAddItem()}
                                     disabled={!itemProduct}
                                     className="bg-emerald-600 text-white px-5 py-2.5 rounded-lg hover:bg-emerald-700 disabled:bg-slate-300 transition-colors"
                                 >
@@ -1387,11 +1404,11 @@ export default function Billing() {
                                                     <td className="p-3 text-center text-xs uppercase text-slate-500">{item.unit || 'nos'}</td>
                                                     <td className="p-3">
                                                         <input
-                                                            type="text"
-                                                            inputMode="numeric"
-                                                            className="w-16 p-1.5 border border-slate-200 rounded text-center focus:ring-2 focus:ring-emerald-500 outline-none"
-                                                            value={item.quantity || ''}
-                                                            onChange={(e) => handleUpdateItemQty(idx, e.target.value.replace(/[^0-9]/g, ''))}
+                                                            type="number"
+                                                            step="0.001"
+                                                            className="w-16 p-1 border rounded text-right focus:ring-1 focus:ring-emerald-500 outline-none font-medium"
+                                                            value={item.quantity === 0 ? '' : item.quantity}
+                                                            onChange={(e) => handleUpdateItemQty(idx, e.target.value)}
                                                         />
                                                     </td>
                                                     <td className="p-3 text-right">₹{item.unitPrice}</td>
@@ -1938,7 +1955,7 @@ export default function Billing() {
                                         Cancel
                                     </button>
                                     <button
-                                        onClick={handleAddNewDealer}
+                                        onClick={() => handleAddNewDealer()}
                                         className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
                                     >
                                         Add Dealer

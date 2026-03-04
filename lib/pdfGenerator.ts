@@ -270,7 +270,7 @@ export const generateInvoicePDFBase64 = async (
         item.productName,
         item.hsnCode || '',
         `${(item.cgst + item.sgst + item.igst).toFixed(0)}%`,
-        `${item.quantity} ${item.unit || 'nos'}`,
+        `${item.quantity.toFixed(3)} ${item.unit || 'nos'}`,
         formatRate(item.unitPrice),
         item.unit || 'nos',
         '', // Disc %
@@ -339,6 +339,26 @@ export const generateInvoicePDFBase64 = async (
             8: { cellWidth: 30, halign: 'right' }
         },
         margin: { top: 15, bottom: 60, left: 10, right: 10 },
+        foot: [[
+            '',
+            'Total',
+            '',
+            '',
+            `${totalQty.toFixed(3)} ${unit}`,
+            '',
+            '',
+            '',
+            formatAmount(subtotal)
+        ]],
+        footStyles: {
+            fillColor: [255, 255, 255],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            lineWidth: 0.3,
+            lineColor: [0, 0, 0],
+            fontSize: 8,
+            halign: 'right'
+        },
         didDrawPage: (data) => {
             // Draw header on every page
             const totalPages = (doc as any).internal.getNumberOfPages();
@@ -673,7 +693,9 @@ export const generateStatementPDFBase64 = async (
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(220, 38, 38); // Red
     doc.text('Outstanding:', 115, 76);
-    doc.text(formatCurrencyPDF(summary.totalOutstanding), 190, 76, { align: 'right' });
+    const outstandingStr = formatCurrencyPDF(summary.totalOutstanding);
+    const balanceType = summary.totalOutstanding >= 0 ? ' (Cr)' : ' (Dr)';
+    doc.text(outstandingStr + balanceType, 190, 76, { align: 'right' });
     doc.setTextColor(0);
 
     doc.line(10, 85, 200, 85);
@@ -691,7 +713,9 @@ export const generateStatementPDFBase64 = async (
             type: 'Invoice',
             amount: inv.amount,
             paid: inv.paid,
-            balance: inv.balance
+            balance: inv.balance,
+            notes: inv.originalTransaction?.notes || '',
+            agent: inv.originalTransaction?.agentName || '-'
         })),
         ...payments.map(p => ({
             date: new Date(p.date),
@@ -700,19 +724,39 @@ export const generateStatementPDFBase64 = async (
             amount: 0,
             paid: p.amount,
             balance: 0,
-            agent: p.agentName || 'Admin'
+            agent: p.agentName || 'Admin',
+            notes: (p as any).notes || ''
         }))
-    ].sort((a, b) => a.date.getTime() - b.date.getTime());
+    ].sort((a, b) => a.date.getTime() - b.date.getTime())
+        .map(entry => {
+            // Correctly label Cheque Returns in the type column
+            if (entry.type === 'Invoice') {
+                const notes = (entry as any).notes || '';
+                const isCheckReturn = notes.startsWith('Cheque Return') || notes.startsWith('Check Return') || notes.startsWith('Chq Return');
+                if (isCheckReturn) {
+                    return { ...entry, type: 'Cheque Return' };
+                }
+            }
+            // Correctly label Stock Returns in the type column
+            if (entry.type === 'Receipt') {
+                const notes = (entry as any).notes || '';
+                const isStockReturn = notes.includes('Stock Return');
+                if (isStockReturn) {
+                    return { ...entry, type: 'Stock Return' };
+                }
+            }
+            return entry;
+        });
 
     autoTable(doc, {
         startY: 95,
-        head: [['Date', 'Ref No', 'Type', 'Invoiced', 'Collected', 'Agent']],
+        head: [['Date', 'Ref No', 'Type', 'Credit', 'Debit', 'Agent']],
         body: statementEntries.map(entry => [
             entry.date.toLocaleDateString('en-GB'),
             entry.ref,
             entry.type,
-            entry.type === 'Invoice' ? formatCurrencyPDF(entry.amount) : '-',
-            entry.type === 'Receipt' ? formatCurrencyPDF(entry.paid) : '-',
+            (entry.type === 'Invoice' || entry.type === 'Cheque Return') ? formatCurrencyPDF(entry.amount) : '-',
+            (entry.type === 'Receipt' || entry.type === 'Stock Return') ? formatCurrencyPDF(entry.paid) : '-',
             (entry as any).agent || '-'
         ]),
         theme: 'grid',

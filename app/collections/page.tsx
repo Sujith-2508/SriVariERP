@@ -161,7 +161,7 @@ export default function Collections() {
             const noteText = `Cheque Return${refNote} – Reason: ${chequeReturnReason}`;
 
             // Create a zero-item invoice for the bounced amount
-            await createInvoice(
+            const { refId: newInvoiceRef } = await createInvoice(
                 activeDealer.id,
                 [], // no items for a cheque return
                 amountNum,
@@ -174,7 +174,7 @@ export default function Collections() {
                 // Log as a debit (increases balance) with a Cheque Return label
                 await syncPaymentToSheets(
                     activeDealer.businessName,
-                    chequeReturnRef || 'CHQ-RETURN',
+                    newInvoiceRef, // Use the actual invoice number (INVxxx)
                     -amountNum, // negative so it shows as debit/owed
                     'Cheque Return',
                     'System'
@@ -257,7 +257,7 @@ export default function Collections() {
                             Share
                         </button>
                         <button
-                            onClick={handleCloseSuccess}
+                            onClick={() => handleCloseSuccess()}
                             className="flex-[2] bg-slate-900 text-white py-3 rounded-xl font-medium hover:bg-slate-800 transition-colors"
                         >
                             Done
@@ -415,8 +415,8 @@ export default function Collections() {
 
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-2">Mode</label>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {['Cash', 'Cheque', 'UPI'].map(m => (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {['Cash', 'Cheque', 'UPI', 'Stock Return'].map(m => (
                                                 <button
                                                     key={m}
                                                     type="button"

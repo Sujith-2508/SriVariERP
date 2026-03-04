@@ -10,6 +10,7 @@ import {
 } from '@/lib/expenseService';
 import { Calendar, Receipt, Plus, Edit2, Trash2, X, Check } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
+import { getISTDateString } from '@/lib/utils';
 
 export default function CompanyExpenseManagement() {
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -23,7 +24,7 @@ export default function CompanyExpenseManagement() {
         expenseType: 'GODOWN_RENT' as CompanyExpense['expenseType'],
         customName: '',
         amount: '' as string | number,
-        date: new Date().toISOString().split('T')[0],
+        date: getISTDateString(),
         notes: ''
     });
 
@@ -81,7 +82,7 @@ export default function CompanyExpenseManagement() {
             expenseType: 'GODOWN_RENT',
             customName: '',
             amount: '',
-            date: new Date().toISOString().split('T')[0],
+            date: getISTDateString(),
             notes: ''
         });
     };

@@ -224,7 +224,7 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                                         <td className="border-r border-black p-1 align-top font-semibold">{item.productName}</td>
                                         <td className="border-r border-black p-1 text-center align-top">{item.hsnCode}</td>
                                         <td className="border-r border-black p-1 text-center align-top">{(item.cgst + item.sgst + item.igst).toFixed(0)}%</td>
-                                        <td className="border-r border-black p-1 text-center align-top font-semibold">{item.quantity} {item.unit}</td>
+                                        <td className="border-r border-black p-1 text-center align-top font-semibold">{Number(item.quantity).toFixed(3)} {item.unit}</td>
                                         <td className="border-r border-black p-1 text-right align-top">{item.unitPrice.toFixed(2)}</td>
                                         <td className="border-r border-black p-1 text-center align-top">{item.unit}</td>
                                         <td className="border-r border-black p-1 text-center align-top">&nbsp;</td>
@@ -291,7 +291,7 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                             <tr className="border-b-2 border-black font-bold">
                                 <td colSpan={4} className="border-r border-black p-1 text-right">Total</td>
                                 <td className="border-r border-black p-1 text-center">
-                                    {items.reduce((sum, item) => sum + item.quantity, 0)} {items[0]?.unit}
+                                    {(items.reduce((sum, item) => sum + item.quantity, 0)).toFixed(3)} {items[0]?.unit}
                                 </td>
                                 <td className="border-r border-black p-1">&nbsp;</td>
                                 <td className="border-r border-black p-1">&nbsp;</td>
