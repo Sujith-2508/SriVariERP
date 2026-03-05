@@ -265,16 +265,29 @@ export function LiveMap({ agentData, selectedAgentId, onAgentClick }: LiveMapPro
                     if (!isValidLocation) return null;
 
                     // Truthful isActive for marker color
-                    const isStale = data.status?.lastActiveAt && (new Date().getTime() - data.status.lastActiveAt.getTime()) > 30 * 60 * 1000;
-                    const isActive = (data.status?.isActive || false) && !isStale && isValidLocation;
+                    const now = new Date().getTime();
+                    const lastActive = data.status?.lastActiveAt?.getTime() || 0;
+                    const diff = Math.max(0, now - lastActive);
+                    const isStale = lastActive > 0 && diff > 30 * 60 * 1000;
+
+                    const rawActive = data.status?.isActive || false;
+                    const isActive = rawActive && !isStale && isValidLocation;
 
                     const position: [number, number] = [effectiveLoc.latitude, effectiveLoc.longitude];
+
+                    // Determine marker icon based on detailed status
+                    let markerIcon = RedIcon;
+                    if (isActive) {
+                        markerIcon = GreenIcon;
+                    } else if (rawActive) {
+                        markerIcon = DefaultIcon; // Default blue icon for active but stale or No GPS
+                    }
 
                     return (
                         <Marker
                             key={data.agent.id}
                             position={position}
-                            icon={isActive ? GreenIcon : RedIcon}
+                            icon={markerIcon}
                             eventHandlers={{
                                 click: () => handleAgentClick(data.agent.id),
                             }}

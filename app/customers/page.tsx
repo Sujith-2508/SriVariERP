@@ -549,7 +549,7 @@ export default function DealerLedger() {
                 const dealerPdf = await PDFDocument.load(pdfBytes);
                 const pageIndices = dealerPdf.getPageIndices();
                 const copiedPages = await mergedPdf.copyPages(dealerPdf, pageIndices);
-                copiedPages.forEach(page => mergedPdf.addPage(page));
+                copiedPages.forEach((page: any) => mergedPdf.addPage(page));
             }
 
             const mergedBytes = await mergedPdf.save();
@@ -1246,574 +1246,626 @@ export default function DealerLedger() {
 
     // Dealer List View
     return (
-        <div className="h-full overflow-y-auto p-6">
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-800">Dealer Ledgers</h1>
-                    <p className="text-sm text-slate-500">View dealer statements and payment history</p>
-                </div>
-                <div className="flex gap-3 items-center">
-                    <button
-                        onClick={handleImportFromSheets}
-                        disabled={isImporting}
-                        className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-blue-100 transition-colors disabled:opacity-50"
-                        title="Import all dealers from 'refined dealers' sheet"
-                    >
-                        {isImporting ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
-                        Import
-                    </button>
-                    <button
-                        onClick={handleImportFromTally}
-                        disabled={isTallyImporting}
-                        className="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-amber-100 transition-colors disabled:opacity-50"
-                        title="Import actual Tally balances from 'Ledger Vouchers' sheet"
-                    >
-                        {isTallyImporting ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                        Tally
-                    </button>
-                    <button
-                        onClick={handleBulkSync}
-                        disabled={isSyncing}
-                        className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-100 transition-colors disabled:opacity-50"
-                        title="Backup all dealers to Google Sheets"
-                    >
-                        {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
-                        Sync
-                    </button>
-                    <button
-                        onClick={() => openDateModal('bulk-export')}
-                        disabled={bulkExporting}
-                        className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg disabled:opacity-60"
-                        title="Export all dealer statements as a single PDF"
-                    >
-                        {bulkExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                        Export All
-                    </button>
-                    <button
-                        onClick={() => setIsAddModalOpen(true)}
-                        className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-lg"
-                    >
-                        <User size={16} />
-                        Add Dealer
-                    </button>
-                    <div className="bg-slate-100 px-4 py-2 rounded-lg text-sm text-slate-600 flex items-center">
-                        Total: <strong className="ml-1">{dealers.length}</strong>
+        <>
+            <div className="h-full overflow-y-auto p-6">
+                <div className="flex justify-between items-center mb-6">
+                    <div>
+                        <h1 className="text-2xl font-bold text-slate-800">Dealer Ledgers</h1>
+                        <p className="text-sm text-slate-500">View dealer statements and payment history</p>
+                    </div>
+                    <div className="flex gap-3 items-center">
+                        <button
+                            onClick={handleImportFromSheets}
+                            disabled={isImporting}
+                            className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                            title="Import all dealers from 'refined dealers' sheet"
+                        >
+                            {isImporting ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
+                            Import
+                        </button>
+                        <button
+                            onClick={handleImportFromTally}
+                            disabled={isTallyImporting}
+                            className="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                            title="Import actual Tally balances from 'Ledger Vouchers' sheet"
+                        >
+                            {isTallyImporting ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                            Tally
+                        </button>
+                        <button
+                            onClick={handleBulkSync}
+                            disabled={isSyncing}
+                            className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-100 transition-colors disabled:opacity-50"
+                            title="Backup all dealers to Google Sheets"
+                        >
+                            {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
+                            Sync
+                        </button>
+                        <button
+                            onClick={() => openDateModal('bulk-export')}
+                            disabled={bulkExporting}
+                            className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg disabled:opacity-60"
+                            title="Export all dealer statements as a single PDF"
+                        >
+                            {bulkExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                            Export All
+                        </button>
+                        <button
+                            onClick={() => setIsAddModalOpen(true)}
+                            className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-lg"
+                        >
+                            <User size={16} />
+                            Add Dealer
+                        </button>
+                        <div className="bg-slate-100 px-4 py-2 rounded-lg text-sm text-slate-600 flex items-center">
+                            Total: <strong className="ml-1">{dealers.length}</strong>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {/* Search */}
-            <div className="relative max-w-md mb-6">
-                <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                <input
-                    id="dealers-search"
-                    type="text"
-                    placeholder="Search dealers by name, city, district..."
-                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
-            </div >
+                {/* Search */}
+                <div className="relative max-w-md mb-6">
+                    <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+                    <input
+                        id="dealers-search"
+                        type="text"
+                        placeholder="Search dealers by name, city, district..."
+                        className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
 
-            {/* Dealer Grid */}
-            < div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" >
+                {/* Dealer Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {
+                        filteredDealers.length > 0 ? (
+                            filteredDealers.map(d => (
+                                <div key={d.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+                                    <div className="flex justify-between items-start mb-3">
+                                        <div>
+                                            <h3 className="font-bold text-lg text-slate-800 leading-tight">{d.businessName}</h3>
+                                            <p className="text-sm text-slate-500 mt-0.5">{d.contactPerson}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-xs text-slate-400 uppercase font-medium">Balance</p>
+                                            <p className={`font-bold text-lg ${d.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                ₹{d.balance.toLocaleString()}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1.5 text-sm text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                        <div className="flex items-center gap-2">
+                                            <Building2 size={14} className="text-slate-400" />
+                                            <span className="truncate">{d.city || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <MapPin size={14} className="text-slate-400" />
+                                            <span className="truncate">{d.district}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <MapPinned size={14} className="text-slate-400" />
+                                            <span>PIN: {d.pinCode || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Phone size={14} className="text-slate-400" />
+                                            <span>{d.phone}</span>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={() => setSelectedDealerId(d.id)}
+                                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <FileText size={16} />
+                                        View Statement
+                                        <ArrowRight size={14} />
+                                    </button>
+
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenEditModal(d);
+                                        }}
+                                        className="w-full mt-2 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-blue-200"
+                                    >
+                                        <Edit size={14} />
+                                        Edit Dealer
+                                    </button>
+
+                                    {d.balance === 0 && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (window.confirm(`Are you sure you want to delete ${d.businessName}?`)) {
+                                                    deleteDealer(d.id);
+                                                }
+                                            }}
+                                            className="w-full mt-2 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-red-200"
+                                        >
+                                            <Trash2 size={14} />
+                                            Delete Dealer
+                                        </button>
+                                    )}
+                                </div>
+                            ))
+                        ) : (
+                            <div className="col-span-full py-20 flex flex-col items-center justify-center bg-white rounded-2xl border-2 border-dashed border-slate-200">
+                                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                                    <User size={40} className="text-slate-300" />
+                                </div>
+                                <h3 className="text-xl font-bold text-slate-800 mb-2">
+                                    {searchTerm ? 'No matching dealers found' : 'No dealers registered yet'}
+                                </h3>
+                                <p className="text-slate-500 text-center max-w-sm mb-8">
+                                    {searchTerm
+                                        ? `We couldn't find any dealers matching "${searchTerm}". Try a different search term.`
+                                        : 'Start by adding your first dealer business to manage their ledgers and tracking.'}
+                                </p>
+                                {!searchTerm && (
+                                    <button
+                                        onClick={() => setIsAddModalOpen(true)}
+                                        className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold shadow-xl hover:bg-slate-800 transition-all flex items-center gap-2"
+                                    >
+                                        <User size={20} />
+                                        Create New Dealer
+                                    </button>
+                                )}
+                                {searchTerm && (
+                                    <button
+                                        onClick={() => setSearchTerm('')}
+                                        className="text-emerald-600 font-bold hover:underline"
+                                    >
+                                        Clear search
+                                    </button>
+                                )}
+                            </div>
+                        )
+                    }
+                </div >
+
+
+                {/* Add Dealer Modal */}
                 {
-                    filteredDealers.map(d => (
-                        <div key={d.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
-                            <div className="flex justify-between items-start mb-3">
-                                <div>
-                                    <h3 className="font-bold text-lg text-slate-800 leading-tight">{d.businessName}</h3>
-                                    <p className="text-sm text-slate-500 mt-0.5">{d.contactPerson}</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-xs text-slate-400 uppercase font-medium">Balance</p>
-                                    <p className={`font-bold text-lg ${d.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                        ₹{d.balance.toLocaleString()}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1.5 text-sm text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                <div className="flex items-center gap-2">
-                                    <Building2 size={14} className="text-slate-400" />
-                                    <span className="truncate">{d.city || 'N/A'}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <MapPin size={14} className="text-slate-400" />
-                                    <span className="truncate">{d.district}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <MapPinned size={14} className="text-slate-400" />
-                                    <span>PIN: {d.pinCode || 'N/A'}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Phone size={14} className="text-slate-400" />
-                                    <span>{d.phone}</span>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={() => setSelectedDealerId(d.id)}
-                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors flex items-center justify-center gap-2"
-                            >
-                                <FileText size={16} />
-                                View Statement
-                                <ArrowRight size={14} />
-                            </button>
-
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenEditModal(d);
-                                }}
-                                className="w-full mt-2 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-blue-200"
-                            >
-                                <Edit size={14} />
-                                Edit Dealer
-                            </button>
-
-                            {d.balance === 0 && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (window.confirm(`Are you sure you want to delete ${d.businessName}?`)) {
-                                            deleteDealer(d.id);
-                                        }
-                                    }}
-                                    className="w-full mt-2 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-red-200"
-                                >
-                                    <Trash2 size={14} />
-                                    Delete Dealer
-                                </button>
-                            )}
-                        </div>
-                    ))
-                }
-            </div >
-
-
-            {/* Add Dealer Modal */}
-            {
-                isAddModalOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsAddModalOpen(false)}>
-                        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                                <h2 className="text-xl font-bold text-slate-800">Add New Dealer</h2>
-                                <button
-                                    onClick={() => setIsAddModalOpen(false)}
-                                    className="text-slate-400 hover:text-slate-600"
-                                >
-                                    <X size={24} />
-                                </button>
-                            </div>
-                            <form onSubmit={handleAddDealer} className="p-6 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
-                                        <input
-                                            ref={addRefs[0] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e)}
-                                            type="text"
-                                            required
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={newDealer.businessName}
-                                            onChange={e => setNewDealer({ ...newDealer, businessName: e.target.value })}
-                                            placeholder="Enter business name"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
-                                        <input
-                                            ref={addRefs[1] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e)}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={newDealer.contactPerson}
-                                            onChange={e => setNewDealer({ ...newDealer, contactPerson: e.target.value })}
-                                            placeholder="Name"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
-                                        <input
-                                            ref={addRefs[2] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e)}
-                                            type="text"
-                                            required
-                                            maxLength={10}
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={newDealer.phone}
-                                            onChange={e => setNewDealer({ ...newDealer, phone: e.target.value.replace(/\D/g, '') })}
-                                            placeholder="10-digit mobile number"
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
-                                        <textarea
-                                            ref={addRefs[3] as React.RefObject<HTMLTextAreaElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e as any)}
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            rows={2}
-                                            value={newDealer.address}
-                                            onChange={e => setNewDealer({ ...newDealer, address: e.target.value })}
-                                            placeholder="Street address"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
-                                        <input
-                                            ref={addRefs[4] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e)}
-                                            type="text"
-                                            required
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={newDealer.city}
-                                            onChange={e => setNewDealer({ ...newDealer, city: e.target.value })}
-                                            placeholder="City"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
-                                        <input
-                                            ref={addRefs[5] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e)}
-                                            type="text"
-                                            required
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={newDealer.district}
-                                            onChange={e => setNewDealer({ ...newDealer, district: e.target.value })}
-                                            placeholder="State"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
-                                        <input
-                                            ref={addRefs[6] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e)}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            value={newDealer.pinCode}
-                                            onChange={e => setNewDealer({ ...newDealer, pinCode: e.target.value })}
-                                            placeholder="6-digit pin code"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
-                                        <input
-                                            ref={addRefs[7] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleAddKeyDown(e)}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none uppercase font-mono"
-                                            value={newDealer.gstNumber}
-                                            onChange={e => setNewDealer({ ...newDealer, gstNumber: e.target.value.toUpperCase() })}
-                                            placeholder="GSTIN"
-                                            maxLength={15}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="pt-4 flex gap-3">
+                    isAddModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsAddModalOpen(false)}>
+                            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                    <h2 className="text-xl font-bold text-slate-800">Add New Dealer</h2>
                                     <button
-                                        type="button"
                                         onClick={() => setIsAddModalOpen(false)}
-                                        className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                        className="text-slate-400 hover:text-slate-600"
                                     >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
-                                    >
-                                        Add Dealer
+                                        <X size={24} />
                                     </button>
                                 </div>
-                            </form>
-                        </div>
-                    </div>
-                )
-            }
-
-            {/* Edit Dealer Modal */}
-            {
-                isEditModalOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsEditModalOpen(false)}>
-                        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
-                                <h2 className="text-xl font-bold text-slate-800">Edit Dealer</h2>
-                                <button
-                                    onClick={() => {
-                                        setIsEditModalOpen(false);
-                                        setEditingDealer(null);
-                                    }}
-                                    className="text-slate-400 hover:text-slate-600"
-                                >
-                                    <X size={24} />
-                                </button>
+                                <form onSubmit={handleAddDealer} className="p-6 space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="col-span-2">
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
+                                            <input
+                                                ref={addRefs[0] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e)}
+                                                type="text"
+                                                required
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                value={newDealer.businessName}
+                                                onChange={e => setNewDealer({ ...newDealer, businessName: e.target.value })}
+                                                placeholder="Enter business name"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
+                                            <input
+                                                ref={addRefs[1] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e)}
+                                                type="text"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                value={newDealer.contactPerson}
+                                                onChange={e => setNewDealer({ ...newDealer, contactPerson: e.target.value })}
+                                                placeholder="Name"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                            <input
+                                                ref={addRefs[2] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e)}
+                                                type="text"
+                                                required
+                                                maxLength={10}
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                value={newDealer.phone}
+                                                onChange={e => setNewDealer({ ...newDealer, phone: e.target.value.replace(/\D/g, '') })}
+                                                placeholder="10-digit mobile number"
+                                            />
+                                        </div>
+                                        <div className="col-span-2">
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                            <textarea
+                                                ref={addRefs[3] as React.RefObject<HTMLTextAreaElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e as any)}
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                rows={2}
+                                                value={newDealer.address}
+                                                onChange={e => setNewDealer({ ...newDealer, address: e.target.value })}
+                                                placeholder="Street address"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                            <input
+                                                ref={addRefs[4] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e)}
+                                                type="text"
+                                                required
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                value={newDealer.city}
+                                                onChange={e => setNewDealer({ ...newDealer, city: e.target.value })}
+                                                placeholder="City"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                                            <input
+                                                ref={addRefs[5] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e)}
+                                                type="text"
+                                                required
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                value={newDealer.district}
+                                                onChange={e => setNewDealer({ ...newDealer, district: e.target.value })}
+                                                placeholder="State"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
+                                            <input
+                                                ref={addRefs[6] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e)}
+                                                type="text"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                                value={newDealer.pinCode}
+                                                onChange={e => setNewDealer({ ...newDealer, pinCode: e.target.value })}
+                                                placeholder="6-digit pin code"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
+                                            <input
+                                                ref={addRefs[7] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleAddKeyDown(e)}
+                                                type="text"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none uppercase font-mono"
+                                                value={newDealer.gstNumber}
+                                                onChange={e => setNewDealer({ ...newDealer, gstNumber: e.target.value.toUpperCase() })}
+                                                placeholder="GSTIN"
+                                                maxLength={15}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="pt-4 flex gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsAddModalOpen(false)}
+                                            className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
+                                        >
+                                            Add Dealer
+                                        </button>
+                                    </div>
+                                </form>
                             </div>
-                            <form onSubmit={handleEditDealer} className="p-6 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
-                                        <input
-                                            ref={editRefs[0] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e)}
-                                            type="text"
-                                            required
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={editDealer.businessName}
-                                            onChange={e => setEditDealer({ ...editDealer, businessName: e.target.value })}
-                                            placeholder="Enter business name"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
-                                        <input
-                                            ref={editRefs[1] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e)}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={editDealer.contactPerson}
-                                            onChange={e => setEditDealer({ ...editDealer, contactPerson: e.target.value })}
-                                            placeholder="Name"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
-                                        <input
-                                            ref={editRefs[2] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e)}
-                                            type="text"
-                                            required
-                                            maxLength={10}
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={editDealer.phone}
-                                            onChange={e => setEditDealer({ ...editDealer, phone: e.target.value.replace(/\D/g, '') })}
-                                            placeholder="10-digit mobile number"
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
-                                        <textarea
-                                            ref={editRefs[3] as React.RefObject<HTMLTextAreaElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e as any)}
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                            rows={2}
-                                            value={editDealer.address}
-                                            onChange={e => setEditDealer({ ...editDealer, address: e.target.value })}
-                                            placeholder="Street address"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
-                                        <input
-                                            ref={editRefs[4] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e)}
-                                            type="text"
-                                            required
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={editDealer.city}
-                                            onChange={e => setEditDealer({ ...editDealer, city: e.target.value })}
-                                            placeholder="City"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
-                                        <input
-                                            ref={editRefs[5] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e)}
-                                            type="text"
-                                            required
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={editDealer.district}
-                                            onChange={e => setEditDealer({ ...editDealer, district: e.target.value })}
-                                            placeholder="State"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
-                                        <input
-                                            ref={editRefs[6] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e)}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={editDealer.pinCode}
-                                            onChange={e => setEditDealer({ ...editDealer, pinCode: e.target.value })}
-                                            placeholder="6-digit pin code"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
-                                        <input
-                                            ref={editRefs[7] as React.RefObject<HTMLInputElement>}
-                                            onKeyDown={(e) => handleEditKeyDown(e)}
-                                            type="text"
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono"
-                                            value={editDealer.gstNumber}
-                                            onChange={e => setEditDealer({ ...editDealer, gstNumber: e.target.value.toUpperCase() })}
-                                            placeholder="GSTIN"
-                                            maxLength={15}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="pt-4 flex gap-3">
+                        </div>
+                    )
+                }
+
+                {/* Edit Dealer Modal */}
+                {
+                    isEditModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsEditModalOpen(false)}>
+                            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+                                    <h2 className="text-xl font-bold text-slate-800">Edit Dealer</h2>
                                     <button
-                                        type="button"
                                         onClick={() => {
                                             setIsEditModalOpen(false);
                                             setEditingDealer(null);
                                         }}
-                                        className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                        className="text-slate-400 hover:text-slate-600"
+                                    >
+                                        <X size={24} />
+                                    </button>
+                                </div>
+                                <form onSubmit={handleEditDealer} className="p-6 space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="col-span-2">
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
+                                            <input
+                                                ref={editRefs[0] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e)}
+                                                type="text"
+                                                required
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                value={editDealer.businessName}
+                                                onChange={e => setEditDealer({ ...editDealer, businessName: e.target.value })}
+                                                placeholder="Enter business name"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
+                                            <input
+                                                ref={editRefs[1] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e)}
+                                                type="text"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                value={editDealer.contactPerson}
+                                                onChange={e => setEditDealer({ ...editDealer, contactPerson: e.target.value })}
+                                                placeholder="Name"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                            <input
+                                                ref={editRefs[2] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e)}
+                                                type="text"
+                                                required
+                                                maxLength={10}
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                value={editDealer.phone}
+                                                onChange={e => setEditDealer({ ...editDealer, phone: e.target.value.replace(/\D/g, '') })}
+                                                placeholder="10-digit mobile number"
+                                            />
+                                        </div>
+                                        <div className="col-span-2">
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                            <textarea
+                                                ref={editRefs[3] as React.RefObject<HTMLTextAreaElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e as any)}
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                rows={2}
+                                                value={editDealer.address}
+                                                onChange={e => setEditDealer({ ...editDealer, address: e.target.value })}
+                                                placeholder="Street address"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                            <input
+                                                ref={editRefs[4] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e)}
+                                                type="text"
+                                                required
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                value={editDealer.city}
+                                                onChange={e => setEditDealer({ ...editDealer, city: e.target.value })}
+                                                placeholder="City"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                                            <input
+                                                ref={editRefs[5] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e)}
+                                                type="text"
+                                                required
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                value={editDealer.district}
+                                                onChange={e => setEditDealer({ ...editDealer, district: e.target.value })}
+                                                placeholder="State"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
+                                            <input
+                                                ref={editRefs[6] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e)}
+                                                type="text"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                value={editDealer.pinCode}
+                                                onChange={e => setEditDealer({ ...editDealer, pinCode: e.target.value })}
+                                                placeholder="6-digit pin code"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
+                                            <input
+                                                ref={editRefs[7] as React.RefObject<HTMLInputElement>}
+                                                onKeyDown={(e) => handleEditKeyDown(e)}
+                                                type="text"
+                                                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono"
+                                                value={editDealer.gstNumber}
+                                                onChange={e => setEditDealer({ ...editDealer, gstNumber: e.target.value.toUpperCase() })}
+                                                placeholder="GSTIN"
+                                                maxLength={15}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="pt-4 flex gap-3">
+                                        {editingDealer?.balance === 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (window.confirm(`Are you sure you want to delete ${editingDealer.businessName}?`)) {
+                                                        deleteDealer(editingDealer.id);
+                                                        setIsEditModalOpen(false);
+                                                        setEditingDealer(null);
+                                                    }
+                                                }}
+                                                className="px-4 py-3 bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-100 transition-colors border border-red-200"
+                                                title="Delete Dealer"
+                                            >
+                                                <Trash2 size={20} />
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setIsEditModalOpen(false);
+                                                setEditingDealer(null);
+                                            }}
+                                            className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
+                                        >
+                                            Update Dealer
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )
+                }
+            </div>
+
+            {/* ─── Date Range Modal ────────────────────────────────── */}
+            {
+                dateRangeModal.open && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+                            {/* Header */}
+                            <div className="bg-slate-800 text-white px-6 py-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Calendar size={20} className="text-emerald-400" />
+                                    <div>
+                                        <h2 className="font-bold text-base">Select Date Range</h2>
+                                        <p className="text-slate-400 text-xs mt-0.5">
+                                            {dateRangeModal.mode === 'export' ? 'For PDF Export' : 'For WhatsApp Statement'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                    className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition-colors">
+                                    <X size={16} />
+                                </button>
+                            </div>
+
+                            <div className="p-6 space-y-4">
+                                {/* Quick options */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    {([
+                                        { key: 'all', label: 'Complete Statement', icon: '📋' },
+                                        { key: 'fy-pick', label: 'Financial Year', icon: '📅' },
+                                        { key: 'month-pick', label: 'By Month', icon: '🗓️' },
+                                        { key: 'custom', label: 'Custom Range', icon: '✏️' },
+                                    ] as const).map(opt => (
+                                        <button
+                                            key={opt.key}
+                                            onClick={() => setDateRangeModal(prev => ({ ...prev, rangeType: opt.key }))}
+                                            className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all font-medium text-sm ${dateRangeModal.rangeType === opt.key
+                                                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <span className="text-lg">{opt.icon}</span>
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {/* Financial Year picker */}
+                                {dateRangeModal.rangeType === 'fy-pick' && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 mb-1.5">Select Financial Year</label>
+                                        <select value={dateRangeModal.selectedYear}
+                                            onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
+                                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                            {Array.from({ length: new Date().getFullYear() + 16 - 2020 }, (_, i) => 2020 + i).reverse().map(y => (
+                                                <option key={y} value={y}>FY {y}-{String(y + 1).slice(-2)}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                                {/* Month picker */}
+                                {dateRangeModal.rangeType === 'month-pick' && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Month</label>
+                                            <select value={dateRangeModal.selectedMonth}
+                                                onChange={e => setDateRangeModal(prev => ({ ...prev, selectedMonth: Number(e.target.value) }))}
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
+                                                    <option key={i} value={i}>{m}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Year</label>
+                                            <select value={dateRangeModal.selectedYear}
+                                                onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                                {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => 2020 + i).reverse().map(y => (
+                                                    <option key={y} value={y}>{y}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+                                {/* Custom date inputs */}
+                                {dateRangeModal.rangeType === 'custom' && (
+                                    <div className="grid grid-cols-2 gap-3 pt-1">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">From Date</label>
+                                            <input
+                                                type="date"
+                                                value={dateRangeModal.fromDate}
+                                                onChange={e => setDateRangeModal(prev => ({ ...prev, fromDate: e.target.value }))}
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">To Date</label>
+                                            <input
+                                                type="date"
+                                                value={dateRangeModal.toDate}
+                                                onChange={e => setDateRangeModal(prev => ({ ...prev, toDate: e.target.value }))}
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Action buttons */}
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                        className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl font-medium text-sm hover:bg-slate-50 transition-colors"
                                     >
                                         Cancel
                                     </button>
                                     <button
-                                        type="submit"
-                                        className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
+                                        onClick={
+                                            dateRangeModal.mode === 'export' ? handleExportPDF
+                                                : dateRangeModal.mode === 'bulk-export' ? handleBulkExportPDF
+                                                    : handleSendWhatsAppStatement
+                                        }
+                                        className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
                                     >
-                                        Update Dealer
+                                        {dateRangeModal.mode === 'export' ? (
+                                            <><Download size={16} /> Generate PDF</>
+                                        ) : dateRangeModal.mode === 'bulk-export' ? (
+                                            <><Download size={16} /> Export All Dealers</>
+                                        ) : (
+                                            <><MessageSquare size={16} /> Send via WhatsApp</>
+                                        )}
                                     </button>
                                 </div>
-                            </form>
+                            </div>
                         </div>
                     </div>
                 )
             }
-        </div >
-
-    {/* ─── Date Range Modal ────────────────────────────────── */ }
-    {
-        dateRangeModal.open && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-                    {/* Header */}
-                    <div className="bg-slate-800 text-white px-6 py-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <Calendar size={20} className="text-emerald-400" />
-                            <div>
-                                <h2 className="font-bold text-base">Select Date Range</h2>
-                                <p className="text-slate-400 text-xs mt-0.5">
-                                    {dateRangeModal.mode === 'export' ? 'For PDF Export' : 'For WhatsApp Statement'}
-                                </p>
-                            </div>
-                        </div>
-                        <button onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                            className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition-colors">
-                            <X size={16} />
-                        </button>
-                    </div>
-
-                    <div className="p-6 space-y-4">
-                        {/* Quick options */}
-                        <div className="grid grid-cols-2 gap-3">
-                            {([
-                                { key: 'all', label: 'Complete Statement', icon: '📋' },
-                                { key: 'fy-pick', label: 'Financial Year', icon: '📅' },
-                                { key: 'month-pick', label: 'By Month', icon: '🗓️' },
-                                { key: 'custom', label: 'Custom Range', icon: '✏️' },
-                            ] as const).map(opt => (
-                                <button
-                                    key={opt.key}
-                                    onClick={() => setDateRangeModal(prev => ({ ...prev, rangeType: opt.key }))}
-                                    className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all font-medium text-sm ${dateRangeModal.rangeType === opt.key
-                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                                        }`}
-                                >
-                                    <span className="text-lg">{opt.icon}</span>
-                                    {opt.label}
-                                </button>
-                            ))}
-                        </div>
-                        {/* Financial Year picker */}
-                        {dateRangeModal.rangeType === 'fy-pick' && (
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Select Financial Year</label>
-                                <select value={dateRangeModal.selectedYear}
-                                    onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                                    {Array.from({ length: new Date().getFullYear() + 16 - 2020 }, (_, i) => 2020 + i).reverse().map(y => (
-                                        <option key={y} value={y}>FY {y}-{String(y + 1).slice(-2)}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-                        {/* Month picker */}
-                        {dateRangeModal.rangeType === 'month-pick' && (
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Month</label>
-                                    <select value={dateRangeModal.selectedMonth}
-                                        onChange={e => setDateRangeModal(prev => ({ ...prev, selectedMonth: Number(e.target.value) }))}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                                        {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
-                                            <option key={i} value={i}>{m}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Year</label>
-                                    <select value={dateRangeModal.selectedYear}
-                                        onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                                        {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => 2020 + i).reverse().map(y => (
-                                            <option key={y} value={y}>{y}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-                        )}
-                        {/* Custom date inputs */}
-                        {dateRangeModal.rangeType === 'custom' && (
-                            <div className="grid grid-cols-2 gap-3 pt-1">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">From Date</label>
-                                    <input
-                                        type="date"
-                                        value={dateRangeModal.fromDate}
-                                        onChange={e => setDateRangeModal(prev => ({ ...prev, fromDate: e.target.value }))}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">To Date</label>
-                                    <input
-                                        type="date"
-                                        value={dateRangeModal.toDate}
-                                        onChange={e => setDateRangeModal(prev => ({ ...prev, toDate: e.target.value }))}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Action buttons */}
-                        <div className="flex gap-3 pt-2">
-                            <button
-                                onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl font-medium text-sm hover:bg-slate-50 transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={
-                                    dateRangeModal.mode === 'export' ? handleExportPDF
-                                        : dateRangeModal.mode === 'bulk-export' ? handleBulkExportPDF
-                                            : handleSendWhatsAppStatement
-                                }
-                                className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
-                            >
-                                {dateRangeModal.mode === 'export' ? (
-                                    <><Download size={16} /> Generate PDF</>
-                                ) : dateRangeModal.mode === 'bulk-export' ? (
-                                    <><Download size={16} /> Export All Dealers</>
-                                ) : (
-                                    <><MessageSquare size={16} /> Send via WhatsApp</>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )
-    }
+        </>
     );
 }
+

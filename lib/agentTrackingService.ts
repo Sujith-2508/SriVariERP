@@ -101,9 +101,12 @@ export async function getAllAgentTrackingData(): Promise<AgentTrackingData[]> {
  * Get latest location for each agent
  */
 export async function getLatestLocations(): Promise<AgentLocation[]> {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
     const { data, error } = await supabase
         .from('agent_locations')
         .select('*')
+        .gte('recorded_at', twentyFourHoursAgo)
         .order('recorded_at', { ascending: false });
 
     if (error) {
@@ -360,11 +363,15 @@ function mapAgentStatus(data: any): AgentStatus {
     const lat = data.current_latitude !== null ? Number(data.current_latitude) : undefined;
     const lng = data.current_longitude !== null ? Number(data.current_longitude) : undefined;
 
+    // Fix for timezone issues: if lastActiveAt is in the future, it's weighted as 0 (not stale)
+    // This happens if mobile app sends local time instead of UTC or if device clocks are out of sync
+    const lastActiveAt = data.last_active_at ? new Date(data.last_active_at) : new Date();
+
     return {
         id: data.id,
         agentId: data.agent_id,
         isActive: data.is_active || false,
-        lastActiveAt: data.last_active_at ? new Date(data.last_active_at) : new Date(),
+        lastActiveAt: lastActiveAt,
         currentLatitude: (lat !== undefined && !isNaN(lat)) ? lat : undefined,
         currentLongitude: (lng !== undefined && !isNaN(lng)) ? lng : undefined,
         currentAddress: data.current_address || undefined,

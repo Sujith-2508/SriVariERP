@@ -360,6 +360,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             setAgents(filteredAgents);
 
+            // Initialize trackingData placeholder with agents to avoid empty state for real-time updates
+            setTrackingData(prev => {
+                const existingDataMap = new Map(prev.map(d => [d.agent.id, d]));
+                return filteredAgents.map(agent => ({
+                    agent: agent,
+                    ...(existingDataMap.get(agent.id) || {})
+                }));
+            });
+
             // Calculate counts for numbering
             const invoices = transactionsData?.filter(t => t.type === 'INVOICE') || [];
             const payments = transactionsData?.filter(t => t.type === 'PAYMENT') || [];
@@ -415,7 +424,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Subscribe to real-time tracking updates
         const statusSub = subscribeToStatusUpdates((status) => {
-            console.log('[DataContext] Status update received:', status.agentId, status.isActive);
+            console.log('[DataContext] Real-time status update:', {
+                agentId: status.agentId,
+                isActive: status.isActive,
+                lastActive: status.lastActiveAt,
+                address: status.currentAddress
+            });
             setTrackingData(prev => prev.map(data =>
                 (data.agent.id === status.agentId || data.agent.agentId === status.agentId)
                     ? { ...data, status }
@@ -424,12 +438,22 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         const locationSub = subscribeToLocationUpdates((location) => {
-            console.log('[DataContext] Location update received:', location.agentId);
-            setTrackingData(prev => prev.map(data =>
-                (data.agent.id === location.agentId || data.agent.agentId === location.agentId)
-                    ? { ...data, latestLocation: location }
-                    : data
-            ));
+            console.log('[DataContext] Real-time location update:', {
+                agentId: location.agentId,
+                lat: location.latitude,
+                lng: location.longitude,
+                timestamp: location.recordedAt
+            });
+            setTrackingData(prev => {
+                const updated = prev.map(data =>
+                    (data.agent.id === location.agentId || data.agent.agentId === location.agentId)
+                        ? { ...data, latestLocation: location }
+                        : data
+                );
+                // If the agent wasn't found in current trackingData, it might be a newly added agent
+                // but we should already have a placeholder from setAgents
+                return updated;
+            });
         });
 
         // NEW: Subscribe to transactions to sync mobile receipts in real-time

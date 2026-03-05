@@ -78,7 +78,12 @@ export function AgentStatusList({ agentData, onAgentClick, selectedAgentId }: Ag
                                 (data.status?.currentLatitude !== undefined && data.status?.currentLatitude !== null && data.status.currentLatitude !== 0);
 
                             // Truthful status detection
-                            const isStale = data.status?.lastActiveAt && (new Date().getTime() - data.status.lastActiveAt.getTime()) > 30 * 60 * 1000;
+                            const now = new Date().getTime();
+                            const lastActive = data.status?.lastActiveAt?.getTime() || 0;
+                            // Use absolute difference or just cap at 0 to handle future timestamps gracefully
+                            const diff = Math.max(0, now - lastActive);
+                            const isStale = lastActive > 0 && diff > 30 * 60 * 1000;
+
                             const rawActive = data.status?.isActive || false;
                             const isActive = rawActive && !isStale && hasLocation;
 
@@ -101,7 +106,7 @@ export function AgentStatusList({ agentData, onAgentClick, selectedAgentId }: Ag
                                                     size={12}
                                                     className={`${isActive
                                                         ? 'fill-emerald-500 text-emerald-500'
-                                                        : rawActive && isStale
+                                                        : rawActive
                                                             ? 'fill-amber-400 text-amber-400'
                                                             : 'fill-slate-400 text-slate-400'
                                                         }`}
