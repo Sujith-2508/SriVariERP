@@ -638,11 +638,15 @@ export async function parseTallyLedgers(): Promise<any[]> {
     }
 }
 
-export async function removeDealerFromSheet(id: string): Promise<boolean> {
+export async function removeDealerFromSheet(id: string, businessName: string): Promise<boolean> {
     const rowIndex = await findRowByValue(10, id);
     if (rowIndex > 0) {
         const empty = Array(11).fill('');
         await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A${rowIndex}:K${rowIndex}?valueInputOption=USER_ENTERED`, 'PUT', { values: [empty] });
+    }
+    // Also delete the individual ledger tab to prevent "Ghost Data" if name is reused later
+    if (businessName) {
+        await deleteDealerSheet(businessName);
     }
     return true;
 }

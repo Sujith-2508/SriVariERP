@@ -685,6 +685,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .delete()
             .eq('customer_id', id);
 
+        // Get dealer object first to pull the name for Sheet tab deletion
+        const dealerToDelete = dealers.find(d => d.id === id);
+
         const { error } = await supabase
             .from('dealers')
             .delete()
@@ -698,10 +701,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTransactions(prev => prev.filter(t => t.customerId !== id));
         setDealers(prev => prev.filter(d => d.id !== id));
 
-        // Remove from Google Sheets in background
-        removeDealerFromSheet(id).catch(e =>
-            console.warn('[DataContext] Dealer removal sync to Google Sheet failed:', e)
-        );
+        // Remove from Google Sheets in background including the ledger tab
+        if (dealerToDelete) {
+            removeDealerFromSheet(id, dealerToDelete.businessName).catch(e =>
+                console.warn('[DataContext] Dealer removal sync to Google Sheet failed:', e)
+            );
+        }
     };
 
     const getDealerTransactions = (dealerId: string, customTxns?: Transaction[]): Transaction[] => {
@@ -1180,8 +1185,42 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const getCustomerTransactions = getDealerTransactions;
 
     const bulkSyncDealers = async () => {
-        if (dealers.length === 0) return;
-        await bulkSyncDealersToSheet(dealers);
+        // Ensure we have the absolute latest data from DB before syncing to Sheet
+        await fetchData();
+
+        // Re-fetch dealers raw to ensure we get the absolute latest if state is slightly behind
+        const { data: res, error: dealersError } = await supabase.from('dealers').select('*');
+        if (dealersError || !res || res.length === 0) return;
+
+        const currentDealers = res.map(transformDealer);
+        console.log(`[DataContext] Starting Force Re-Sync for ${currentDealers.length} dealers to Google Sheets...`);
+
+        // 1. Re-sync Master Index (Refined Dealers list) first
+        await bulkSyncDealersToSheet(currentDealers);
+
+        // 2. Comprehensive Ledger Sync (one-by-one to avoid rate limits)
+        for (const dealer of currentDealers) {
+            try {
+                // syncDealerLedgerToSheet handles clearing the tab and re-appending all txns
+                await syncDealerLedgerToSheet(dealer.id);
+
+                // Mark all transactions for this dealer as synced in Supabase
+                await supabase
+                    .from('transactions')
+                    .update({ synced_to_sheet: true })
+                    .eq('customer_id', dealer.id);
+
+                // Mark dealer as synced
+                await supabase
+                    .from('dealers')
+                    .update({ synced_to_sheet: true })
+                    .eq('id', dealer.id);
+            } catch (err) {
+                console.error(`[DataContext] Bulk re-sync failed for ${dealer.businessName}:`, err);
+            }
+        }
+
+        await fetchData(); // Final refresh
     };
 
     const syncAllDealerTabs = async (): Promise<{ created: number; skipped: number }> => {
@@ -1327,7 +1366,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (error) throw error;
 
         // Remove from master index
-        await removeDealerFromSheet(id);
+        await removeDealerFromSheet(id, sheetName);
 
         // Optionally delete the individual sheet tab
         if (deleteTab) {

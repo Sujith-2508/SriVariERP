@@ -4,13 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/contexts/DataContext';
 import { Agent } from '@/types';
-import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt } from 'lucide-react';
+import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt, Activity } from 'lucide-react';
 import { LiveMap } from '@/components/LiveMap';
 import { AgentStatusList } from '@/components/AgentStatusList';
 import { AttendanceCalendar } from '@/components/AttendanceCalendar';
 import AgentSalaryManagement from '@/components/AgentSalaryManagement';
 import CompanyExpenseManagement from '@/components/CompanyExpenseManagement';
 import { ProfitAnalysis } from '@/components/ProfitAnalysis';
+import { AgentRecentActivity } from '@/components/AgentRecentActivity';
 
 type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses' | 'analysis';
 
@@ -225,156 +226,136 @@ export default function AgentsPage() {
 
             {/* Tab Content */}
             <div className="flex-1 overflow-hidden">
-                {/* Overview Tab */}
+                {/* Overview Tab (Dashboard) */}
                 {activeTab === 'overview' && (
-                    <div className="h-full overflow-y-auto p-6">
-                        {/* Stats Cards */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-3 bg-emerald-100 rounded-lg">
-                                        <Users size={20} className="text-emerald-600" />
+                    <div className="h-full flex flex-col md:flex-row gap-6 p-6 overflow-hidden">
+                        {/* Agents Table List */}
+                        <div className={`flex-1 overflow-y-auto min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 transition-all ${selectedAgent ? 'md:w-3/5' : 'w-full'}`}>
+                            {/* Stats Header for Overview */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-0 border-b border-slate-100 divide-x divide-slate-100">
+                                <div className="p-6">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
+                                            <Users size={18} />
+                                        </div>
+                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Agents</p>
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-slate-500">Total Agents</p>
-                                        <p className="text-2xl font-bold text-slate-800">{activeAgents.length}</p>
+                                    <p className="text-2xl font-black text-slate-800">{agents.length}</p>
+                                </div>
+                                <div className="p-6">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
+                                            <Target size={18} />
+                                        </div>
+                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Target</p>
                                     </div>
+                                    <p className="text-2xl font-black text-slate-800">₹{(activeAgents.reduce((acc, a) => acc + (a.collectionTarget || 100000), 0) / 100000).toFixed(1)}L</p>
+                                </div>
+                                <div className="p-6">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className="p-2 bg-purple-50 rounded-lg text-purple-600">
+                                            <TrendingUp size={18} />
+                                        </div>
+                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Collected</p>
+                                    </div>
+                                    <p className="text-2xl font-black text-slate-800">₹{(activeAgents.reduce((acc, a) => acc + getAgentCollections(a.name), 0) / 1000).toFixed(1)}K</p>
                                 </div>
                             </div>
-                            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-3 bg-blue-100 rounded-lg">
-                                        <Target size={20} className="text-blue-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-slate-500">Total Target</p>
-                                        <p className="text-2xl font-bold text-slate-800">
-                                            ₹{activeAgents.reduce((acc, a) => acc + (a.collectionTarget || 100000), 0).toLocaleString()}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-3 bg-purple-100 rounded-lg">
-                                        <TrendingUp size={20} className="text-purple-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-slate-500">This Month Collected</p>
-                                        <p className="text-2xl font-bold text-slate-800">
-                                            ₹{activeAgents.reduce((acc, a) => acc + getAgentCollections(a.name), 0).toLocaleString()}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
 
-                        {/* Agents Table */}
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            <table className="w-full">
-                                <thead className="bg-slate-50 border-b border-slate-200">
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
+                                <div>
+                                    <h2 className="text-lg font-bold text-slate-800">Performance Table</h2>
+                                    <p className="text-xs text-slate-500 font-medium">Click an agent to view live activity logs</p>
+                                </div>
+                            </div>
+
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-50/50 text-slate-500 text-xs font-bold uppercase tracking-wider sticky top-[50px] z-10">
                                     <tr>
-                                        <th className="text-left px-6 py-4 text-sm font-semibold text-slate-600">Agent</th>
-                                        <th className="text-left px-6 py-4 text-sm font-semibold text-slate-600">Division</th>
-                                        <th className="text-left px-6 py-4 text-sm font-semibold text-slate-600">Phone</th>
-                                        <th className="text-left px-6 py-4 text-sm font-semibold text-slate-600">Target</th>
-                                        <th className="text-left px-6 py-4 text-sm font-semibold text-slate-600">Collected</th>
-                                        <th className="text-left px-6 py-4 text-sm font-semibold text-slate-600">Achievement</th>
-                                        <th className="text-left px-6 py-4 text-sm font-semibold text-slate-600">Status</th>
-                                        <th className="text-center px-6 py-4 text-sm font-semibold text-slate-600">Actions</th>
+                                        <th className="px-6 py-4">Agent Details</th>
+                                        <th className="px-6 py-4">Target (%)</th>
+                                        <th className="px-6 py-4">Status</th>
+                                        <th className="px-6 py-4 text-center">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody className="divide-y divide-slate-100">
                                     {isLoading ? (
                                         <tr>
-                                            <td colSpan={8} className="text-center py-12 text-slate-400">
-                                                Loading agents...
+                                            <td colSpan={4} className="px-6 py-20 text-center">
+                                                <div className="flex flex-col items-center gap-3">
+                                                    <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                                                    <p className="text-slate-500 font-medium">Fetching agent data...</p>
+                                                </div>
                                             </td>
                                         </tr>
-                                    ) : activeAgents.length === 0 ? (
+                                    ) : agents.length === 0 ? (
                                         <tr>
-                                            <td colSpan={8} className="text-center py-12 text-slate-400">
-                                                <Users size={48} className="mx-auto mb-3 opacity-50" />
-                                                <p>No active agents. Add your first agent!</p>
+                                            <td colSpan={4} className="px-6 py-20 text-center text-slate-400">
+                                                <Users size={48} className="mx-auto mb-3 opacity-20" />
+                                                <p className="text-lg font-medium">No agents added yet</p>
                                             </td>
                                         </tr>
                                     ) : (
-                                        activeAgents.map(agent => {
-                                            const collected = getAgentCollections(agent.name);
-                                            const target = agent.collectionTarget || 100000;
-                                            const percentage = Math.round((collected / target) * 100);
-                                            const displayPercent = Math.min(percentage, 100);
-                                            const isOverTarget = percentage >= 100;
+                                        agents.map(agent => {
+                                            const collections = getAgentCollections(agent.name);
+                                            const percent = Math.min(100, Math.round((collections / (agent.collectionTarget || 100000)) * 100));
+                                            const displayPercent = isNaN(percent) ? 0 : percent;
 
                                             return (
-                                                <tr key={agent.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                                                <tr
+                                                    key={agent.id}
+                                                    onClick={() => setSelectedAgent(agent)}
+                                                    className={`hover:bg-slate-50/80 transition-colors group cursor-pointer ${selectedAgent?.id === agent.id ? 'bg-emerald-50/50' : ''}`}
+                                                >
                                                     <td className="px-6 py-4">
                                                         <div className="flex items-center gap-3">
-                                                            <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-sm font-bold text-slate-600">
-                                                                {agent.name.split(' ').map(n => n[0]).join('')}
+                                                            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 font-bold group-hover:bg-emerald-100 group-hover:text-emerald-700 transition-colors">
+                                                                {agent.name.charAt(0)}
                                                             </div>
                                                             <div>
-                                                                <div className="font-medium text-slate-800">{agent.name}</div>
-                                                                {agent.agentId && <div className="text-xs text-slate-400">ID: {agent.agentId}</div>}
+                                                                <div className="font-bold text-slate-800">{agent.name}</div>
+                                                                <div className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">
+                                                                    {agent.division || 'General'} • {agent.phone}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <div className="flex items-center gap-2 text-slate-600">
-                                                            <MapPin size={14} />
-                                                            {agent.division || agent.area || '-'}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4">
-                                                        <div className="flex items-center gap-2 text-slate-600">
-                                                            <Phone size={14} />
-                                                            {agent.phone}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4 font-medium text-slate-800">
-                                                        ₹{target.toLocaleString()}
-                                                    </td>
-                                                    <td className="px-6 py-4 font-medium text-slate-800">
-                                                        ₹{collected.toLocaleString()}
-                                                    </td>
-                                                    <td className="px-6 py-4">
-                                                        <div className="w-32">
-                                                            <div className="flex justify-between text-xs mb-1">
-                                                                <span className={isOverTarget ? 'text-emerald-600 font-bold' : 'text-slate-500'}>
-                                                                    {percentage}%
-                                                                </span>
+                                                        <div className="max-w-[120px]">
+                                                            <div className="flex justify-between text-[10px] mb-1 font-bold">
+                                                                <span className="text-emerald-600">₹{(collections / 1000).toFixed(1)}k</span>
+                                                                <span className="text-slate-400">{displayPercent}%</span>
                                                             </div>
-                                                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                                                                 <div
-                                                                    className={`h-full rounded-full transition-all ${isOverTarget ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                                                                    className={`h-full rounded-full transition-all duration-1000 ${displayPercent >= 100 ? 'bg-emerald-500' : 'bg-emerald-400'
+                                                                        }`}
                                                                     style={{ width: `${displayPercent}%` }}
                                                                 />
                                                             </div>
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4">
-                                                        <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${agent.isActive
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : 'bg-slate-100 text-slate-600'
+                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-black tracking-widest uppercase border ${agent.isActive
+                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                                            : 'bg-slate-50 text-slate-500 border-slate-100'
                                                             }`}>
-                                                            {agent.isActive ? 'Active' : 'Inactive'}
+                                                            {agent.isActive ? 'ACTIVE' : 'OFF'}
                                                         </span>
                                                     </td>
-                                                    <td className="px-6 py-4">
-                                                        <div className="flex items-center justify-center gap-2">
+                                                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="flex items-center justify-center gap-1">
                                                             <button
                                                                 onClick={() => handleEdit(agent)}
-                                                                className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors"
-                                                                title="Edit"
+                                                                className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors"
                                                             >
-                                                                <Edit2 size={16} />
+                                                                <Edit2 size={14} />
                                                             </button>
                                                             <button
                                                                 onClick={() => handleDelete(agent.id)}
-                                                                className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
-                                                                title="Delete"
+                                                                className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
                                                             >
-                                                                <Trash2 size={16} />
+                                                                <Trash2 size={14} />
                                                             </button>
                                                         </div>
                                                     </td>
@@ -385,6 +366,64 @@ export default function AgentsPage() {
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* Recent Activity Live Panel */}
+                        {selectedAgent && (
+                            <div className="w-full md:w-2/5 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col animate-in slide-in-from-right duration-300">
+                                <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-xl font-bold shadow-lg shadow-emerald-100">
+                                            {selectedAgent.name.charAt(0)}
+                                        </div>
+                                        <div>
+                                            <h2 className="text-lg font-bold text-slate-800">{selectedAgent.name}</h2>
+                                            <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider">Live Dashboard</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => setSelectedAgent(null)}
+                                        className="p-2 hover:bg-slate-200 text-slate-400 rounded-xl transition-all"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto p-6">
+                                    <div className="grid grid-cols-2 gap-4 mb-8">
+                                        <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
+                                            <p className="text-[10px] font-bold text-emerald-600 uppercase mb-1">Total Collected</p>
+                                            <p className="text-2xl font-black text-emerald-800">₹{getAgentCollections(selectedAgent.name).toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-blue-50 rounded-2xl p-4 border border-blue-100">
+                                            <p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Receipts</p>
+                                            <p className="text-2xl font-black text-blue-800">
+                                                {transactions.filter(t => t.agentName === selectedAgent.name && t.type === 'PAYMENT').length}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <AgentRecentActivity agentId={selectedAgent.id} agentName={selectedAgent.name} />
+                                </div>
+
+                                <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
+                                    <button
+                                        onClick={() => setActiveTab('attendance')}
+                                        className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center justify-center gap-2 mx-auto"
+                                    >
+                                        <Calendar size={14} />
+                                        VIEW ATTENDANCE HISTORY
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {!selectedAgent && (
+                            <div className="hidden md:flex flex-1 items-center justify-center flex-col text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                                <Activity size={64} className="mb-4 opacity-10" />
+                                <h3 className="text-lg font-bold text-slate-300">Live Agent Dashboard</h3>
+                                <p className="text-sm">Click any agent in the performance table to see their real-time activity trail</p>
+                            </div>
+                        )}
                     </div>
                 )}
 

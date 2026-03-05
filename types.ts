@@ -224,6 +224,16 @@ export interface AgentTrackingData {
   todayAttendance?: Attendance;
 }
 
+// Unified Agent Activity for Timeline
+export interface AgentActivity {
+  id: string;
+  agentId: string;
+  type: 'CHECK_IN' | 'CHECK_OUT' | 'PAYMENT' | 'LOCATION' | 'STATUS_CHANGE';
+  description: string;
+  timestamp: Date;
+  metadata?: any; // e.g. amount, referenceId, latitude, longitude
+}
+
 // Purchase Management - Supplier
 export interface SupplierData {
   id: string;

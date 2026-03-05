@@ -484,20 +484,21 @@ export default function DealerLedger() {
     };
 
     const handleBulkSync = async () => {
+        if (!confirm('This will re-sync ALL dealer data and individual ledgers to Google Sheets. This might take a few minutes. Continue?')) return;
         setIsSyncing(true);
         try {
             await bulkSyncDealers();
-            alert('Successfully synced all dealers to Google Sheets!');
+            alert('Full sync complete! All data and ledgers are now up-to-date in Google Sheets.');
         } catch (error) {
-            console.error('Migration failed:', error);
-            alert('Failed to sync dealers to Google Sheets');
+            console.error('Core sync failed:', error);
+            alert('Failed to sync. Please check your internet connection or Google Sheets connectivity.');
         } finally {
             setIsSyncing(false);
         }
     };
 
-    const handleImportFromSheets = async () => {
-        if (!confirm('This will import new dealers from the "refined dealers" sheet and update existing ones. Continue?')) return;
+    const handleImportFromSheet = async () => {
+        if (!confirm('This will import dealers from Google Sheets. Existing dealers will be updated. Continue?')) return;
 
         setIsImporting(true);
         try {
@@ -525,11 +526,6 @@ export default function DealerLedger() {
             setIsTallyImporting(false);
         }
     };
-
-
-
-
-
 
     const handleBulkExportPDF = async () => {
         setDateRangeModal(prev => ({ ...prev, open: false }));
@@ -750,7 +746,7 @@ export default function DealerLedger() {
                     })()}
 
                     {/* Payment History Table */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
                         <div className="bg-emerald-600 text-white p-4">
                             <div className="flex items-center gap-2">
                                 <Receipt size={18} />
@@ -1164,44 +1160,17 @@ export default function DealerLedger() {
                     </div>
                     <div className="flex gap-3 items-center">
                         <button
-                            onClick={handleImportFromSheets}
-                            disabled={isImporting}
-                            className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-blue-100 transition-colors disabled:opacity-50"
-                            title="Import all dealers from 'refined dealers' sheet"
-                        >
-                            {isImporting ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
-                            Import
-                        </button>
-                        <button
-                            onClick={handleImportFromTally}
-                            disabled={isTallyImporting}
-                            className="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-amber-100 transition-colors disabled:opacity-50"
-                            title="Import actual Tally balances from 'Ledger Vouchers' sheet"
-                        >
-                            {isTallyImporting ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                            Tally
-                        </button>
-                        <button
                             onClick={handleBulkSync}
                             disabled={isSyncing}
-                            className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-100 transition-colors disabled:opacity-50"
-                            title="Backup all dealers to Google Sheets"
+                            className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 disabled:opacity-50"
+                            title="Re-sync all data correctly from Database to Google Sheets"
                         >
                             {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
-                            Sync
-                        </button>
-                        <button
-                            onClick={() => openDateModal('bulk-export')}
-                            disabled={bulkExporting}
-                            className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg disabled:opacity-60"
-                            title="Export all dealer statements as a single PDF"
-                        >
-                            {bulkExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                            Export All
+                            {isSyncing ? 'Syncing...' : 'Sync to Sheets'}
                         </button>
                         <button
                             onClick={() => setIsAddModalOpen(true)}
-                            className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-lg"
+                            className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg"
                         >
                             <User size={16} />
                             Add Dealer
@@ -1228,7 +1197,26 @@ export default function DealerLedger() {
                 {/* Dealer Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {
-                        filteredDealers.length > 0 ? (
+                        filteredDealers.length === 0 ? (
+                            <div className="col-span-full bg-white rounded-3xl border border-slate-200 p-20 flex flex-col items-center justify-center text-center shadow-sm">
+                                <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-6">
+                                    <Building2 size={48} className="text-slate-200" />
+                                </div>
+                                <h3 className="text-2xl font-bold text-slate-800 mb-2">No Dealers Found</h3>
+                                <p className="text-slate-500 max-w-sm mb-8">
+                                    {searchTerm ? `No results for "${searchTerm}". Try a different name.` : "Start by adding your first dealer. Once added, you can manage their invoices, receipts, and statements."}
+                                </p>
+                                {!searchTerm && (
+                                    <button
+                                        onClick={() => setIsAddModalOpen(true)}
+                                        className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95"
+                                    >
+                                        <User size={20} />
+                                        Create Your First Dealer
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
                             filteredDealers.map(d => (
                                 <div key={d.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
                                     <div className="flex justify-between items-start mb-3">
@@ -1299,37 +1287,6 @@ export default function DealerLedger() {
                                     )}
                                 </div>
                             ))
-                        ) : (
-                            <div className="col-span-full py-20 flex flex-col items-center justify-center bg-white rounded-2xl border-2 border-dashed border-slate-200">
-                                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-                                    <User size={40} className="text-slate-300" />
-                                </div>
-                                <h3 className="text-xl font-bold text-slate-800 mb-2">
-                                    {searchTerm ? 'No matching dealers found' : 'No dealers registered yet'}
-                                </h3>
-                                <p className="text-slate-500 text-center max-w-sm mb-8">
-                                    {searchTerm
-                                        ? `We couldn't find any dealers matching "${searchTerm}". Try a different search term.`
-                                        : 'Start by adding your first dealer business to manage their ledgers and tracking.'}
-                                </p>
-                                {!searchTerm && (
-                                    <button
-                                        onClick={() => setIsAddModalOpen(true)}
-                                        className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold shadow-xl hover:bg-slate-800 transition-all flex items-center gap-2"
-                                    >
-                                        <User size={20} />
-                                        Create New Dealer
-                                    </button>
-                                )}
-                                {searchTerm && (
-                                    <button
-                                        onClick={() => setSearchTerm('')}
-                                        className="text-emerald-600 font-bold hover:underline"
-                                    >
-                                        Clear search
-                                    </button>
-                                )}
-                            </div>
                         )
                     }
                 </div >

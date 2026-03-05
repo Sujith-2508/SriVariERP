@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { AgentStatus, Attendance, AgentLocation, AgentTrackingData, Agent } from '@/types';
+import { AgentStatus, Attendance, AgentLocation, AgentTrackingData, Agent, AgentActivity } from '@/types';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -183,6 +183,100 @@ export async function getAttendance(
     }
 
     return data.map(mapAttendance);
+}
+
+/**
+ * Get unified activity timeline for a specific agent
+ */
+export async function getAgentActivityTimeline(
+    agentId: string,
+    agentName: string,
+    limit: number = 20
+): Promise<AgentActivity[]> {
+    try {
+        const activities: AgentActivity[] = [];
+
+        // 1. Fetch recent attendance
+        const { data: attendanceLogs } = await supabase
+            .from('attendance')
+            .select('*')
+            .eq('agent_id', agentId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+
+        (attendanceLogs || []).forEach(a => {
+            if (a.check_in_time) {
+                activities.push({
+                    id: `att-in-${a.id}`,
+                    agentId,
+                    type: 'CHECK_IN',
+                    description: `Checked In at ${new Date(a.check_in_time).toLocaleTimeString()}`,
+                    timestamp: new Date(a.check_in_time),
+                    metadata: { notes: a.notes }
+                });
+            }
+            if (a.check_out_time) {
+                activities.push({
+                    id: `att-out-${a.id}`,
+                    agentId,
+                    type: 'CHECK_OUT',
+                    description: `Checked Out at ${new Date(a.check_out_time).toLocaleTimeString()}`,
+                    timestamp: new Date(a.check_out_time),
+                    metadata: { hours: a.total_hours }
+                });
+            }
+        });
+
+        // 2. Fetch recent payments by this agent
+        const { data: paymentTxns } = await supabase
+            .from('transactions')
+            .select('*')
+            .eq('type', 'PAYMENT')
+            .eq('agent_name', agentName)
+            .order('date', { ascending: false })
+            .limit(limit);
+
+        (paymentTxns || []).forEach(p => {
+            activities.push({
+                id: `pay-${p.id}`,
+                agentId,
+                type: 'PAYMENT',
+                description: `Recorded Receipt ${p.reference_id} for ₹${p.amount}`,
+                timestamp: new Date(p.date),
+                metadata: { amount: p.amount, ref: p.reference_id, source: p.source }
+            });
+        });
+
+        // 3. Fetch recent locations (to show movement)
+        const { data: locations } = await supabase
+            .from('agent_locations')
+            .select('*')
+            .eq('agent_id', agentId)
+            .order('recorded_at', { ascending: false })
+            .limit(limit / 2);
+
+        (locations || []).forEach(l => {
+            if (l.address) {
+                activities.push({
+                    id: `loc-${l.id}`,
+                    agentId,
+                    type: 'LOCATION',
+                    description: `Located at ${l.address}`,
+                    timestamp: new Date(l.recorded_at),
+                    metadata: { lat: l.latitude, lng: l.longitude }
+                });
+            }
+        });
+
+        // Sort by timestamp descending
+        return activities
+            .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+            .slice(0, limit);
+
+    } catch (e) {
+        console.error('Error fetching activity timeline:', e);
+        return [];
+    }
 }
 
 /**
