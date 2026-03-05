@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import { AgentTrackingData, AgentLocation } from '@/types';
 import { getAgentRoute, subscribeToLocationUpdates, subscribeToStatusUpdates } from '@/lib/agentTrackingService';
 import { MapPin, Navigation, Clock, Maximize } from 'lucide-react';
+import { getISTDateString } from '@/lib/utils';
 
 // Fix for default marker icons in Next.js/Electron
 const DefaultIcon = L.icon({
@@ -136,7 +137,7 @@ export function LiveMap({ agentData, selectedAgentId, onAgentClick }: LiveMapPro
     };
     const [routeHistory, setRouteHistory] = useState<AgentLocation[]>([]);
     const [showRoute, setShowRoute] = useState(false);
-    const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [selectedDate, setSelectedDate] = useState<string>(getISTDateString());
     const [isClient, setIsClient] = useState(false);
 
     useEffect(() => {
@@ -158,7 +159,7 @@ export function LiveMap({ agentData, selectedAgentId, onAgentClick }: LiveMapPro
     useEffect(() => {
         if (!selectedAgent || !showRoute) return;
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = getISTDateString();
         if (selectedDate !== today) return;
 
         const data = agentData.find(d => d.agent.id === selectedAgent);
@@ -205,7 +206,7 @@ export function LiveMap({ agentData, selectedAgentId, onAgentClick }: LiveMapPro
                             type="date"
                             value={selectedDate}
                             onChange={(e) => setSelectedDate(e.target.value)}
-                            max={new Date().toISOString().split('T')[0]}
+                            max={getISTDateString()}
                             className="text-xs border border-slate-200 rounded p-1 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                     </div>

@@ -30,8 +30,8 @@ const INDIVIDUAL_LEDGER_HEADERS = [
     'Invoice No.',      // C
     'Receipt No.',      // D
     'Vch Type',         // E
-    'Sales (Dr \u20B9)',  // F
-    'Receipts (Cr \u20B9)',// G
+    'Sales (Cr \u20B9)',  // F
+    'Receipts (Dr \u20B9)',// G
     'Balance (\u20B9)',   // H
     'Type'              // I
 ];
@@ -154,8 +154,10 @@ export async function syncDealerToSheet(dealer: Dealer, companyInfo?: any): Prom
         } else {
             console.log(`[SheetsDealers] Adding to Index: ${dealer.businessName}`);
             await ensureIndexTabExists();
-            await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A:K:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', { values: [rowData] });
+            // Use A:A to force it to look for the next free row starting from Column A
+            await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A:A:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', { values: [rowData] });
         }
+
 
         // 2. Initialize the PROFESSIONAL LEDGER Sheet for this dealer
         await initializeDealerLedger(dealer, companyInfo);
@@ -170,7 +172,7 @@ export async function syncDealerToSheet(dealer: Dealer, companyInfo?: any): Prom
 /**
  * Creates a professional Tally-style header for a dealer's ledger
  */
-async function initializeDealerLedger(dealer: Dealer, companyInfo: any): Promise<void> {
+export async function initializeDealerLedger(dealer: Dealer, companyInfo: any): Promise<void> {
     const name = sanitizeTabName(dealer.businessName);
     try {
         const res = await sheetsRequest('?fields=sheets.properties.title,sheets.properties.sheetId');
@@ -296,15 +298,26 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
         const isInvoice = transaction.type === 'INVOICE';
 
         // Smart Particulars Construction
+        const isCheckReturn = transaction.notes?.startsWith('Cheque Return') ||
+            transaction.notes?.startsWith('Check Return') ||
+            transaction.notes?.startsWith('Chq Return');
+
         let particulars = '';
-        if (isInvoice) {
+        if (isCheckReturn) {
+            particulars = `Cheque Return (${transaction.referenceId || ''})`;
+        } else if (isInvoice) {
             particulars = `Goods Sold to ${transaction.destination || 'Destination'}`;
             if (transaction.vehicleNumber) particulars += ` via ${transaction.vehicleNumber}`;
         } else {
-            // Receipt: Use standardized description to avoid random notes (e.g. Tamil) being the ONLY description
-            const agentPart = transaction.agentName ? ` (By ${transaction.agentName})` : '';
-            const notePart = transaction.notes ? ` - ${transaction.notes}` : '';
-            particulars = `Receipt Received${agentPart}${notePart}`;
+            // Receipt: Check if it's a Stock Return
+            const isStockReturn = transaction.notes?.includes('Stock Return');
+            if (isStockReturn) {
+                particulars = 'Stock Return Received';
+            } else {
+                const agentPart = transaction.agentName ? ` (By ${transaction.agentName})` : '';
+                const notePart = transaction.notes ? ` - ${transaction.notes}` : '';
+                particulars = `Receipt Received${agentPart}${notePart}`;
+            }
         }
 
         // --- NEW: DUPLICATE CHECK ---
@@ -316,23 +329,90 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
         }
 
         const rowData = [
-            `'${new Date(transaction.date).toLocaleDateString('en-IN')}`, // A: Date (Single quote prefix for plain text)
+            new Date(transaction.date).toLocaleDateString('en-IN'), // A: Date
             particulars,                                            // B: Particulars
-            isInvoice ? (transaction.referenceId || '') : '',      // C: Invoice No.
-            !isInvoice ? (transaction.referenceId || '') : '',     // D: Receipt No.
-            isInvoice ? 'Sales' : 'Receipt',                        // E: Vch Type
-            isInvoice ? transaction.amount : '',                    // F: Sales (Dr)
-            !isInvoice ? transaction.amount : '',                   // G: Receipts (Cr)
+            isInvoice ? (transaction.referenceId || '') : '',       // C: Invoice No.
+            !isInvoice ? (transaction.referenceId || '') : '',      // D: Receipt No.
+            isCheckReturn ? 'Cheque Return' : (isInvoice ? 'Sales' : (transaction.notes?.toLowerCase().includes('stock return') ? 'Stock Return' : 'Receipt')), // E: Vch Type
+            isInvoice ? transaction.amount : '',                    // F: Sales (Cr)
+            !isInvoice ? transaction.amount : '',                   // G: Receipts (Dr)
             Math.abs(runningBalance),                               // H: Balance
-            runningBalance >= 0 ? 'Dr' : 'Cr'                        // I: Type
+            (isInvoice || isCheckReturn) ? 'Cr' : 'Dr'              // I: Type
         ];
 
-        await sheetsRequest(`/values/'${name}'!A11:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', {
+        await sheetsRequest(`/values/'${name}'!A11:I1000000:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', {
             values: [rowData]
         });
         return true;
     } catch (e) {
         console.error(`[SheetsDealers] Failed to sync transaction for ${name}:`, e);
+        return false;
+    }
+}
+
+/**
+ * Writes ALL transactions for a dealer in ONE single API call.
+ * Use this for bulk operations instead of calling syncTransactionToDealerSheet
+ * per transaction (which hits the 60 write/min quota limit).
+ */
+export async function batchWriteTransactionsToDealerSheet(
+    dealerName: string,
+    transactions: any[]
+): Promise<boolean> {
+    const name = sanitizeTabName(dealerName);
+    if (transactions.length === 0) return true;
+
+    try {
+        let balance = 0;
+        const rows = transactions.map(txn => {
+            const isInvoice = txn.type === 'INVOICE';
+            if (isInvoice) balance += txn.amount;
+            else balance -= txn.amount;
+
+            const isCheckReturn = txn.notes?.startsWith('Cheque Return') ||
+                txn.notes?.startsWith('Check Return') ||
+                txn.notes?.startsWith('Chq Return');
+
+            let particulars = '';
+            if (isCheckReturn) {
+                particulars = `Cheque Return (${txn.referenceId || ''})`;
+            } else if (isInvoice) {
+                particulars = `Goods Sold to ${txn.destination || 'Destination'}`;
+                if (txn.vehicleNumber) particulars += ` via ${txn.vehicleNumber}`;
+            } else {
+                // Receipt: Check if it's a Stock Return
+                const isStockReturn = txn.notes?.includes('Stock Return');
+                if (isStockReturn) {
+                    particulars = 'Stock Return Received';
+                } else {
+                    const agentPart = txn.agentName ? ` (By ${txn.agentName})` : '';
+                    const notePart = txn.notes ? ` - ${txn.notes}` : '';
+                    particulars = `Receipt Received${agentPart}${notePart}`;
+                }
+            }
+
+            return [
+                new Date(txn.date).toLocaleDateString('en-IN'), // A: Date
+                particulars,                                    // B: Particulars
+                isInvoice ? (txn.referenceId || '') : '',       // C: Invoice No.
+                !isInvoice ? (txn.referenceId || '') : '',      // D: Receipt No.
+                isCheckReturn ? 'Cheque Return' : (isInvoice ? 'Sales' : (txn.notes?.toLowerCase().includes('stock return') ? 'Stock Return' : 'Receipt')), // E: Vch Type
+                isInvoice ? txn.amount : '',                    // F: Sales (Cr)
+                !isInvoice ? txn.amount : '',                   // G: Receipts (Dr)
+                Math.abs(balance),                              // H: Balance
+                (isInvoice || isCheckReturn) ? 'Cr' : 'Dr'      // I: Type
+            ];
+        });
+
+        // ONE API call for all rows
+        await sheetsRequest(
+            `/values/'${name}'!A11:I1000000:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+            'POST',
+            { values: rows }
+        );
+        return true;
+    } catch (e) {
+        console.error(`[SheetsDealers] batchWriteTransactionsToDealerSheet failed for ${name}:`, e);
         return false;
     }
 }
@@ -375,15 +455,50 @@ export async function bulkSyncDealersToSheet(dealers: Dealer[]): Promise<boolean
     try {
         await ensureTabExists();
         const rows = dealers.map(dealerToRow);
-        // Set Headers
         await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A1:K1?valueInputOption=USER_ENTERED`, 'PUT', { values: [DEALER_HEADERS] });
-        // Append all
-        await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A2:K:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', { values: rows });
+        // Use A:A to force it to look for the next free row starting from Column A
+        await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A:A:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', { values: rows });
         return true;
     } catch (e) {
         console.error('[SheetsDealers] Bulk sync fail:', e);
         return false;
     }
+}
+
+/**
+ * Creates individual Google Sheet tabs for ALL dealers that do not yet have one.
+ * Uses initializeDealerLedger so format matches exactly (company header, dealer info, period, table).
+ * Returns { created, skipped } counts.
+ */
+export async function bulkCreateDealerTabs(
+    dealers: Dealer[],
+    companyInfo?: any
+): Promise<{ created: number; skipped: number }> {
+    let created = 0;
+    let skipped = 0;
+    try {
+        // Fetch all existing tab names in one call
+        const res = await sheetsRequest('?fields=sheets.properties.title');
+        const existingTitles: Set<string> = new Set(
+            (res.sheets || []).map((s: any) => s.properties.title as string)
+        );
+
+        for (const dealer of dealers) {
+            const tabName = sanitizeTabName(dealer.businessName);
+            if (existingTitles.has(tabName)) {
+                console.log(`[SheetsDealers] Tab exists, skipping: "${tabName}"`);
+                skipped++;
+            } else {
+                console.log(`[SheetsDealers] Creating missing tab: "${tabName}"`);
+                await initializeDealerLedger(dealer, companyInfo);
+                existingTitles.add(tabName);
+                created++;
+            }
+        }
+    } catch (e) {
+        console.error('[SheetsDealers] bulkCreateDealerTabs error:', e);
+    }
+    return { created, skipped };
 }
 
 /**
@@ -530,4 +645,37 @@ export async function removeDealerFromSheet(id: string): Promise<boolean> {
         await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A${rowIndex}:K${rowIndex}?valueInputOption=USER_ENTERED`, 'PUT', { values: [empty] });
     }
     return true;
+}
+
+/**
+ * Deletes every sheet tab that is NOT in the `keepTabs` list.
+ * Tabs in `keepTabs` are preserved exactly as-is (case-sensitive).
+ * Returns the number of tabs deleted.
+ */
+export async function deleteAllTabsExcept(keepTabs: string[]): Promise<number> {
+    try {
+        const res = await sheetsRequest('?fields=sheets.properties.title,sheets.properties.sheetId,sheets.properties.index');
+        const allSheets: { title: string; sheetId: number; index: number }[] =
+            (res.sheets || []).map((s: any) => ({
+                title: s.properties.title as string,
+                sheetId: s.properties.sheetId as number,
+                index: s.properties.index as number,
+            })).sort((a: any, b: any) => b.index - a.index); // reverse order to avoid index-shift issues
+
+        const toDelete = allSheets.filter(s => !keepTabs.includes(s.title));
+
+        console.log(`[SheetsDealers] ${allSheets.length} total tabs, keeping ${keepTabs.length}, deleting ${toDelete.length}`);
+
+        for (const sheet of toDelete) {
+            await sheetsRequest(':batchUpdate', 'POST', {
+                requests: [{ deleteSheet: { sheetId: sheet.sheetId } }]
+            });
+            console.log(`[SheetsDealers] Deleted tab: "${sheet.title}"`);
+        }
+
+        return toDelete.length;
+    } catch (e) {
+        console.error('[SheetsDealers] deleteAllTabsExcept failed:', e);
+        return 0;
+    }
 }

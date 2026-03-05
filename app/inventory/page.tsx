@@ -175,7 +175,7 @@ export default function Inventory() {
     const handleStockUpdate = () => {
         if (!stockUpdateProduct || !stockUpdateValue) return;
 
-        const value = parseInt(stockUpdateValue);
+        const value = parseFloat(stockUpdateValue);
         if (isNaN(value)) return;
 
         const newStock = stockUpdateType === 'add'
@@ -211,7 +211,7 @@ export default function Inventory() {
                     <p className="text-sm text-slate-500">Manage products and stock levels</p>
                 </div>
                 <button
-                    onClick={handleOpenAdd}
+                    onClick={() => handleOpenAdd()}
                     className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-lg"
                 >
                     <Plus size={16} />
@@ -271,7 +271,12 @@ export default function Inventory() {
                                             <span className="bg-slate-100 px-2 py-1 rounded text-xs">{p.category}</span>
                                         </td>
                                         <td className="p-4 text-right font-medium">₹{p.price.toLocaleString()}</td>
-                                        <td className="p-4 text-center font-bold">{p.stock}</td>
+                                        <td className="p-4 text-center">
+                                            <span className={`font-bold ${p.stock <= 5 ? 'text-red-600' : 'text-slate-700'}`}>
+                                                {p.stock.toFixed(3)}
+                                            </span>
+                                            <span className="text-[10px] text-slate-400 ml-1 uppercase">{p.unit || 'nos'}</span>
+                                        </td>
                                         <td className="p-4 text-center">
                                             <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-semibold">
                                                 {gstDisplay}%
@@ -466,8 +471,9 @@ export default function Inventory() {
                                     <input
                                         type="number"
                                         min="0"
+                                        step="0.001"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        placeholder="0"
+                                        placeholder="0.000"
                                         value={formData.stock}
                                         onChange={e => setFormData({ ...formData, stock: e.target.value === '' ? '' : e.target.value })}
                                         ref={stockRef}
@@ -559,14 +565,15 @@ export default function Inventory() {
                             </div>
 
                             <div className="p-6 space-y-4">
-                                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                                    <p className="font-medium text-slate-800">{stockUpdateProduct.name}</p>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                        Product ID: <span className="font-mono font-bold">{stockUpdateProduct.productId}</span>
-                                    </p>
-                                    <p className="text-sm text-slate-500">Current Stock: <strong>{stockUpdateProduct.stock}</strong></p>
+                                <div className="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                    <div>
+                                        <h2 className="text-xl font-bold text-slate-800">{stockUpdateProduct.name}</h2>
+                                        <p className="text-sm text-slate-500">Current Stock: <span className="font-bold">{stockUpdateProduct.stock.toFixed(3)}</span> {stockUpdateProduct.unit || 'nos'}</p>
+                                    </div>
+                                    <div className="bg-white px-3 py-1 rounded-full border border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                        ID: {stockUpdateProduct.productId || stockUpdateProduct.id.slice(0, 8)}
+                                    </div>
                                 </div>
-
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-2">Update Type</label>
                                     <div className="grid grid-cols-2 gap-3">
@@ -600,8 +607,9 @@ export default function Inventory() {
                                     <input
                                         type="number"
                                         min="0"
+                                        step="0.001"
                                         className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-lg font-medium text-center"
-                                        placeholder="0"
+                                        placeholder="0.000"
                                         value={stockUpdateValue}
                                         onChange={e => setStockUpdateValue(e.target.value)}
                                     />
@@ -612,8 +620,8 @@ export default function Inventory() {
                                         <span className="text-sm text-emerald-700">New Stock: </span>
                                         <span className="font-bold text-emerald-800">
                                             {stockUpdateType === 'add'
-                                                ? stockUpdateProduct.stock + (parseInt(stockUpdateValue) || 0)
-                                                : parseInt(stockUpdateValue) || 0
+                                                ? (stockUpdateProduct.stock + (parseFloat(stockUpdateValue) || 0)).toFixed(3)
+                                                : (parseFloat(stockUpdateValue) || 0).toFixed(3)
                                             }
                                         </span>
                                     </div>
@@ -628,7 +636,7 @@ export default function Inventory() {
                                         Cancel
                                     </button>
                                     <button
-                                        onClick={handleStockUpdate}
+                                        onClick={() => handleStockUpdate()}
                                         disabled={!stockUpdateValue}
                                         className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 disabled:bg-slate-300 disabled:shadow-none"
                                     >

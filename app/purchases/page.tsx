@@ -31,6 +31,7 @@ import {
 } from '@/lib/purchaseService';
 import { createSupplierSheetTab, SupplierSheetDetails, CompanySheetDetails } from '@/lib/googleSheetSuppliers';
 import { syncAllStatements } from '@/lib/folderSyncService';
+import { getISTDateString } from '@/lib/utils';
 import {
     Search,
     Plus,
@@ -105,7 +106,7 @@ export default function PurchasesPage() {
     const [billForm, setBillForm] = useState({
         supplierId: '',
         billNumber: '',
-        billDate: new Date().toISOString().split('T')[0],
+        billDate: getISTDateString(),
         amount: 0,
         dueDate: '',
         notes: ''
@@ -123,7 +124,7 @@ export default function PurchasesPage() {
     const [paymentForm, setPaymentForm] = useState({
         supplierId: '',
         paymentNumber: '',
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: getISTDateString(),
         amount: 0,
         paymentMode: 'CASH' as 'CASH' | 'CHEQUE' | 'BANK_TRANSFER' | 'UPI' | 'OTHER',
         referenceNumber: '',
@@ -393,7 +394,7 @@ export default function PurchasesPage() {
         setBillForm({
             supplierId: '',
             billNumber: '',
-            billDate: new Date().toISOString().split('T')[0],
+            billDate: getISTDateString(),
             amount: 0,
             dueDate: '',
             notes: ''
@@ -485,7 +486,7 @@ export default function PurchasesPage() {
         setPaymentForm({
             supplierId: '',
             paymentNumber: nextNo,
-            paymentDate: new Date().toISOString().split('T')[0],
+            paymentDate: getISTDateString(),
             amount: 0,
             paymentMode: 'CASH',
             referenceNumber: '',
@@ -1176,7 +1177,8 @@ export default function PurchasesPage() {
                                                         ref={billQtyRef}
                                                         onKeyDown={(e) => handleProductEntryKeyDown(e, 'qty')}
                                                         type="number"
-                                                        min="1"
+                                                        step="0.001"
+                                                        min="0"
                                                         className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
                                                         value={currentBillItem.quantity || ''}
                                                         onChange={e => setCurrentBillItem({ ...currentBillItem, quantity: parseFloat(e.target.value) || 0 })}
@@ -1197,7 +1199,7 @@ export default function PurchasesPage() {
                                                     <button
                                                         ref={billAddBtnRef}
                                                         type="button"
-                                                        onClick={handleAddBillItem}
+                                                        onClick={() => handleAddBillItem()}
                                                         className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold hover:bg-slate-700 transition-colors"
                                                     >
                                                         Add
@@ -1221,7 +1223,7 @@ export default function PurchasesPage() {
                                                             {billItems.map((item, idx) => (
                                                                 <tr key={idx}>
                                                                     <td className="p-2">{item.productName}</td>
-                                                                    <td className="p-2 text-center">{item.quantity}</td>
+                                                                    <td className="p-2 text-center">{Number(item.quantity).toFixed(3)}</td>
                                                                     <td className="p-2 text-right">₹{item.unitPrice.toLocaleString()}</td>
                                                                     <td className="p-2 text-right font-bold">₹{item.total.toLocaleString()}</td>
                                                                     <td className="p-2 text-center">
@@ -1269,8 +1271,8 @@ export default function PurchasesPage() {
                                                 type="number"
                                                 required
                                                 className={`w-full p-3 border-2 rounded-xl outline-none text-2xl font-bold text-emerald-600 transition-colors ${billItems.length > 0
-                                                        ? 'border-emerald-300 bg-emerald-50 focus:border-emerald-500'
-                                                        : 'border-blue-300 bg-blue-50 focus:border-blue-500'
+                                                    ? 'border-emerald-300 bg-emerald-50 focus:border-emerald-500'
+                                                    : 'border-blue-300 bg-blue-50 focus:border-blue-500'
                                                     }`}
                                                 value={billForm.amount || ''}
                                                 onChange={e => setBillForm({ ...billForm, amount: parseFloat(e.target.value) || 0 })}
@@ -1390,7 +1392,7 @@ export default function PurchasesPage() {
                                                 {selectedBill.items?.map((item: any, idx: number) => (
                                                     <tr key={idx} className="hover:bg-slate-50/50">
                                                         <td className="p-3 font-medium text-slate-800">{item.productName}</td>
-                                                        <td className="p-3 text-center">{item.quantity}</td>
+                                                        <td className="p-3 text-center">{Number(item.quantity).toFixed(3)}</td>
                                                         <td className="p-3 text-right text-slate-600">₹{item.unitPrice.toLocaleString()}</td>
                                                         <td className="p-3 text-right font-bold text-slate-800">₹{item.total.toLocaleString()}</td>
                                                     </tr>
@@ -1604,7 +1606,7 @@ export default function PurchasesPage() {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button
-                                        onClick={downloadStatementPdf}
+                                        onClick={() => downloadStatementPdf()}
                                         disabled={isGeneratingPdf}
                                         className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-md disabled:bg-emerald-400"
                                     >

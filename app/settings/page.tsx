@@ -371,7 +371,7 @@ export default function SettingsPage() {
                         )}
 
                         <button
-                            onClick={handleConnectDrive}
+                            onClick={() => handleConnectDrive()}
                             disabled={driveConnecting}
                             className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${driveConnected
                                 ? 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 border border-slate-200'
@@ -452,7 +452,7 @@ export default function SettingsPage() {
                                 <label className={labelCls}>{label}</label>
                                 <div className="relative">
                                     <input type={show ? 'text' : 'password'} value={value} onChange={(e) => set(e.target.value)} className={`${inputCls} pr-12`} placeholder={placeholder} />
-                                    <button type="button" onClick={toggle} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                    <button type="button" onClick={() => toggle()} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                                         {show ? <EyeOff size={18} /> : <Eye size={18} />}
                                     </button>
                                 </div>

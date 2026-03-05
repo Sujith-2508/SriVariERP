@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
 import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
-import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow } from '@/lib/googleSheetDealers';
+import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
 
 interface InvoiceData {
     vehicleName?: string;
@@ -48,10 +48,12 @@ interface DataContextType {
     getInvoicePaymentHistory: (invoiceId: string) => PaymentAllocation[];
     refreshData: () => Promise<void>;
     bulkSyncDealers: () => Promise<void>;
+    syncAllDealerTabs: () => Promise<{ created: number; skipped: number }>;
     importDealersFromSheet: () => Promise<{ added: number; updated: number }>;
     importDealersFromTally: () => Promise<{ added: number; updated: number }>;
     deleteDealerWithSheet: (id: string, sheetName: string, deleteTab: boolean) => Promise<void>;
     syncDealerLedgerToSheet: (dealerId: string) => Promise<void>;
+    bulkSyncAllDealerLedgers: (onProgress?: (done: number, total: number, name: string) => void) => Promise<{ synced: number; errors: number }>;
     // Agent methods
     addAgent: (agent: Omit<Agent, 'id'>) => Promise<string>;
     updateAgent: (agent: Agent) => Promise<void>;
@@ -458,7 +460,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // NEW: Subscribe to transactions to sync mobile receipts in real-time
         const transactionSub = subscribeToTransactionUpdates(async (data: any, event: 'INSERT' | 'UPDATE' | 'DELETE') => {
-            if (event === 'INSERT' && data.source === 'MOBILE') {
+            const isMobile = data.source?.toUpperCase() === 'MOBILE';
+            if (event === 'INSERT' && isMobile) {
                 console.log('[DataContext] REAL-TIME: New mobile transaction detected:', data.reference_id);
 
                 // 1. Check if we already have this in state to avoid duplicate UI/sync
@@ -724,7 +727,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Calculate COGS and Profit metrics for the invoice
         // Cheque returns are balance reversals — treat as 0 profit
         const noteStr = invoiceData?.notes || '';
-        const isChequeReturn = noteStr.startsWith('Cheque Return');
+        const isChequeReturn = noteStr.startsWith('Cheque Return') || noteStr.startsWith('Chq Return') || noteStr.startsWith('Check Return');
 
         const transportCharges = invoiceData?.transportCharges || 0;
         const discountPercent = invoiceData?.discountPercent || 0;
@@ -844,10 +847,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTransactions(prev => [newTxn, ...prev]);
         setInvoiceCount(prev => prev + 1);
 
-        // Sync to individual dealer sheet
+        // Sync to individual dealer sheet with CORRECT running balance
+        // Compute: sum of all dealer transactions (sorted by date) including the new one
         if (dealer) {
-            syncTransactionToDealerSheet(dealer.businessName, newTxn, dealer.balance + totalAmount).catch(e =>
-                console.warn('[DataContext] Failed to sync transaction to dealer sheet:', e)
+            const allDealerTxns = [...transactions, newTxn]
+                .filter(t => t.customerId === dealerId)
+                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            let runningBal = 0;
+            for (const t of allDealerTxns) {
+                if (t.type === 'INVOICE') runningBal += t.amount;
+                else runningBal -= t.amount;
+            }
+            syncTransactionToDealerSheet(dealer.businessName, newTxn, runningBal).catch(e =>
+                console.warn('[DataContext] Failed to sync invoice to dealer sheet:', e)
             );
         }
 
@@ -1025,10 +1037,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setReceiptCount(prev => prev + 1);
         }
 
-        // Sync to individual dealer sheet
+        // Sync to individual dealer sheet with CORRECT running balance
         const dealer = dealers.find(d => d.id === dealerId);
         if (dealer) {
-            syncTransactionToDealerSheet(dealer.businessName, newTxn, dealer.balance - amount).catch(e =>
+            const allDealerTxns = [...transactions, newTxn]
+                .filter(t => t.customerId === dealerId)
+                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            let runningBal = 0;
+            for (const t of allDealerTxns) {
+                if (t.type === 'INVOICE') runningBal += t.amount;
+                else runningBal -= t.amount;
+            }
+            syncTransactionToDealerSheet(dealer.businessName, newTxn, runningBal).catch(e =>
                 console.warn('[DataContext] Failed to sync payment to dealer sheet:', e)
             );
         }
@@ -1162,6 +1182,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const bulkSyncDealers = async () => {
         if (dealers.length === 0) return;
         await bulkSyncDealersToSheet(dealers);
+    };
+
+    const syncAllDealerTabs = async (): Promise<{ created: number; skipped: number }> => {
+        if (dealers.length === 0) return { created: 0, skipped: 0 };
+        return await bulkCreateDealerTabs(dealers, companySettings);
     };
 
     const importDealersFromSheet = async () => {
@@ -1331,18 +1356,55 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // 1. Get all transactions for this dealer sorted by date
         const dealerTxns = getDealerTransactions(dealerId, customTxns);
 
-        // 2. Clear current rows in the sheet to prevent duplicates and ensure order
+        // 2. Clear current rows in the sheet
         await clearDealerTransactionsForSync(dealer.businessName);
 
-        // 3. Re-append all transactions with correct running balance
-        let balance = 0; // Starting from 0 as per sheet opening balance
-        for (const txn of dealerTxns) {
-            if (txn.type === 'INVOICE') balance += txn.amount;
-            else balance -= txn.amount;
-
-            await syncTransactionToDealerSheet(dealer.businessName, txn, balance);
-        }
+        // 3. Re-append ALL transactions in ONE batch call
+        await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns);
     };
+
+    /**
+     * Creates tabs for all dealers (if missing) and re-syncs ALL transactions
+     * from Supabase state into each dealer's Google Sheet tab.
+     */
+    const bulkSyncAllDealerLedgers = async (
+        onProgress?: (done: number, total: number, name: string) => void
+    ): Promise<{ synced: number; errors: number }> => {
+        let synced = 0;
+        let errors = 0;
+        const total = dealers.length;
+        const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+        for (let i = 0; i < dealers.length; i++) {
+            const dealer = dealers[i];
+            try {
+                onProgress?.(i, total, dealer.businessName);
+
+                // 1. Ensure the tab exists (creates with header if missing)
+                await initializeDealerLedger(dealer, companySettings);
+
+                // 2. Clear old transaction rows (1 API call)
+                await clearDealerTransactionsForSync(dealer.businessName);
+
+                // 3. Write ALL transactions in ONE API call (batch instead of per-row)
+                const dealerTxns = getDealerTransactions(dealer.id);
+                await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns);
+
+                synced++;
+            } catch (e) {
+                console.error(`[DataContext] bulkSyncAllDealerLedgers failed for ${dealer.businessName}:`, e);
+                errors++;
+            }
+
+            // Rate limit guard: pause 1s between dealers (quota = 60 writes/min)
+            // Each dealer now uses at most 3 calls: getSheet + clear + batchWrite
+            if (i < dealers.length - 1) await sleep(1000);
+        }
+
+        onProgress?.(total, total, 'Complete');
+        return { synced, errors };
+    };
+
 
     const [lastBackgroundSync, setLastBackgroundSync] = useState<Date | null>(null);
     const [isAutoSyncing, setIsAutoSyncing] = useState(false);
@@ -1486,10 +1548,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             getInvoicePaymentHistory,
             refreshData,
             bulkSyncDealers,
+            syncAllDealerTabs,
             importDealersFromSheet,
             importDealersFromTally,
             deleteDealerWithSheet,
             syncDealerLedgerToSheet,
+            bulkSyncAllDealerLedgers,
             addAgent,
             updateAgent,
             deleteAgent,

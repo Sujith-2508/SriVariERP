@@ -1,6 +1,17 @@
 
 import { Transaction, TransactionType, InvoiceItem, Product } from '@/types';
 
+/**
+ * Returns today's date as a YYYY-MM-DD string in IST (Asia/Kolkata, UTC+5:30).
+ * Use this everywhere you need "today's date" to avoid UTC date drift.
+ * e.g. at 11:45 PM IST, new Date().toISOString() gives the PREVIOUS day (wrong).
+ */
+export function getISTDateString(date: Date = new Date()): string {
+    return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    // en-CA locale formats as YYYY-MM-DD which HTML date inputs accept directly
+}
+
+
 export interface InvoiceStatement {
     id: string;
     date: Date;
@@ -23,7 +34,7 @@ export interface PaymentStatement {
     referenceId: string;
     amount: number;
     remaining: number; // For calculation purposes
-    note?: string;
+    notes?: string;
     agentName?: string;
 }
 
@@ -67,7 +78,7 @@ export function calculateDealerStatement(transactions: Transaction[]) {
                 referenceId: txn.referenceId || 'N/A',
                 amount: txn.amount,
                 remaining: txn.amount,
-                note: txn.notes,
+                notes: txn.notes,
                 agentName: txn.agentName
             });
         }

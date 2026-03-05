@@ -133,7 +133,7 @@ export default function MigrationPage() {
 
                             <div className="flex gap-4">
                                 <button
-                                    onClick={runMigration}
+                                    onClick={() => runMigration()}
                                     disabled={status === 'LOADING'}
                                     className={`px-6 py-2 rounded text-white font-medium ${status === 'LOADING' ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
                                         }`}
@@ -142,7 +142,7 @@ export default function MigrationPage() {
                                 </button>
 
                                 <button
-                                    onClick={clearData}
+                                    onClick={() => clearData()}
                                     className="px-6 py-2 rounded text-red-600 border border-red-200 hover:bg-red-50 font-medium"
                                 >
                                     Clear Existing Data

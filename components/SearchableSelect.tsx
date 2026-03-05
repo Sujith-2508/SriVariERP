@@ -250,10 +250,10 @@ const SearchableSelect = React.forwardRef<any, SearchableSelectProps>((props, re
                                         <div className="flex items-center gap-2 shrink-0 ml-2">
                                             {option.stock !== undefined && (
                                                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${option.stock <= 0 ? 'bg-red-100 text-red-700' :
-                                                        option.stock < 50 ? 'bg-amber-100 text-amber-700' :
-                                                            'bg-emerald-100 text-emerald-700'
+                                                    option.stock < 50 ? 'bg-amber-100 text-amber-700' :
+                                                        'bg-emerald-100 text-emerald-700'
                                                     }`}>
-                                                    {option.stock} qty
+                                                    {Number(option.stock).toFixed(3)} qty
                                                 </span>
                                             )}
                                             {option.id === value && <Check size={16} className="text-emerald-600 shrink-0" />}

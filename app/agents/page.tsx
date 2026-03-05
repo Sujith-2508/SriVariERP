@@ -182,7 +182,7 @@ export default function AgentsPage() {
                     </div>
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={handleRefresh}
+                            onClick={() => handleRefresh()}
                             className={`p-2.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all flex items-center gap-2 ${isLoading || loadingTracking ? 'animate-pulse cursor-wait' : ''}`}
                             title="Refresh Data"
                             disabled={isLoading || loadingTracking}
