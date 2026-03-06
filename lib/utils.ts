@@ -168,8 +168,19 @@ export function calculateCOGS(items: InvoiceItem[], products: Product[]): number
     console.log(`[COGS] Calculating for ${items.length} items with ${products.length} products`);
     let totalCOGS = 0;
     items.forEach(item => {
-        const product = products.find(p => p.id === item.productId || p.productId === item.productId);
-        const costPrice = Number(product?.costPrice) || 0;
+        // PRIMARY: Use costPrice stored on the item itself (captured at billing time)
+        // FALLBACK: Look up the product in the catalog by ID, then by name
+        let costPrice = 0;
+        if (item.costPrice !== undefined && item.costPrice > 0) {
+            costPrice = Number(item.costPrice);
+        } else {
+            const product = products.find(p =>
+                p.id === item.productId ||
+                p.productId === item.productId ||
+                p.name?.toLowerCase() === item.productName?.toLowerCase()
+            );
+            costPrice = Number(product?.costPrice) || 0;
+        }
         const itemCOGS = costPrice * item.quantity;
         console.log(`[COGS] Item: ${item.productName}, Qty: ${item.quantity}, Cost: ${costPrice}, COGS: ${itemCOGS}`);
         totalCOGS += itemCOGS;
@@ -178,6 +189,7 @@ export function calculateCOGS(items: InvoiceItem[], products: Product[]): number
     console.log(`[COGS] Total COGS: ${totalCOGS}`);
     return totalCOGS;
 }
+
 
 
 /**

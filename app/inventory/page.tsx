@@ -235,6 +235,12 @@ export default function Inventory() {
                     <div className="text-sm text-slate-500">
                         {filteredProducts.length} products
                     </div>
+                    {/* Warn if any products are missing cost price */}
+                    {products.some(p => !p.costPrice || p.costPrice === 0) && (
+                        <div className="ml-auto flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-xs font-semibold">
+                            ⚠️ {products.filter(p => !p.costPrice || p.costPrice === 0).length} product(s) missing Cost Price — COGS will be ₹0
+                        </div>
+                    )}
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -244,7 +250,8 @@ export default function Inventory() {
                                 <th className="p-4">Product Name</th>
                                 <th className="p-4">HSN Code</th>
                                 <th className="p-4">Category</th>
-                                <th className="p-4 text-right">Price</th>
+                                <th className="p-4 text-right">Cost Price</th>
+                                <th className="p-4 text-right">Sell Price</th>
                                 <th className="p-4 text-center">Stock</th>
                                 <th className="p-4 text-center">GST%</th>
                                 <th className="p-4 text-center">Actions</th>
@@ -269,6 +276,14 @@ export default function Inventory() {
                                         </td>
                                         <td className="p-4 text-slate-600">
                                             <span className="bg-slate-100 px-2 py-1 rounded text-xs">{p.category}</span>
+                                        </td>
+                                        {/* Cost Price - highlighted red if missing */}
+                                        <td className="p-4 text-right">
+                                            {p.costPrice && p.costPrice > 0 ? (
+                                                <span className="font-medium text-slate-700">₹{p.costPrice.toLocaleString()}</span>
+                                            ) : (
+                                                <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-1 rounded">NOT SET</span>
+                                            )}
                                         </td>
                                         <td className="p-4 text-right font-medium">₹{p.price.toLocaleString()}</td>
                                         <td className="p-4 text-center">

@@ -113,6 +113,7 @@ const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []
         type: type,
         amount: Number(row.amount),
         date: new Date(row.date),
+        createdAt: row.created_at ? new Date(row.created_at) : undefined,
         referenceId: row.reference_id,
         notes: row.notes,
         agentName: row.agent_name,
@@ -713,7 +714,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const txnsToUse = customTxns || transactions;
         return txnsToUse
             .filter(t => t.customerId === dealerId)
-            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            .sort((a, b) => {
+                const dateA = new Date(a.date).getTime();
+                const dateB = new Date(b.date).getTime();
+
+                // Primary sort: by date (ascending)
+                if (dateA !== dateB) return dateA - dateB;
+
+                // Secondary sort: INVOICEs before PAYMENTs on the same day
+                // (you can only make a payment against an existing invoice)
+                const typeOrder = (t: Transaction) => t.type === TransactionType.INVOICE ? 0 : 1;
+                if (typeOrder(a) !== typeOrder(b)) return typeOrder(a) - typeOrder(b);
+
+                // Tertiary sort: by DB insertion order (created_at) for same type same day
+                const createdA = a.createdAt ? a.createdAt.getTime() : 0;
+                const createdB = b.createdAt ? b.createdAt.getTime() : 0;
+                return createdA - createdB;
+            });
     };
 
     const getInvoicePaymentHistory = (invoiceId: string): PaymentAllocation[] => {
@@ -744,8 +761,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (!isChequeReturn) {
             items.forEach(item => {
-                const product = products.find(p => p.id === item.productId || p.productId === item.productId);
-                const costPrice = Number(product?.costPrice) || 0;
+                // PRIMARY: use costPrice snapshotted on the item at billing time
+                // FALLBACK: look it up from the in-memory product catalog
+                let costPrice = (item.costPrice !== undefined && item.costPrice > 0)
+                    ? Number(item.costPrice)
+                    : Number(products.find(p => p.id === item.productId || p.productId === item.productId || p.name?.toLowerCase() === item.productName?.toLowerCase())?.costPrice) || 0;
                 totalCOGS += (costPrice * item.quantity);
             });
 
@@ -853,11 +873,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setInvoiceCount(prev => prev + 1);
 
         // Sync to individual dealer sheet with CORRECT running balance
-        // Compute: sum of all dealer transactions (sorted by date) including the new one
+        // Compute: sum of all dealer transactions (sorted correctly) including the new one
         if (dealer) {
             const allDealerTxns = [...transactions, newTxn]
                 .filter(t => t.customerId === dealerId)
-                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                .sort((a, b) => {
+                    const dateA = new Date(a.date).getTime();
+                    const dateB = new Date(b.date).getTime();
+                    if (dateA !== dateB) return dateA - dateB;
+                    // INVOICEs before PAYMENTs on the same day
+                    const typeOrder = (t: Transaction) => t.type === TransactionType.INVOICE ? 0 : 1;
+                    if (typeOrder(a) !== typeOrder(b)) return typeOrder(a) - typeOrder(b);
+                    const createdA = a.createdAt ? a.createdAt.getTime() : 0;
+                    const createdB = b.createdAt ? b.createdAt.getTime() : 0;
+                    return createdA - createdB;
+                });
             let runningBal = 0;
             for (const t of allDealerTxns) {
                 if (t.type === 'INVOICE') runningBal += t.amount;
@@ -1047,7 +1077,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (dealer) {
             const allDealerTxns = [...transactions, newTxn]
                 .filter(t => t.customerId === dealerId)
-                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                .sort((a, b) => {
+                    const dateA = new Date(a.date).getTime();
+                    const dateB = new Date(b.date).getTime();
+                    if (dateA !== dateB) return dateA - dateB;
+                    // INVOICEs before PAYMENTs on the same day
+                    const typeOrder = (t: Transaction) => t.type === TransactionType.INVOICE ? 0 : 1;
+                    if (typeOrder(a) !== typeOrder(b)) return typeOrder(a) - typeOrder(b);
+                    const createdA = a.createdAt ? a.createdAt.getTime() : 0;
+                    const createdB = b.createdAt ? b.createdAt.getTime() : 0;
+                    return createdA - createdB;
+                });
             let runningBal = 0;
             for (const t of allDealerTxns) {
                 if (t.type === 'INVOICE') runningBal += t.amount;

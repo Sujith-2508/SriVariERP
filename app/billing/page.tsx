@@ -17,7 +17,7 @@ import SearchableSelect from '@/components/SearchableSelect';
 import { uploadInvoicePDFByMonth, buildInvoiceFileName } from '@/lib/googleDriveService';
 
 export default function Billing() {
-    const { dealers, products, createInvoice, updateInvoice, addDealer, transactions } = useData();
+    const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading } = useData();
     const router = useRouter();
     const searchParams = useSearchParams();
     const editInvoiceId = searchParams.get('edit');
@@ -206,12 +206,22 @@ export default function Billing() {
     // Initialize Manual Invoice Number
     const isInvoiceInitialized = useRef(false);
     useEffect(() => {
-        if (!editInvoiceId && !isInvoiceInitialized.current && transactions.length > 0) {
-            setManualInvoiceNo(String(transactions.filter(t => t.type === 'INVOICE').length + 1).padStart(3, '0'));
-            isInvoiceInitialized.current = true;
+        // Reset when switching between new/edit invoice
+        if (editInvoiceId) {
+            isInvoiceInitialized.current = false;
+            return; // editing: number is loaded from the existing invoice
         }
+        if (isInvoiceInitialized.current) return;
+
+        // Wait until DataContext has finished loading (isLoading = false)
+        // This ensures we read the true DB count, not a stale cache count
+        if (isLoading) return;
+
+        const invoiceCount = transactions.filter(t => t.type === 'INVOICE').length;
+        setManualInvoiceNo(String(invoiceCount + 1).padStart(3, '0'));
+        isInvoiceInitialized.current = true;
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [transactions, editInvoiceId]);
+    }, [transactions, editInvoiceId, isLoading]);
 
     // Load Company Settings
     // Load Company Settings
@@ -557,6 +567,7 @@ export default function Billing() {
             productName: itemProduct.name,
             quantity: qty,
             unitPrice: itemProduct.price,
+            costPrice: itemProduct.costPrice || 0,   // Snapshot cost price at billing time
             cgst: cgst,
             sgst: sgst,
             igst: igst,
@@ -674,6 +685,7 @@ export default function Billing() {
                         productName: item.productName,
                         quantity: item.quantity,
                         unitPrice: item.unitPrice,
+                        costPrice: item.costPrice || 0,
                         cgst: item.cgst,
                         sgst: item.sgst,
                         igst: item.igst,
@@ -733,6 +745,7 @@ export default function Billing() {
                         productName: item.productName,
                         quantity: item.quantity,
                         unitPrice: item.unitPrice,
+                        costPrice: item.costPrice || 0,
                         cgst: item.cgst,
                         sgst: item.sgst,
                         igst: item.igst,

@@ -52,6 +52,7 @@ export interface Transaction {
   type: TransactionType;
   amount: number;
   date: Date;
+  createdAt?: Date;          // DB insertion timestamp — used as tiebreaker for same-day sort
   referenceId?: string;
   items?: InvoiceItem[];
   notes?: string;
@@ -71,7 +72,6 @@ export interface Transaction {
   cogs?: number;
   profitAmount?: number;
   profitPercentage?: number;
-
 }
 
 export interface InvoiceItem {
@@ -79,6 +79,7 @@ export interface InvoiceItem {
   productName: string;
   quantity: number;
   unitPrice: number;
+  costPrice?: number;        // Cost price at time of sale — stored for reliable COGS calculation
   cgst: number;
   sgst: number;
   igst: number;
