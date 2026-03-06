@@ -221,7 +221,25 @@ export default function DealerLedger() {
         useRef<HTMLInputElement>(null),
         useRef<HTMLInputElement>(null),
     ];
-    const { handleKeyDown: handleAddKeyDown } = useEnterKeyNavigation(addRefs);
+    const { handleKeyDown: handleAddKeyDownBase } = useEnterKeyNavigation(addRefs);
+    const [addPhoneError, setAddPhoneError] = useState<string>('');
+
+    // Phone-aware Enter/Arrow handler for Add modal (phone is index 2)
+    const handleAddKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const currentIndex = addRefs.findIndex(ref => ref.current === e.currentTarget);
+        if (currentIndex === 2 && (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowRight')) {
+            const phone = newDealer.phone;
+            if (phone.length < 10) {
+                e.preventDefault();
+                setAddPhoneError('Please fill out this field correctly. Phone number must be 10 digits.');
+                (addRefs[2].current as HTMLInputElement | null)?.focus();
+                return;
+            } else {
+                setAddPhoneError('');
+            }
+        }
+        handleAddKeyDownBase(e);
+    };
 
     // Refs for Edit Dealer sequential navigation
     const editRefs = [
@@ -234,7 +252,25 @@ export default function DealerLedger() {
         useRef<HTMLInputElement>(null),
         useRef<HTMLInputElement>(null),
     ];
-    const { handleKeyDown: handleEditKeyDown } = useEnterKeyNavigation(editRefs);
+    const { handleKeyDown: handleEditKeyDownBase } = useEnterKeyNavigation(editRefs);
+    const [editPhoneError, setEditPhoneError] = useState<string>('');
+
+    // Phone-aware Enter/Arrow handler for Edit modal (phone is index 2)
+    const handleEditKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const currentIndex = editRefs.findIndex(ref => ref.current === e.currentTarget);
+        if (currentIndex === 2 && (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowRight')) {
+            const phone = editDealer.phone;
+            if (phone.length < 10) {
+                e.preventDefault();
+                setEditPhoneError('Please fill out this field correctly. Phone number must be 10 digits.');
+                (editRefs[2].current as HTMLInputElement | null)?.focus();
+                return;
+            } else {
+                setEditPhoneError('');
+            }
+        }
+        handleEditKeyDownBase(e);
+    };
 
 
 
@@ -244,9 +280,11 @@ export default function DealerLedger() {
         // Phone Number Validation
         const phoneRegex = /^[0-9]{10}$/;
         if (!phoneRegex.test(newDealer.phone)) {
-            alert('Please enter a valid 10-digit mobile number.');
+            setAddPhoneError('Please fill out this field correctly. Phone number must be 10 digits.');
+            (addRefs[2].current as HTMLInputElement | null)?.focus();
             return;
         }
+        setAddPhoneError('');
 
         try {
             await addDealer({
@@ -294,9 +332,11 @@ export default function DealerLedger() {
         // Phone Number Validation
         const phoneRegex = /^[0-9]{10}$/;
         if (!phoneRegex.test(editDealer.phone)) {
-            alert('Please enter a valid 10-digit mobile number.');
+            setEditPhoneError('Please fill out this field correctly. Phone number must be 10 digits.');
+            (editRefs[2].current as HTMLInputElement | null)?.focus();
             return;
         }
+        setEditPhoneError('');
 
         try {
             await updateDealer({
@@ -1344,14 +1384,33 @@ export default function DealerLedger() {
                                     <input
                                         ref={addRefs[2] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
+                                        onBlur={() => {
+                                            if (newDealer.phone.length > 0 && newDealer.phone.length < 10) {
+                                                setAddPhoneError('Please fill out this field correctly. Phone number must be 10 digits.');
+                                            } else {
+                                                setAddPhoneError('');
+                                            }
+                                        }}
                                         type="text"
                                         required
                                         maxLength={10}
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        className={`w-full p-2.5 border rounded-lg focus:ring-2 outline-none transition-colors ${addPhoneError
+                                                ? 'border-red-400 focus:ring-red-400 bg-red-50'
+                                                : 'border-slate-300 focus:ring-emerald-500'
+                                            }`}
                                         value={newDealer.phone}
-                                        onChange={e => setNewDealer({ ...newDealer, phone: e.target.value.replace(/\D/g, '') })}
+                                        onChange={e => {
+                                            const val = e.target.value.replace(/\D/g, '');
+                                            setNewDealer({ ...newDealer, phone: val });
+                                            if (val.length === 10) setAddPhoneError('');
+                                        }}
                                         placeholder="10-digit mobile number"
                                     />
+                                    {addPhoneError && (
+                                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                                            <span>⚠</span> {addPhoneError}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
@@ -1485,14 +1544,33 @@ export default function DealerLedger() {
                                     <input
                                         ref={editRefs[2] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
+                                        onBlur={() => {
+                                            if (editDealer.phone.length > 0 && editDealer.phone.length < 10) {
+                                                setEditPhoneError('Please fill out this field correctly. Phone number must be 10 digits.');
+                                            } else {
+                                                setEditPhoneError('');
+                                            }
+                                        }}
                                         type="text"
                                         required
                                         maxLength={10}
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        className={`w-full p-2.5 border rounded-lg focus:ring-2 outline-none transition-colors ${editPhoneError
+                                                ? 'border-red-400 focus:ring-red-400 bg-red-50'
+                                                : 'border-slate-300 focus:ring-blue-500'
+                                            }`}
                                         value={editDealer.phone}
-                                        onChange={e => setEditDealer({ ...editDealer, phone: e.target.value.replace(/\D/g, '') })}
+                                        onChange={e => {
+                                            const val = e.target.value.replace(/\D/g, '');
+                                            setEditDealer({ ...editDealer, phone: val });
+                                            if (val.length === 10) setEditPhoneError('');
+                                        }}
                                         placeholder="10-digit mobile number"
                                     />
+                                    {editPhoneError && (
+                                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                                            <span>⚠</span> {editPhoneError}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="col-span-2">
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
