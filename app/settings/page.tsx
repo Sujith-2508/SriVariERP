@@ -126,11 +126,22 @@ export default function SettingsPage() {
 
     const handleConnectDrive = async () => {
         const electron = (window as any).electron;
-        const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || localStorage.getItem('google_oauth_client_id') || '';
-        const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || localStorage.getItem('google_oauth_client_secret') || '';
+        const isElectron = !!electron;
+
+        // Smart Client ID Selection
+        const desktopId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_DESKTOP || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
+        const webId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_WEB || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
+        const desktopSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_DESKTOP || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || '';
+        const webSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_WEB || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || '';
+
+        const clientId = isElectron ? desktopId : webId;
+        const clientSecret = isElectron ? desktopSecret : webSecret;
 
         if (!clientId) {
-            setDriveMessage({ type: 'error', text: 'NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID is not set in .env.local' });
+            setDriveMessage({
+                type: 'error',
+                text: `Google Client ID for ${isElectron ? 'Desktop' : 'Web'} not found. Please check your .env.local file.`
+            });
             return;
         }
 

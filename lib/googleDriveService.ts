@@ -144,8 +144,8 @@ async function getOAuthAccessToken(): Promise<string | null> {
                 }
 
                 // If expired, try to refresh via standard web fetch
-                const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || localStorage.getItem('google_oauth_client_id');
-                const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || localStorage.getItem('google_oauth_client_secret');
+                const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_WEB || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || localStorage.getItem('google_oauth_client_id');
+                const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_WEB || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || localStorage.getItem('google_oauth_client_secret');
 
                 if (tokens.refresh_token && clientId && clientSecret) {
                     const resp = await fetch('https://oauth2.googleapis.com/token', {
