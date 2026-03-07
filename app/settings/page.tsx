@@ -126,54 +126,104 @@ export default function SettingsPage() {
 
     const handleConnectDrive = async () => {
         const electron = (window as any).electron;
-        if (!electron?.drive?.connect) {
-            setDriveMessage({ type: 'error', text: 'Drive OAuth is only available in the desktop app.' });
-            return;
-        }
+        const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || localStorage.getItem('google_oauth_client_id') || '';
+        const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || localStorage.getItem('google_oauth_client_secret') || '';
 
-        const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
         if (!clientId) {
             setDriveMessage({ type: 'error', text: 'NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID is not set in .env.local' });
             return;
         }
 
-        const redirectUri = 'urn:ietf:wg:oauth:2.0:oob'; // out-of-band (desktop)
         setDriveConnecting(true);
         setDriveMessage(null);
 
         try {
-            // Step 1: Open OAuth window — main process handles loopback redirect automatically
-            const result = await electron.drive.connect(clientId);
-            if (!result) { setDriveMessage({ type: 'error', text: 'Drive connection cancelled.' }); return; }
+            // -- DESKTOP (ELECTRON) FLOW --
+            if (electron?.drive?.connect) {
+                const result = await electron.drive.connect(clientId);
+                if (!result) { setDriveMessage({ type: 'error', text: 'Drive connection cancelled.' }); return; }
+                const { code, redirectUri: callbackUri } = result;
 
-            const { code, redirectUri: callbackUri } = result;
+                const resp = await fetch('https://oauth2.googleapis.com/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        code,
+                        client_id: clientId,
+                        client_secret: clientSecret,
+                        redirect_uri: callbackUri,
+                        grant_type: 'authorization_code'
+                    })
+                });
+                const tokens = await resp.json();
+                if (tokens.error) throw new Error(tokens.error_description || tokens.error);
 
-            // Step 2: Exchange code for tokens via Google
-            const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || '';
-            const resp = await fetch('https://oauth2.googleapis.com/token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({
-                    code,
-                    client_id: clientId,
-                    client_secret: clientSecret,
-                    redirect_uri: callbackUri,
-                    grant_type: 'authorization_code'
-                })
-            });
-            const tokens = await resp.json();
-            if (tokens.error) throw new Error(tokens.error_description || tokens.error);
+                await electron.drive.saveTokens(tokens);
+                setDriveConnected(true);
+                setDriveMessage({ type: 'success', text: 'Google Drive connected! Invoices will now be saved automatically.' });
+            }
+            // -- WEB (BROWSER) FLOW --
+            else {
+                const redirectUri = window.location.origin + window.location.pathname;
+                const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=https://www.googleapis.com/auth/drive&access_type=offline&prompt=consent`;
 
-            // Step 3: Save tokens to disk via IPC
-            await electron.drive.saveTokens(tokens);
-            setDriveConnected(true);
-            setDriveMessage({ type: 'success', text: 'Google Drive connected! Invoices will now be saved automatically.' });
+                // Store secrets for redemption
+                localStorage.setItem('google_oauth_client_id', clientId);
+                if (clientSecret) localStorage.setItem('google_oauth_client_secret', clientSecret);
+
+                // Redirect user to Google
+                window.location.href = authUrl;
+            }
         } catch (err: any) {
             setDriveMessage({ type: 'error', text: err.message || 'Failed to connect Google Drive.' });
-        } finally {
             setDriveConnecting(false);
         }
     };
+
+    // Callback handler for Web OAuth
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        if (code && !driveConnected && !driveConnecting) {
+            const finalizeWebDrive = async () => {
+                setDriveConnecting(true);
+                try {
+                    const clientId = localStorage.getItem('google_oauth_client_id');
+                    const clientSecret = localStorage.getItem('google_oauth_client_secret');
+                    const redirectUri = window.location.origin + window.location.pathname;
+
+                    const resp = await fetch('https://oauth2.googleapis.com/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            code,
+                            client_id: clientId || '',
+                            client_secret: clientSecret || '',
+                            redirect_uri: redirectUri,
+                            grant_type: 'authorization_code'
+                        })
+                    });
+                    const tokens = await resp.json();
+                    if (tokens.error) throw new Error(tokens.error_description || tokens.error);
+
+                    const updated = {
+                        ...tokens,
+                        expires_at: Date.now() + (tokens.expires_in - 60) * 1000
+                    };
+                    localStorage.setItem('drive_token', JSON.stringify(updated));
+                    setDriveConnected(true);
+                    setDriveMessage({ type: 'success', text: 'Google Drive connected successfully!' });
+                    // Clean URL
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                } catch (err: any) {
+                    setDriveMessage({ type: 'error', text: 'OAuth Callback failed: ' + err.message });
+                } finally {
+                    setDriveConnecting(false);
+                }
+            };
+            finalizeWebDrive();
+        }
+    }, [driveConnected, driveConnecting]);
 
 
     const validatePassword = (pwd: string): { valid: boolean; message: string } => {

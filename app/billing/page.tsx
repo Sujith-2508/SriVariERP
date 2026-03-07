@@ -14,7 +14,7 @@ import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfG
 import { calculateDealerStatement } from '@/lib/utils';
 import { getISTDateString } from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
-import { uploadInvoicePDFByMonth, buildInvoiceFileName } from '@/lib/googleDriveService';
+import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 
 export default function Billing() {
     const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading } = useData();
@@ -866,15 +866,17 @@ export default function Billing() {
     };
 
     const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
-        if (!window.electron?.whatsapp || !companySettings) return;
+        if (!companySettings) return;
 
         setWhatsappSending('sending');
         setWhatsappError(null);
 
         try {
-            const status = await window.electron.whatsapp.getStatus();
-            if (status !== 'READY') {
-                throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+            if (window.electron?.whatsapp?.getStatus) {
+                const status = await window.electron.whatsapp.getStatus();
+                if (status !== 'READY') {
+                    throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+                }
             }
 
             // 1. Generate Invoice PDF
@@ -911,23 +913,55 @@ export default function Billing() {
             );
 
             // 3. Send Invoice
-            await window.electron.whatsapp.sendPDF(
-                dealer.phone,
-                invoiceBase64,
-                `Invoice_${invoiceData.referenceId}.pdf`,
-                `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
-            );
+            if (window.electron?.whatsapp?.sendPDF) {
+                await window.electron.whatsapp.sendPDF(
+                    dealer.phone,
+                    invoiceBase64,
+                    `Invoice_${invoiceData.referenceId}.pdf`,
+                    `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
+                );
+            } else {
+                // WEB FALLBACK: Upload to Drive and share Link
+                try {
+                    setWhatsappSending('sending');
+                    const link = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
+                    const message = `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${link}`;
+                    const whatsappUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                    // Small delay to simulate sending
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (err: any) {
+                    console.error('Web WhatsApp share failed:', err);
+                    // Fallback to text only if drive fails
+                    const message = `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}.`;
+                    const whatsappUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                }
+            }
 
             // Small delay between documents
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
             // 4. Send Statement
-            await window.electron.whatsapp.sendPDF(
-                dealer.phone,
-                statementBase64,
-                `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`,
-                `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`
-            );
+            if (window.electron?.whatsapp?.sendPDF) {
+                await window.electron.whatsapp.sendPDF(
+                    dealer.phone,
+                    statementBase64,
+                    `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`,
+                    `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`
+                );
+            } else {
+                // WEB FALLBACK: Send Statement Link
+                try {
+                    const stmtLink = await uploadToWhatsAppFolder(statementBase64, `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`);
+                    const msg = `Hello ${dealer.businessName}, please find your account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}. \n\nView Statement: ${stmtLink}`;
+                    const waUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                    window.open(waUrl, '_blank');
+                } catch (e) {
+                    console.warn('Web statement share failed:', e);
+                }
+                setWhatsappSending('success');
+            }
 
             setWhatsappSending('success');
             setTimeout(() => setWhatsappSending('idle'), 5000);
@@ -996,9 +1030,12 @@ export default function Billing() {
             }
 
             // Send WhatsApp statement with updated balance
-            if (companySettings && crDealer.phone && window.electron?.whatsapp) {
+            if (companySettings && crDealer.phone) {
                 try {
-                    const status = await window.electron.whatsapp.getStatus();
+                    const status = window.electron?.whatsapp?.getStatus
+                        ? await window.electron.whatsapp.getStatus()
+                        : 'READY';
+
                     if (status === 'READY') {
                         // Build cheque-return transaction entry for the statement
                         const crTxn = {
@@ -1025,14 +1062,28 @@ export default function Billing() {
                             { totalInvoiced, totalPaid, totalOutstanding }
                         );
 
-                        const msg = `Hello ${crDealer.businessName}, a cheque return of ₹${amountNum.toLocaleString()} has been recorded${refNote ? ` for ${crChequeNo}` : ''}. Your updated outstanding balance is ₹${totalOutstanding.toLocaleString()}. Please find the account statement attached.`;
+                        const msg = `Hello ${crDealer.businessName}, a cheque return of ₹${amountNum.toLocaleString()} has been recorded${refNote ? ` for ${crChequeNo}` : ''}. Your updated outstanding balance is ₹${totalOutstanding.toLocaleString()}.`;
 
-                        await window.electron.whatsapp.sendPDF(
-                            crDealer.phone,
-                            statementBase64,
-                            `Statement_${crDealer.businessName.replace(/\s+/g, '_')}.pdf`,
-                            msg
-                        );
+                        if (window.electron?.whatsapp?.sendPDF) {
+                            await window.electron.whatsapp.sendPDF(
+                                crDealer.phone,
+                                statementBase64,
+                                `Statement_${crDealer.businessName.replace(/\s+/g, '_')}.pdf`,
+                                msg + " Please find the account statement attached."
+                            );
+                        } else {
+                            // WEB FALLBACK: Upload statement to Drive and share link
+                            try {
+                                const stmtLink = await uploadToWhatsAppFolder(statementBase64, `Statement_${crDealer.businessName.replace(/\s+/g, '_')}.pdf`);
+                                const whatsappUrl = `https://wa.me/${crDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg + "\n\nView Statement: " + stmtLink)}`;
+                                window.open(whatsappUrl, '_blank');
+                            } catch (e) {
+                                console.warn('Web cheque-return statement share failed:', e);
+                                const whatsappUrl = `https://wa.me/${crDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg + " (Statement available in office)")}`;
+                                window.open(whatsappUrl, '_blank');
+                            }
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
                     }
                 } catch (waErr) {
                     console.warn('[Billing] Cheque Return WhatsApp send failed:', waErr);

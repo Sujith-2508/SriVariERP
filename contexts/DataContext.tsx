@@ -1512,6 +1512,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setIsAutoSyncing(true);
         try {
+            // Check for network connectivity first (optional but helpful)
+            if (!navigator.onLine) {
+                console.warn('[DataContext] Offline: Skipping background sync check.');
+                return;
+            }
+
             // 1. Find dealers with unsynced transactions (mobile added them while desktop was closed)
             const { data: unsyncedTxns, error: txnError } = await supabase
                 .from('transactions')
@@ -1531,8 +1537,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     supabase.from('payment_allocations').select('*')
                 ]);
 
+                // Check for ANY errors in the fetch cluster
                 if (dealersRes.error) throw dealersRes.error;
                 if (txnsRes.error) throw txnsRes.error;
+                if (itemsRes.error) throw itemsRes.error;
+                if (allocationsRes.error) throw allocationsRes.error;
 
                 const transformedDealers = (dealersRes.data || []).map(transformDealer);
                 const transformedAllocations = (allocationsRes.data || []).map(transformAllocation);
@@ -1548,6 +1557,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 console.log(`[DataContext] Auto-sync: Re-syncing ledgers for ${dealerIds.length} dealers to Google Sheets...`);
 
                 for (const dId of dealerIds) {
+                    if (!dId) continue; // Skip if customer_id is null
                     try {
                         // Re-sync the entire ledger using the fresh local data
                         await syncDealerLedgerToSheet(dId, transformedDealers, fullyTransformedTxns);
@@ -1572,13 +1582,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
 
                 // Also refresh the UI state so the user sees the synced status if they open it
-                fetchData();
+                await fetchData();
                 setLastBackgroundSync(new Date());
             } else {
                 console.log('[DataContext] No unsynced transactions found during background check');
             }
-        } catch (err) {
-            console.error('[DataContext] Periodic sync error:', err);
+        } catch (err: any) {
+            console.error('[DataContext] Periodic sync error details:', {
+                message: err.message || 'Unknown error',
+                details: err.details,
+                hint: err.hint,
+                code: err.code,
+                full: err
+            });
         } finally {
             setIsAutoSyncing(false);
         }

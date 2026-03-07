@@ -1,90 +1,114 @@
-const { app, BrowserWindow, ipcMain, shell, protocol } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, protocol, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const https = require('https')
+
+// ─── Load .env.local at runtime (required for production exe) ────────────────
+function loadEnvFile() {
+    const resourcesPath = process.resourcesPath || path.join(__dirname);
+    const envPaths = [
+        path.join(resourcesPath, 'app.asar.unpacked', '.env.local'), // packaged (asar unpacked)
+        path.join(resourcesPath, '.env.local'),                     // packaged (direct resource)
+        path.join(__dirname, '.env.local'),                          // dev mode
+    ];
+
+    for (const envPath of envPaths) {
+        if (fs.existsSync(envPath)) {
+            const content = fs.readFileSync(envPath, 'utf8');
+            content.split('\n').filter(line => line.trim() && !line.startsWith('#')).forEach(line => {
+                const parts = line.split('=');
+                if (parts.length >= 2) {
+                    const key = parts[0].trim();
+                    const value = parts.slice(1).join('=').trim();
+                    if (!process.env[key]) process.env[key] = value;
+                }
+            });
+            console.log('[env] Loaded:', envPath);
+            break;
+        }
+    }
+}
+loadEnvFile();
+
+// ─── Protocol Registration (MUST BE BEFORE app:ready) ────────────────────────
+protocol.registerSchemesAsPrivileged([
+    { scheme: 'app', privileges: { secure: true, standard: true, supportFetchAPI: true } }
+]);
+
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 
-
-// Better detection: check if Next.js dev server is likely running
-// In dev mode (electron-dev script), NODE_ENV might not be set, but we can check if 'out' folder exists
-const outPath = path.join(__dirname, 'out/index.html')
-const hasProductionBuild = fs.existsSync(outPath)
-
-// Force dev mode when running electron-dev (localhost:3000 should be available)
-// Only use production build if 'out' folder exists and NODE_ENV explicitly set to production
-const isDev = process.env.NODE_ENV !== 'production' || !hasProductionBuild
+const isDev = !app.isPackaged;
+const outDir = path.join(__dirname, 'out');
 
 let mainWindow;
 let whatsappClient;
-let whatsappStatus = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, QR_READY, AUTHENTICATED, READY
+let whatsappStatus = 'DISCONNECTED';
 
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
-        show: false, // Don't show until ready
-        backgroundColor: '#f8fafc', // Match app background (slate-50)
+        show: false,
+        backgroundColor: '#f8fafc',
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            webSecurity: false, // Allow cross-origin fetch for Drive/Sheets sync
+            webSecurity: false, // allow cors
             preload: path.join(__dirname, 'preload.js')
         },
         title: 'Sri Vari Enterprises - Billing ERP',
-        icon: process.platform === 'win32'
-            ? path.join(__dirname, 'public/icon.ico')
-            : path.join(__dirname, 'public/icon.png')
+        icon: path.join(__dirname, 'public', process.platform === 'win32' ? 'icon.ico' : 'icon.png')
     })
 
-    // Remove default menu
     mainWindow.setMenuBarVisibility(false)
 
-    // Show window when ready to prevent white flash
     mainWindow.once('ready-to-show', () => {
         mainWindow.show()
     })
 
-    // CSP Fix for Google Drive & Sheets API
+    // CSP Handler for runtime connections
     const { session } = require('electron')
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         callback({
             responseHeaders: {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
-                    "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:3000 https://*; " +
-                    "connect-src 'self' http://localhost:3000 ws://localhost:3000 https://*; " +
-                    "img-src 'self' data: blob: https://*;"
+                    "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: app://* http://localhost:3000 https://*; " +
+                    "connect-src 'self' app://* http://localhost:3000 ws://localhost:3000 https://*; " +
+                    "img-src 'self' data: blob: app://* https://*;"
                 ]
             }
         })
     })
 
     if (isDev) {
-        // Development: Load from Next.js dev server
-        console.log('Loading from development server: http://localhost:3000')
         mainWindow.loadURL('http://localhost:3000')
-        // DevTools disabled for clean UI
-        // mainWindow.webContents.openDevTools()
     } else {
-        // Production: Load from static export
-        console.log('Loading from production build:', outPath)
-        mainWindow.loadFile(outPath)
+        mainWindow.loadURL('app://localhost/')
     }
 
-    // Handle load errors
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
         console.error(`Failed to load: ${errorDescription} (${errorCode})`)
-        if (isDev) {
-            // Retry loading after a short delay (dev server might still be starting)
-            setTimeout(() => {
-                console.log('Retrying connection to dev server...')
+        if (errorCode === -3) return; // user cancelled
+
+        setTimeout(() => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            if (isDev) {
                 mainWindow.loadURL('http://localhost:3000')
-            }, 2000)
+            } else {
+                mainWindow.loadURL('app://localhost/')
+            }
+        }, 2000)
+    })
+
+    // Enable DevTools shortcut in production (for debugging)
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+        if ((input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i') {
+            mainWindow.webContents.openDevTools()
         }
     })
 
-    // Initialize WhatsApp
     initWhatsApp();
 }
 
@@ -97,19 +121,55 @@ function initWhatsApp() {
     console.log('Initializing WhatsApp Client...');
     whatsappStatus = 'CONNECTING';
 
+    // Windows FIX: Building on Mac for Windows doesn't bundle the correct Chromium.
+    // We'll try to find Chrome or Edge on the user's Windows machine as a backup.
+    let executablePath = undefined;
+    if (process.platform === 'win32') {
+        const potentialPaths = [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+        ];
+        for (const p of potentialPaths) {
+            if (fs.existsSync(p)) {
+                executablePath = p;
+                break;
+            }
+        }
+    }
+
     whatsappClient = new Client({
         authStrategy: new LocalAuth({
             dataPath: path.join(app.getPath('userData'), 'whatsapp-session')
         }),
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+        },
         puppeteer: {
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        }
+            headless: 'new',
+            executablePath: executablePath,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-extensions',
+                '--no-zygote',
+                '--disable-gpu',
+                '--proxy-server="direct://"',
+                '--proxy-bypass-list=*'
+            ]
+        },
+        authTimeoutMs: 60000
     });
+
+    let authToReadyTimeout;
 
     whatsappClient.on('qr', async (qr) => {
         console.log('WhatsApp QR Received');
         whatsappStatus = 'QR_READY';
+        if (authToReadyTimeout) clearTimeout(authToReadyTimeout);
         try {
             const qrDataUrl = await qrcode.toDataURL(qr);
             if (mainWindow) {
@@ -124,8 +184,24 @@ function initWhatsApp() {
     whatsappClient.on('authenticated', () => {
         console.log('WhatsApp Authenticated');
         whatsappStatus = 'AUTHENTICATED';
-        if (mainWindow) mainWindow.webContents.send('whatsapp:authenticated');
-        if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+        if (mainWindow) {
+            mainWindow.webContents.send('whatsapp:authenticated');
+            mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+        }
+
+        // FAILSAFE: If it stays in AUTHENTICATED state for 2 minutes without reaching READY, it's hung
+        if (authToReadyTimeout) clearTimeout(authToReadyTimeout);
+        authToReadyTimeout = setTimeout(() => {
+            if (whatsappStatus === 'AUTHENTICATED') {
+                console.error('WhatsApp failed to transition from AUTHENTICATED to READY in 2 minutes.');
+                if (whatsappClient) whatsappClient.destroy().catch(() => { });
+                whatsappStatus = 'DISCONNECTED';
+                if (mainWindow) {
+                    mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+                    mainWindow.webContents.send('whatsapp:auth_failure', 'Connection timeout after scanning. Please try re-syncing.');
+                }
+            }
+        }, 120000);
     });
 
     whatsappClient.on('auth_failure', (msg) => {
@@ -138,6 +214,7 @@ function initWhatsApp() {
     whatsappClient.on('ready', () => {
         console.log('WhatsApp Client Ready');
         whatsappStatus = 'READY';
+        if (authToReadyTimeout) clearTimeout(authToReadyTimeout);
         if (mainWindow) mainWindow.webContents.send('whatsapp:ready');
         if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
     });
@@ -197,6 +274,18 @@ ipcMain.handle('whatsapp:reconnect', async () => {
         }
         whatsappClient = null;
     }
+
+    // CRITICAL: Wipe the session folder to ensure a clean start
+    const sessionPath = path.join(app.getPath('userData'), 'whatsapp-session');
+    try {
+        if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+            console.log('Wiped WhatsApp session folder:', sessionPath);
+        }
+    } catch (err) {
+        console.error('Failed to wipe session folder:', err);
+    }
+
     whatsappStatus = 'DISCONNECTED';
     initWhatsApp();
     return { status: whatsappStatus };
@@ -448,7 +537,34 @@ ipcMain.handle('drive:save-tokens', async (event, tokens) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+    // ── Register app:// protocol handler ─────────────────────────────────────
+    protocol.handle('app', (request) => {
+        const url = new URL(request.url)
+        let pathname = decodeURIComponent(url.pathname)
+
+        // Normalize Pathname for Windows
+        pathname = pathname.replace(/^\//, ''); // remove leading slash
+        if (pathname === '' || pathname === '/') pathname = 'index.html'
+
+        // Handle Next.js route pathnames (SPA logic)
+        if (!path.extname(pathname) && !pathname.endsWith('/')) {
+            pathname += '/index.html'
+        }
+
+        const filePath = path.join(outDir, pathname)
+        const fileUrl = require('url').pathToFileURL(filePath).toString()
+
+        return net.fetch(fileUrl).catch(err => {
+            console.error('[app://] fetch error:', err, 'for', fileUrl)
+            // SPA Fallback: if not found, serve the main index.html
+            const fallbackPath = path.join(outDir, 'index.html')
+            return net.fetch(require('url').pathToFileURL(fallbackPath).toString())
+        })
+    })
+
+    createWindow()
+})
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()

@@ -2,7 +2,9 @@
 const isElectronBuild = process.env.ELECTRON_BUILD === '1';
 
 const nextConfig = {
-    ...(isElectronBuild ? { output: 'export' } : {}),
+    ...(isElectronBuild ? {
+        output: 'export'
+    } : {}),
     images: {
         unoptimized: true
     },
@@ -11,4 +13,3 @@ const nextConfig = {
 }
 
 module.exports = nextConfig
-

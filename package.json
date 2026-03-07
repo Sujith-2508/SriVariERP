@@ -1,6 +1,8 @@
 {
   "name": "sri-vari-enterprises",
   "version": "1.0.0",
+  "description": "Billing and Collections ERP System",
+  "author": "Sri Vari Enterprises",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -10,14 +12,38 @@
     "export": "next build",
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "build:electron": "ELECTRON_BUILD=1 next build && electron-builder"
+    "build:electron": "ELECTRON_BUILD=1 next build && electron-builder",
+    "build:win": "ELECTRON_BUILD=1 next build && electron-builder --win",
+    "build:mac": "ELECTRON_BUILD=1 next build && electron-builder --mac",
+    "build:all": "ELECTRON_BUILD=1 next build && electron-builder --win --mac"
   },
   "build": {
     "appId": "com.srivari.erp",
     "productName": "Sri Vari ERP",
     "win": {
       "icon": "public/icon.ico",
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sri Vari ERP"
     },
     "mac": {
       "icon": "public/icon.png"
@@ -29,9 +55,15 @@
       "out/**/*",
       "main.js",
       "preload.js",
+      ".env.local",
       "public/icon.ico",
-      "public/icon.png",
-      "node_modules/**/*"
+      "public/icon.png"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/whatsapp-web.js/**/*",
+      "node_modules/puppeteer/**/*",
+      "node_modules/puppeteer-core/**/*"
     ],
     "directories": {
       "output": "dist"

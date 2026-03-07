@@ -25,6 +25,7 @@ const ROOT_FOLDER_NAME = 'SriVari Invoices';
 const ERP_INVOICES_FOLDER = 'ERP Invoices';
 const SUPPLIER_STATEMENTS_FOLDER = 'Supplier Statements';
 const DEALER_STATEMENTS_FOLDER = 'Dealer Statements';
+const WHATSAPP_UPLOADS_FOLDER = 'WhatsApp Documents';
 const DRIVE_EMAIL_KEY = 'googleDriveEmail';
 
 // --- Auth helpers (same pattern as googleSheetWriter.ts) ---
@@ -125,13 +126,53 @@ async function getDriveAccessToken(): Promise<string> {
  */
 async function getOAuthAccessToken(): Promise<string | null> {
     try {
+        // 1. Try Electron IPC first
         const electron = (window as any).electron;
         if (electron?.drive?.getAccessToken) {
             const token = await electron.drive.getAccessToken();
             if (token) return token;
         }
+
+        // 2. Fallback to Browser localStorage for Web Version
+        if (typeof window !== 'undefined') {
+            const tokenJson = localStorage.getItem('drive_token');
+            if (tokenJson) {
+                const tokens = JSON.parse(tokenJson);
+                // Check if expired
+                if (tokens.access_token && tokens.expires_at && Date.now() < tokens.expires_at - 60000) {
+                    return tokens.access_token;
+                }
+
+                // If expired, try to refresh via standard web fetch
+                const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || localStorage.getItem('google_oauth_client_id');
+                const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || localStorage.getItem('google_oauth_client_secret');
+
+                if (tokens.refresh_token && clientId && clientSecret) {
+                    const resp = await fetch('https://oauth2.googleapis.com/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            client_id: clientId,
+                            client_secret: clientSecret,
+                            refresh_token: tokens.refresh_token,
+                            grant_type: 'refresh_token'
+                        })
+                    });
+                    const result = await resp.json();
+                    if (result.access_token) {
+                        const updated = {
+                            ...tokens,
+                            access_token: result.access_token,
+                            expires_at: Date.now() + (result.expires_in - 60) * 1000
+                        };
+                        localStorage.setItem('drive_token', JSON.stringify(updated));
+                        return result.access_token;
+                    }
+                }
+            }
+        }
     } catch (e) {
-        // Not in Electron or IPC failed
+        console.error('[DriveService] Web Auth retrieval failed:', e);
     }
     return null;
 }
@@ -235,6 +276,26 @@ async function shareFolderWithEmail(token: string, folderId: string): Promise<vo
         console.log(`[DriveService] Shared folder with ${email.trim()}`);
     } catch (e) {
         console.warn('[DriveService] Failed to share folder:', e);
+    }
+}
+
+/** Set a folder to "Anyone with the link can view" */
+async function makeFolderPublic(token: string, folderId: string): Promise<void> {
+    try {
+        await fetch(`${DRIVE_API}/${folderId}/permissions`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                role: 'reader',
+                type: 'anyone',
+            }),
+        });
+        console.log(`[DriveService] Folder ${folderId} is now public (anyone with link)`);
+    } catch (e) {
+        console.warn('[DriveService] Failed to make folder public:', e);
     }
 }
 
@@ -534,4 +595,26 @@ export function buildInvoiceFileName(
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const yyyy = date.getFullYear();
     return `${invoiceNo}_${sanitizedDealer}_${dd}-${mm}-${yyyy}.pdf`;
+}
+/**
+ * Upload a PDF specifically for sharing via WhatsApp.
+ * Returns the webViewLink for the message.
+ */
+export async function uploadToWhatsAppFolder(
+    base64Data: string,
+    fileName: string
+): Promise<string> {
+    const oauthToken = await getOAuthAccessToken();
+    if (!oauthToken) {
+        throw new Error('Google Drive not connected. Please connect it in Settings to send PDF links.');
+    }
+
+    const rootId = await getRootFolder(oauthToken);
+    const folderId = await findOrCreateSubFolder(oauthToken, WHATSAPP_UPLOADS_FOLDER, rootId);
+
+    // Ensure the folder is public so links work for everyone
+    await makeFolderPublic(oauthToken, folderId);
+
+    const result = await uploadPdfToFolder(oauthToken, base64Data, fileName, folderId);
+    return result.webViewLink;
 }

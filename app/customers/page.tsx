@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { deleteAllTabsExcept } from '@/lib/googleSheetDealers';
+import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 
 // ... existing imports
 
@@ -492,28 +493,51 @@ export default function DealerLedger() {
     const handleSendWhatsAppStatement = async () => {
         setDateRangeModal(prev => ({ ...prev, open: false }));
         const selectedDealer = dealers.find(d => d.id === selectedDealerId);
-        if (!selectedDealer || !window.electron?.whatsapp) return;
+        if (!selectedDealer) return;
 
         setWhatsappSending('sending');
         setWhatsappError(null);
 
         try {
-            const status = await window.electron.whatsapp.getStatus();
-            if (status !== 'READY') {
-                throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+            if (window.electron?.whatsapp?.getStatus) {
+                const status = await window.electron.whatsapp.getStatus();
+                if (status !== 'READY') {
+                    throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+                }
             }
+
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
                 selectedDealer, invoices, payments, getCompanySettings(), summary
             );
             const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
             const rangeText = getWhatsAppRangeText();
-            await window.electron.whatsapp.sendPDF(
-                selectedDealer.phone,
-                base64Pdf,
-                `${safeName}_Statement_${getPdfLabel()}.pdf`,
-                `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`
-            );
+
+            if (window.electron?.whatsapp?.sendPDF) {
+                await window.electron.whatsapp.sendPDF(
+                    selectedDealer.phone,
+                    base64Pdf,
+                    `${safeName}_Statement_${getPdfLabel()}.pdf`,
+                    `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`
+                );
+            } else {
+                // WEB FALLBACK: Upload to Drive and share Link
+                try {
+                    const stmtLink = await uploadToWhatsAppFolder(base64Pdf, `${safeName}_Statement_${getPdfLabel()}.pdf`);
+                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. \n\nView Statement PDF: ${stmtLink}`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                    // Small delay to simulate sending
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (err: any) {
+                    console.error('Web WhatsApp share failed:', err);
+                    // Fallback to text only
+                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. (Full statement available in office)`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                }
+            }
+
             setWhatsappSending('success');
             setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
@@ -1395,8 +1419,8 @@ export default function DealerLedger() {
                                         required
                                         maxLength={10}
                                         className={`w-full p-2.5 border rounded-lg focus:ring-2 outline-none transition-colors ${addPhoneError
-                                                ? 'border-red-400 focus:ring-red-400 bg-red-50'
-                                                : 'border-slate-300 focus:ring-emerald-500'
+                                            ? 'border-red-400 focus:ring-red-400 bg-red-50'
+                                            : 'border-slate-300 focus:ring-emerald-500'
                                             }`}
                                         value={newDealer.phone}
                                         onChange={e => {
@@ -1555,8 +1579,8 @@ export default function DealerLedger() {
                                         required
                                         maxLength={10}
                                         className={`w-full p-2.5 border rounded-lg focus:ring-2 outline-none transition-colors ${editPhoneError
-                                                ? 'border-red-400 focus:ring-red-400 bg-red-50'
-                                                : 'border-slate-300 focus:ring-blue-500'
+                                            ? 'border-red-400 focus:ring-red-400 bg-red-50'
+                                            : 'border-slate-300 focus:ring-blue-500'
                                             }`}
                                         value={editDealer.phone}
                                         onChange={e => {
