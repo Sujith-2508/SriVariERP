@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive, Building2, Landmark } from 'lucide-react';
 import WhatsAppSection from '@/components/WhatsAppSection';
 import { supabase } from '@/lib/supabase';
+import { validatePassword } from '@/lib/validation';
 
 export default function SettingsPage() {
     // â”€â”€â”€ Admin credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -19,6 +20,9 @@ export default function SettingsPage() {
     const [driveConnected, setDriveConnected] = useState(false);
     const [driveConnecting, setDriveConnecting] = useState(false);
     const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    // --- User Profile ---
+    const [userId, setUserId] = useState<string | null>(null);
 
     // â”€â”€â”€ Company & Bank Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [companySettingsId, setCompanySettingsId] = useState<string | null>(null);
@@ -43,8 +47,16 @@ export default function SettingsPage() {
     const [companyMessage, setCompanyMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
     useEffect(() => {
-        const storedUsername = localStorage.getItem('adminUsername') || 'SVadmin';
-        setCurrentUsername(storedUsername);
+        // Load user from session
+        const sessUserId = sessionStorage.getItem('userId');
+        const sessUsername = sessionStorage.getItem('username');
+        if (sessUserId) {
+            setUserId(sessUserId);
+            setCurrentUsername(sessUsername || '');
+
+            // Fetch additional details if needed
+            // (Recovery info removal)
+        }
 
         // Check if Drive is already connected via Electron IPC
         const electron = (window as any).electron;
@@ -245,28 +257,74 @@ export default function SettingsPage() {
         return { valid: true, message: '' };
     };
 
-    const handleUpdateUsername = (e: React.FormEvent) => {
+    const handleUpdateUsername = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newUsername.trim()) { setMessage({ type: 'error', text: 'Username cannot be empty' }); return; }
-        localStorage.setItem('adminUsername', newUsername);
-        setCurrentUsername(newUsername);
-        setNewUsername('');
-        setMessage({ type: 'success', text: 'Username updated successfully!' });
+        if (!userId) { setMessage({ type: 'error', text: 'No active session' }); return; }
+
+        const { error } = await supabase
+            .from('users')
+            .update({ username: newUsername.trim() })
+            .eq('id', userId);
+
+        if (error) {
+            setMessage({ type: 'error', text: 'Failed to update username: ' + error.message });
+        } else {
+            sessionStorage.setItem('username', newUsername.trim());
+            setCurrentUsername(newUsername.trim());
+            setNewUsername('');
+            setMessage({ type: 'success', text: 'Username updated successfully!' });
+        }
         setTimeout(() => setMessage(null), 3000);
     };
 
-    const handleUpdatePassword = (e: React.FormEvent) => {
+    const handleUpdatePassword = async (e: React.FormEvent) => {
         e.preventDefault();
-        const storedPassword = localStorage.getItem('adminPassword') || 'Srivari@123';
-        if (currentPassword !== storedPassword) { setMessage({ type: 'error', text: 'Current password is incorrect' }); return; }
+        if (!userId) { setMessage({ type: 'error', text: 'No active session' }); return; }
+
+        // Fetch current password from DB to verify
+        const { data: user, error: fetchError } = await supabase
+            .from('users')
+            .select('password')
+            .eq('id', userId)
+            .single();
+
+        if (fetchError || !user) {
+            setMessage({ type: 'error', text: 'Failed to verify current session.' });
+            return;
+        }
+
+        if (currentPassword !== user.password) {
+            setMessage({ type: 'error', text: 'Current password is incorrect' });
+            return;
+        }
+
         const validation = validatePassword(newPassword);
-        if (!validation.valid) { setMessage({ type: 'error', text: validation.message }); return; }
-        if (newPassword !== confirmPassword) { setMessage({ type: 'error', text: 'New passwords do not match' }); return; }
-        localStorage.setItem('adminPassword', newPassword);
-        setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
-        setMessage({ type: 'success', text: 'Password updated successfully!' });
+        if (!validation.valid) {
+            setMessage({ type: 'error', text: validation.message });
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            setMessage({ type: 'error', text: 'New passwords do not match' });
+            return;
+        }
+
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ password: newPassword })
+            .eq('id', userId);
+
+        if (updateError) {
+            setMessage({ type: 'error', text: 'Failed to update password.' });
+        } else {
+            setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+            setMessage({ type: 'success', text: 'Password updated successfully!' });
+        }
         setTimeout(() => setMessage(null), 3000);
     };
+
+    // Recovery info update removed
 
     const inputCls = "w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm";
     const labelCls = "block text-xs font-semibold text-slate-600 mb-1";
@@ -480,14 +538,17 @@ export default function SettingsPage() {
                 <div className="bg-white rounded-xl border border-slate-200 p-6">
                     <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                         <User size={20} className="text-slate-500" />
-                        Change Username
+                        Account Settings
                     </h2>
                     <p className="text-sm text-slate-500 mb-4">
-                        Current username: <span className="font-medium text-slate-700">{currentUsername}</span>
+                        Logged in as: <span className="font-medium text-slate-700">{currentUsername}</span>
                     </p>
+
+                    <div className="h-px bg-slate-100 my-6" />
+
                     <form onSubmit={handleUpdateUsername} className="space-y-4">
                         <div>
-                            <label className={labelCls}>New Username</label>
+                            <label className={labelCls}>Change Username</label>
                             <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className={inputCls} placeholder="Enter new username" />
                         </div>
                         <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors">Update Username</button>

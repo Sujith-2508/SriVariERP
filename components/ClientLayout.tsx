@@ -33,21 +33,23 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
         }
     }, [pathname, mounted, isAuthenticated]);
 
-    // Check if on login page (handles both /login and /login/)
-    const isLoginPage = pathname === '/login' || pathname === '/login/';
+    // Check if on public pages (no login required)
+    const isPublicPage = pathname === '/login' || pathname === '/login/' ||
+        pathname === '/forgot-password' || pathname === '/forgot-password/' ||
+        pathname === '/change-password' || pathname === '/change-password/';
 
     // Handle redirect based on authentication status
     useEffect(() => {
         if (!mounted || isAuthenticated === null) return;
 
-        if (!isLoginPage && !isAuthenticated) {
-            // Not on login page and not authenticated - redirect to login
+        if (!isPublicPage && !isAuthenticated) {
+            // Not on a public page and not authenticated - redirect to login
             router.replace('/login');
-        } else if (isLoginPage && isAuthenticated) {
+        } else if (pathname === '/login' && isAuthenticated) {
             // On login page but already authenticated - redirect to dashboard
             router.replace('/');
         }
-    }, [mounted, isLoginPage, isAuthenticated, router]);
+    }, [mounted, isPublicPage, pathname, isAuthenticated, router]);
 
     // Map pathname to ViewState for active state detection
     const getViewState = (): ViewState => {
@@ -63,8 +65,8 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
 
     const currentView = getViewState();
 
-    // Login page - just render children directly (no auth check needed)
-    if (isLoginPage) {
+    // Public pages - just render children directly (no auth check needed)
+    if (isPublicPage) {
         return (
             <DataProvider>
                 {children}

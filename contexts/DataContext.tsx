@@ -721,14 +721,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // Primary sort: by date (ascending)
                 if (dateA !== dateB) return dateA - dateB;
 
-                // Secondary sort: INVOICEs before PAYMENTs on the same day
-                // (you can only make a payment against an existing invoice)
-                const typeOrder = (t: Transaction) => t.type === TransactionType.INVOICE ? 0 : 1;
-                if (typeOrder(a) !== typeOrder(b)) return typeOrder(a) - typeOrder(b);
-
-                // Tertiary sort: by DB insertion order (created_at) for same type same day
-                const createdA = a.createdAt ? a.createdAt.getTime() : 0;
-                const createdB = b.createdAt ? b.createdAt.getTime() : 0;
+                // Secondary sort: by precise generation time (createdAt)
+                const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                 return createdA - createdB;
             });
     };
@@ -881,11 +876,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const dateA = new Date(a.date).getTime();
                     const dateB = new Date(b.date).getTime();
                     if (dateA !== dateB) return dateA - dateB;
-                    // INVOICEs before PAYMENTs on the same day
-                    const typeOrder = (t: Transaction) => t.type === TransactionType.INVOICE ? 0 : 1;
-                    if (typeOrder(a) !== typeOrder(b)) return typeOrder(a) - typeOrder(b);
-                    const createdA = a.createdAt ? a.createdAt.getTime() : 0;
-                    const createdB = b.createdAt ? b.createdAt.getTime() : 0;
+                    // Strict chronological sorting per user request
+                    const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                    const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                     return createdA - createdB;
                 });
             let runningBal = 0;
@@ -1081,11 +1074,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const dateA = new Date(a.date).getTime();
                     const dateB = new Date(b.date).getTime();
                     if (dateA !== dateB) return dateA - dateB;
-                    // INVOICEs before PAYMENTs on the same day
-                    const typeOrder = (t: Transaction) => t.type === TransactionType.INVOICE ? 0 : 1;
-                    if (typeOrder(a) !== typeOrder(b)) return typeOrder(a) - typeOrder(b);
-                    const createdA = a.createdAt ? a.createdAt.getTime() : 0;
-                    const createdB = b.createdAt ? b.createdAt.getTime() : 0;
+                    // Strict chronological sorting per user request
+                    const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                    const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                     return createdA - createdB;
                 });
             let runningBal = 0;

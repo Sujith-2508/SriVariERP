@@ -91,12 +91,12 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
     const valueStyle = `${cellStyle} font-semibold`;
 
     return (
-        <div className="print-invoice bg-white text-black p-0 m-0 font-sans text-[10px]">
+        <div className="print-invoice bg-white text-black p-[20mm] m-0 font-sans text-[10px] min-h-screen">
             <style>{`
                 @media print {
-                    @page { margin: 10mm; size: A4; }
+                    @page { margin: 0; size: A4; }
                     body { margin: 0; padding: 0; }
-                    .print-invoice { padding: 0; margin: 0; }
+                    .print-invoice { padding: 20mm; margin: 0; width: 210mm; }
                 }
                 .print-invoice * { box-sizing: border-box; }
                 .print-invoice table { border-collapse: collapse; }

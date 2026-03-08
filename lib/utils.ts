@@ -44,9 +44,16 @@ export function calculateDealerStatement(transactions: Transaction[]) {
     const payments: PaymentStatement[] = [];
 
     // Sort transactions by date ascending to apply FIFO correctly
-    const sortedTxns = [...transactions].sort((a, b) =>
-        new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
+    const sortedTxns = [...transactions].sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+
+        // Fallback to creation time for same-day transactions
+        const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return createdA - createdB;
+    });
 
     const today = new Date();
 
@@ -116,20 +123,26 @@ export function calculateDealerStatement(transactions: Transaction[]) {
                 invoice.isOverdue = false;
             }
         }
+        payment.remaining = remainingPayment;
     });
 
     // 3. Return structured data with summary precision fixed
     const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.amount, 0);
-    const totalPaid = invoices.reduce((sum, inv) => sum + inv.paid, 0);
-    const totalOutstanding = invoices.reduce((sum, inv) => sum + inv.balance, 0);
+    const totalPaidOnInvoices = invoices.reduce((sum, inv) => sum + inv.paid, 0);
+    const totalUnapplied = payments.reduce((sum, p) => sum + p.remaining, 0);
+
+    // Total outstanding is Net Balance: Total Invoiced - Total Paid
+    // Positive if dealer owes us, negative if we owe dealer (advance)
+    const totalOutstanding = totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
 
     return {
         invoices,
         payments,
         summary: {
             totalInvoiced: Math.round(totalInvoiced * 100) / 100,
-            totalPaid: Math.round(totalPaid * 100) / 100,
+            totalPaid: Math.round((totalPaidOnInvoices + totalUnapplied) * 100) / 100,
             totalOutstanding: Math.round(totalOutstanding * 100) / 100,
+            totalUnapplied: Math.round(totalUnapplied * 100) / 100,
             overdueCount: invoices.filter(inv => inv.isOverdue && inv.balance > 0).length
         }
     };

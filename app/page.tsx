@@ -3,10 +3,10 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent, Wallet, Receipt } from 'lucide-react';
+import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent, Wallet, Receipt, Download, RefreshCw, X, FileText, Search } from 'lucide-react';
 import { calculateInvoiceProfit, formatCurrency } from '@/lib/utils';
-import { TransactionType, SupplierData, PurchaseBillData, AgentSalaryData } from '@/types';
-import { getAllSuppliers, getPurchaseBills } from '@/lib/purchaseService';
+import { TransactionType, SupplierData, PurchaseBillData, AgentSalaryData, PurchasePaymentData } from '@/types';
+import { getAllSuppliers, getPurchaseBills, getPurchasePayments } from '@/lib/purchaseService';
 import { getSalaryByMonth } from '@/lib/salaryService';
 import { getExpensesByMonth } from '@/lib/expenseService';
 import { CompanyExpense } from '@/types';
@@ -15,9 +15,28 @@ export default function Dashboard() {
     const { dealers, products, transactions, agents } = useData();
     const [suppliers, setSuppliers] = useState<SupplierData[]>([]);
     const [purchaseBills, setPurchaseBills] = useState<PurchaseBillData[]>([]);
+    const [purchasePayments, setPurchasePayments] = useState<PurchasePaymentData[]>([]);
     const [agentSalaries, setAgentSalaries] = useState<AgentSalaryData[]>([]);
     const [companyExpenses, setCompanyExpenses] = useState<CompanyExpense[]>([]);
     const [profitPeriod, setProfitPeriod] = useState<'monthly' | 'yearly'>('monthly');
+
+    const [dateRangeModal, setDateRangeModal] = useState<{
+        open: boolean;
+        range: 'all' | 'fy-pick' | 'month-pick' | 'custom';
+        startDate: string;
+        endDate: string;
+        selectedFY: string;
+        selectedMonth: string;
+    }>({
+        open: false,
+        range: 'all',
+        startDate: '',
+        endDate: '',
+        selectedFY: `${new Date().getMonth() < 3 ? new Date().getFullYear() - 1 : new Date().getFullYear()}`,
+        selectedMonth: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
+    });
+
+    const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
     // Selected month and year for viewing historical data
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // 1-12
@@ -26,19 +45,157 @@ export default function Dashboard() {
     // Load expenses and salaries when month/year changes
     useEffect(() => {
         const loadDashboardData = async () => {
-            const [suppliersData, billsData, salariesData, expensesData] = await Promise.all([
+            const [suppliersData, billsData, paymentsData, salariesData, expensesData] = await Promise.all([
                 getAllSuppliers(),
                 getPurchaseBills(),
+                getPurchasePayments(),
                 getSalaryByMonth(selectedMonth, selectedYear),
                 getExpensesByMonth(selectedMonth, selectedYear)
             ]);
             setSuppliers(suppliersData);
             setPurchaseBills(billsData);
+            setPurchasePayments(paymentsData);
             setAgentSalaries(salariesData);
             setCompanyExpenses(expensesData);
         };
         loadDashboardData();
     }, [selectedMonth, selectedYear]);
+
+    const handleExportCompanyStatementPDF = async () => {
+        setIsGeneratingPdf(true);
+        try {
+            const { generateWholeCompanyStatementPDFBase64 } = await import('@/lib/pdfGenerator');
+            const { supabase } = await import('@/lib/supabase');
+
+            // Load company settings
+            let company = {
+                companyName: 'Sri Vari Enterprises',
+                addressLine1: 'Block No.9 T.S. No 609',
+                addressLine2: 'Palaniyappan Street',
+                city: 'Pollachi',
+                gstNumber: '33DIGPM0162N1Z6',
+                phone: '',
+                email: ''
+            };
+            const { data: compData } = await supabase.from('company_settings').select('*').limit(1);
+            if (compData && compData[0]) {
+                const c = compData[0];
+                company = {
+                    companyName: c.company_name,
+                    addressLine1: c.address_line1,
+                    addressLine2: c.address_line2,
+                    city: c.city,
+                    gstNumber: c.gst_number,
+                    phone: c.phone,
+                    email: c.email
+                };
+            }
+
+            // Determine date range
+            let start: Date | undefined;
+            let end: Date | undefined;
+            let rangeLabel = 'Complete Statement';
+
+            if (dateRangeModal.range === 'fy-pick') {
+                const fy = parseInt(dateRangeModal.selectedFY);
+                start = new Date(fy, 3, 1);
+                end = new Date(fy + 1, 2, 31, 23, 59, 59);
+                rangeLabel = `FY ${fy}-${(fy + 1).toString().slice(2)}`;
+            } else if (dateRangeModal.range === 'month-pick') {
+                const [y, m] = dateRangeModal.selectedMonth.split('-').map(Number);
+                start = new Date(y, m - 1, 1);
+                end = new Date(y, m, 0, 23, 59, 59);
+                rangeLabel = new Date(y, m - 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+            } else if (dateRangeModal.range === 'custom') {
+                start = new Date(dateRangeModal.startDate);
+                end = new Date(dateRangeModal.endDate);
+                end.setHours(23, 59, 59);
+                rangeLabel = `${start.toLocaleDateString('en-IN')} to ${end.toLocaleDateString('en-IN')}`;
+            }
+
+            // Aggregate all transactions
+            const allTransactions: any[] = [];
+
+            // 1. Dealer Invoices & Payments
+            transactions.forEach(t => {
+                const dDate = new Date(t.date);
+                if ((!start || dDate >= start) && (!end || dDate <= end)) {
+                    const dealer = dealers.find(d => d.id === t.customerId);
+                    const businessName = dealer?.businessName || 'Unknown Dealer';
+
+                    let type = t.type === 'INVOICE' ? 'Invoice' : 'Receipt';
+                    const notes = t.notes || '';
+                    if (notes.startsWith('Cheque Return') || notes.startsWith('Chq Return')) type = 'Cheque Return';
+                    if (notes.includes('Stock Return')) type = 'Stock Return';
+
+                    allTransactions.push({
+                        date: dDate,
+                        businessName,
+                        type,
+                        credit: (t.type === 'INVOICE' || type === 'Cheque Return') ? t.amount : 0,
+                        debit: (t.type === 'PAYMENT' || type === 'Stock Return') ? t.amount : 0
+                    });
+                }
+            });
+
+            // 2. Supplier Bills & Payments
+            purchaseBills.forEach(b => {
+                const bDate = new Date(b.billDate);
+                if ((!start || bDate >= start) && (!end || bDate <= end)) {
+                    const supplier = suppliers.find(s => s.id === b.supplierId);
+                    allTransactions.push({
+                        date: bDate,
+                        businessName: supplier?.name || 'Unknown Supplier',
+                        type: 'Purchase Bill',
+                        credit: 0,
+                        debit: b.amount
+                    });
+                }
+            });
+
+            purchasePayments.forEach(p => {
+                const pDate = new Date(p.paymentDate);
+                if ((!start || pDate >= start) && (!end || pDate <= end)) {
+                    const supplier = suppliers.find(s => s.id === p.supplierId);
+                    allTransactions.push({
+                        date: pDate,
+                        businessName: supplier?.name || 'Unknown Supplier',
+                        type: 'Payment',
+                        credit: p.amount,
+                        debit: 0
+                    });
+                }
+            });
+
+            // Sort by date ascending
+            allTransactions.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+            const base64 = await generateWholeCompanyStatementPDFBase64(
+                company as any,
+                allTransactions,
+                rangeLabel
+            );
+
+            const binaryString = atob(base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Company_Statement_${rangeLabel.replace(/ /g, '_')}.pdf`;
+            link.click();
+            URL.revokeObjectURL(url);
+            setDateRangeModal(prev => ({ ...prev, open: false }));
+        } catch (error) {
+            console.error('Error generating company statement PDF:', error);
+            alert('Failed to generate statement');
+        } finally {
+            setIsGeneratingPdf(false);
+        }
+    };
 
     // ========================================================================
     // 1. FUNDAMENTAL STATS
@@ -334,11 +491,20 @@ export default function Dashboard() {
 
 
                 </div>
-                <div className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-lg">
-                    <Calendar size={16} className="text-slate-500" />
-                    <span className="text-sm font-medium text-slate-600">
-                        {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
-                    </span>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: true }))}
+                        className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 transition-all shadow-md shadow-emerald-100"
+                    >
+                        <Download size={16} />
+                        Export Statement
+                    </button>
+                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-lg">
+                        <Calendar size={16} className="text-slate-500" />
+                        <span className="text-sm font-medium text-slate-600">
+                            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -581,6 +747,128 @@ export default function Dashboard() {
                     border-radius: 2px;
                 }
             `}</style>
+
+            {/* Date Range Modal */}
+            {dateRangeModal.open && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                    />
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                            <div>
+                                <h3 className="text-xl font-bold text-slate-800">Export Company Statement</h3>
+                                <p className="text-xs text-slate-500 mt-1">Select date range for consolidated report</p>
+                            </div>
+                            <button
+                                onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                            >
+                                <X size={20} className="text-slate-500" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-6">
+                            <div className="grid grid-cols-2 gap-3">
+                                {[
+                                    { id: 'all', label: 'Complete', icon: FileText },
+                                    { id: 'fy-pick', label: 'Financial Year', icon: Calendar },
+                                    { id: 'month-pick', label: 'Month Wise', icon: Clock },
+                                    { id: 'custom', label: 'Custom Range', icon: Search }
+                                ].map((opt) => {
+                                    const Icon = opt.icon;
+                                    return (
+                                        <button
+                                            key={opt.id}
+                                            onClick={() => setDateRangeModal(prev => ({ ...prev, range: opt.id as any }))}
+                                            className={`p-3 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${dateRangeModal.range === opt.id
+                                                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                                                : 'border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50'
+                                                }`}
+                                        >
+                                            <Icon size={20} />
+                                            <span className="text-xs font-bold">{opt.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                {dateRangeModal.range === 'fy-pick' && (
+                                    <div>
+                                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">Select Financial Year</label>
+                                        <select
+                                            className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-sm"
+                                            value={dateRangeModal.selectedFY}
+                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedFY: e.target.value }))}
+                                        >
+                                            {Array.from({ length: 15 }, (_, i) => 2020 + i).map(year => (
+                                                <option key={year} value={year.toString()}>
+                                                    FY {year}-{String(year + 1).slice(2)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
+                                {dateRangeModal.range === 'month-pick' && (
+                                    <div>
+                                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">Select Month</label>
+                                        <input
+                                            type="month"
+                                            className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-sm"
+                                            value={dateRangeModal.selectedMonth}
+                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedMonth: e.target.value }))}
+                                        />
+                                    </div>
+                                )}
+
+                                {dateRangeModal.range === 'custom' && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">Start Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                                                value={dateRangeModal.startDate}
+                                                onChange={(e) => setDateRangeModal(prev => ({ ...prev, startDate: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">End Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                                                value={dateRangeModal.endDate}
+                                                onChange={(e) => setDateRangeModal(prev => ({ ...prev, endDate: e.target.value }))}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {dateRangeModal.range === 'all' && (
+                                    <div className="text-center py-2">
+                                        <p className="text-sm text-slate-600">Generating complete historical statement</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button
+                                onClick={handleExportCompanyStatementPDF}
+                                disabled={isGeneratingPdf}
+                                className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 shadow-lg shadow-emerald-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isGeneratingPdf ? (
+                                    <><RefreshCw size={20} className="animate-spin" /> Generating PDF...</>
+                                ) : (
+                                    <><Download size={20} /> Download Statement</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }

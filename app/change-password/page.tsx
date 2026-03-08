@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, Eye, EyeOff, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { validatePassword } from '@/lib/validation';
 
 export default function ChangePasswordPage() {
     const router = useRouter();
@@ -30,8 +31,9 @@ export default function ChangePasswordPage() {
             return;
         }
 
-        if (newPassword.length < 6) {
-            setError('New password must be at least 6 characters long.');
+        const validation = validatePassword(newPassword);
+        if (!validation.isValid) {
+            setError(validation.message);
             setIsLoading(false);
             return;
         }
@@ -47,7 +49,7 @@ export default function ChangePasswordPage() {
             const { data: user, error: queryError } = await supabase
                 .from('users')
                 .select('*')
-                .eq('username', username)
+                .eq('username', username.trim())
                 .eq('is_active', true)
                 .single();
 

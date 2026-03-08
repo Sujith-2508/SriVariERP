@@ -641,13 +641,19 @@ export const generateStatementPDFBase64 = async (
     // 2. PROFESSIONAL HEADER (Aligned with Invoice)
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName, 12, 20);
-    doc.setFontSize(8);
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text(company.addressLine1 || '', 12, 25);
-    doc.text(company.addressLine2 || '', 12, 29);
-    doc.text(`${company.city || ''}`, 12, 33);
-    doc.text(`GST NO: ${company.gstNumber || 'N/A'}`, 12, 37);
+    const addr1 = (company.addressLine1 || '').toUpperCase();
+    const addr2 = (company.addressLine2 || '').toUpperCase();
+    const city = (company.city || '').toUpperCase();
+    const gst = (company.gstNumber || '').toUpperCase();
+
+    doc.text(addr1, 12, 24);
+    doc.text(addr2, 12, 29);
+    doc.text(city, 12, 34);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`GST NO: ${gst || 'N/A'}`, 12, 39);
 
     // Right Side Header
     doc.line(100, 10, 100, 45);
@@ -715,7 +721,8 @@ export const generateStatementPDFBase64 = async (
             paid: inv.paid,
             balance: inv.balance,
             notes: inv.originalTransaction?.notes || '',
-            agent: inv.originalTransaction?.agentName || '-'
+            agent: inv.originalTransaction?.agentName || '-',
+            createdAt: inv.originalTransaction?.createdAt
         })),
         ...payments.map(p => ({
             date: new Date(p.date),
@@ -725,9 +732,17 @@ export const generateStatementPDFBase64 = async (
             paid: p.amount,
             balance: 0,
             agent: p.agentName || 'Admin',
-            notes: (p as any).notes || ''
+            notes: (p as any).notes || '',
+            createdAt: (p as any).createdAt
         }))
-    ].sort((a, b) => a.date.getTime() - b.date.getTime())
+    ].sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return createdA - createdB;
+    })
         .map(entry => {
             // Correctly label Cheque Returns in the type column
             if (entry.type === 'Invoice') {
@@ -769,6 +784,183 @@ export const generateStatementPDFBase64 = async (
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
     doc.text('Note: This is an automatically generated account statement. Please contact us for any discrepancies.', 105, 280, { align: 'center' });
+
+    const pdfOutput = doc.output('datauristring');
+    return pdfOutput.split(',')[1];
+};
+
+/**
+ * Generates a Supplier Statement PDF and returns it as a Base64 string.
+ */
+export const generateSupplierStatementPDFBase64 = async (
+    supplier: { name: string; phone?: string; city?: string; balance: number },
+    statementData: any[],
+    company: CompanySettings
+): Promise<string> => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    // 1. BOX BORDER
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    // 2. HEADER SECTION
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const addr1 = (company.addressLine1 || '').toUpperCase();
+    const addr2 = (company.addressLine2 || '').toUpperCase();
+    const city = (company.city || '').toUpperCase();
+    const gst = (company.gstNumber || '').toUpperCase();
+
+    doc.text(addr1, 12, 24);
+    doc.text(addr2, 12, 29);
+    doc.text(city, 12, 34);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`GST NO: ${gst || 'N/A'}`, 12, 39);
+
+    // Right Side Header
+    doc.line(100, 10, 100, 45);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('SUPPLIER STATEMENT', 150, 25, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}`, 150, 32, { align: 'center' });
+
+    doc.line(10, 45, 200, 45);
+
+    // 3. SUPPLIER INFO
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Statement For:', 12, 52);
+    doc.setFontSize(11);
+    doc.text(supplier.name, 12, 58);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    if (supplier.phone) doc.text(`Phone: ${supplier.phone}`, 12, 63);
+    if (supplier.city) doc.text(`City: ${supplier.city}`, 12, 67);
+
+    // 4. SUMMARY BOX
+    doc.setDrawColor(200);
+    doc.setFillColor(245, 245, 245);
+    doc.rect(130, 50, 65, 25, 'F');
+    doc.rect(130, 50, 65, 25, 'S');
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Current Balance:', 135, 58);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    if (supplier.balance > 0) doc.setTextColor(220, 38, 38);
+    doc.text(`Rs. ${supplier.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 135, 66);
+    doc.setTextColor(0);
+
+    doc.line(10, 80, 200, 80);
+
+    // 5. TRANSACTION TABLE
+    const tableColumn = ["Date", "Type", "Reference", "Particulars", "Debit (+)", "Credit (-)", "Balance"];
+    const tableRows = statementData.map(entry => [
+        new Date(entry.date).toLocaleDateString('en-GB'),
+        entry.type === 'BILL' ? 'Pur. Bill' : 'Payment',
+        entry.reference,
+        entry.notes || '-',
+        entry.debit > 0 ? entry.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
+        entry.credit > 0 ? entry.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
+        entry.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+    ]);
+
+    autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 85,
+        theme: 'striped',
+        headStyles: { fillColor: [16, 185, 129] },
+        styles: { fontSize: 8 },
+        margin: { left: 10, right: 10 }
+    });
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Note: This is an automatically generated supplier statement.', 105, 280, { align: 'center' });
+
+    const pdfOutput = doc.output('datauristring');
+    return pdfOutput.split(',')[1];
+};
+
+/**
+ * Generates a Whole Company Statement PDF and returns it as a Base64 string.
+ */
+export const generateWholeCompanyStatementPDFBase64 = async (
+    company: CompanySettings,
+    transactions: any[],
+    dateRangeLabel: string
+): Promise<string> => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    const formatCurrencyPDF = (amount: number) => {
+        return `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    };
+
+    // 1. BOX BORDER
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    // 2. HEADER SECTION
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const addr1 = (company.addressLine1 || '').toUpperCase();
+    const addr2 = (company.addressLine2 || '').toUpperCase();
+    const city = (company.city || '').toUpperCase();
+    const gst = (company.gstNumber || '').toUpperCase();
+
+    doc.text(addr1, 12, 24);
+    doc.text(addr2, 12, 29);
+    doc.text(city, 12, 34);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`GST NO: ${gst || 'N/A'}`, 12, 39);
+
+    // Right Side Header
+    doc.line(100, 10, 100, 45);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('COMPANY STATEMENT', 150, 25, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(dateRangeLabel, 150, 32, { align: 'center' });
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 150, 36, { align: 'center' });
+
+    doc.line(10, 45, 200, 45);
+
+    // 3. TRANSACTION TABLE
+    const tableColumn = ["Date", "Business Name", "Type", "Credit", "Debit"];
+    const tableRows = transactions.map(t => [
+        new Date(t.date).toLocaleDateString('en-GB'),
+        t.businessName || '-',
+        t.type || '-',
+        t.credit > 0 ? formatCurrencyPDF(t.credit) : '-',
+        t.debit > 0 ? formatCurrencyPDF(t.debit) : '-'
+    ]);
+
+    autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 55,
+        theme: 'grid',
+        headStyles: { fillColor: [59, 130, 246] },
+        styles: { fontSize: 8, cellPadding: 2 },
+        margin: { left: 10, right: 10 }
+    });
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Note: This is a consolidated company-wide financial statement.', 105, 280, { align: 'center' });
 
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];

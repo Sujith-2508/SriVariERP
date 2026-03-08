@@ -55,8 +55,8 @@ export default function DealerLedger() {
     // Helper to get company settings (uses loaded settings, NOT blank fallback)
     const getCompanySettings = (): CompanySettings => companySettings || {
         id: '', companyName: 'Sri Vari Enterprises',
-        addressLine1: '', addressLine2: '', city: '', state: 'Tamil Nadu',
-        pinCode: '', gstNumber: '', panNumber: '', phone: '', email: '',
+        addressLine1: 'Block No.9 T.S. No 609', addressLine2: 'Palaniyappan Street', city: 'Pollachi', state: 'Tamil Nadu',
+        pinCode: '', gstNumber: '33DIGPM0162N1Z6', panNumber: '', phone: '', email: '',
         bankName: '', bankBranch: '', accountNumber: '', ifscCode: '', accountHolderName: ''
     };
 
@@ -440,16 +440,23 @@ export default function DealerLedger() {
         const range = getDateRange();
         if (!range) return { invoices, payments, summary };
         const { from, to } = range;
+
         const filteredInvoices = invoices.filter(inv => new Date(inv.date) >= from && new Date(inv.date) <= to);
         const filteredPayments = payments.filter(p => new Date(p.date) >= from && new Date(p.date) <= to);
+
         const totalInvoiced = filteredInvoices.reduce((s, inv) => s + inv.amount, 0);
-        const totalPaid = filteredInvoices.reduce((s, inv) => s + inv.paid, 0);
-        const totalOutstanding = filteredInvoices.reduce((s, inv) => s + inv.balance, 0);
+        const totalPaidOnInvoices = filteredInvoices.reduce((s, inv) => s + inv.paid, 0);
+        const totalUnapplied = filteredPayments.reduce((s, p) => s + (p.remaining || 0), 0);
+        const totalOutstanding = totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
+
         return {
             invoices: filteredInvoices,
             payments: filteredPayments,
             summary: {
-                totalInvoiced, totalPaid, totalOutstanding,
+                totalInvoiced,
+                totalPaid: totalPaidOnInvoices + totalUnapplied,
+                totalOutstanding,
+                totalUnapplied,
                 overdueCount: filteredInvoices.filter(i => i.isOverdue && i.balance > 0).length
             }
         };
@@ -673,16 +680,6 @@ export default function DealerLedger() {
                             <p className="text-sm text-slate-500">{selectedDealer.businessName}</p>
                         </div>
                     </div>
-                    <div>
-                        <button
-                            onClick={() => handleDownloadInvoicePDF()}
-                            disabled={!companySettings}
-                            className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                        >
-                            <Download size={16} />
-                            Download PDF
-                        </button>
-                    </div>
                 </div>
 
                 <div className="p-6 max-w-4xl mx-auto">
@@ -891,17 +888,14 @@ export default function DealerLedger() {
                         </div>
                     </div>
                 </div>
-            </div>
+            </div >
         );
     }
 
     // Dealer Statement View
     if (selectedDealer && !mainContent) {
-        const { invoices, payments } = getDealerStatement(selectedDealer.id);
-        const totalInvoiced = invoices.reduce((acc, inv) => acc + inv.amount, 0);
-        const totalPaid = invoices.reduce((acc, inv) => acc + inv.paid, 0);
-        const totalBalance = invoices.reduce((acc, inv) => acc + inv.balance, 0);
-        const overdueCount = invoices.filter(inv => inv.isOverdue && inv.balance > 0).length;
+        const { invoices, payments, summary } = getDealerStatement(selectedDealer.id);
+        const { totalInvoiced, totalPaid, totalOutstanding: totalBalance, overdueCount } = summary;
 
         // Profit Calculation
         const dealerProfitStats = getDealerProfitSummary(
@@ -1226,11 +1220,19 @@ export default function DealerLedger() {
                         <button
                             onClick={handleBulkSync}
                             disabled={isSyncing}
-                            className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 disabled:opacity-50"
+                            className="bg-emerald-600/90 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
                             title="Re-sync all data correctly from Database to Google Sheets"
                         >
                             {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
                             {isSyncing ? 'Syncing...' : 'Sync to Sheets'}
+                        </button>
+                        <button
+                            onClick={() => openDateModal('bulk-export')}
+                            className="bg-white text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-50 transition-all shadow-sm"
+                            title="Export all dealer statements as a single PDF"
+                        >
+                            <Download size={16} />
+                            Export Statements
                         </button>
                         <button
                             onClick={() => setIsAddModalOpen(true)}
