@@ -2,9 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { SupplierData, PurchaseBillData, PurchasePaymentData } from '../../types';
+import { useData } from '@/contexts/DataContext';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmationContext';
+import { CloudUpload, RefreshCw, Database, Trash2, AlertTriangle, CheckCircle, FileUp, ShieldAlert } from 'lucide-react';
 import { Sidebar } from '../../components/Sidebar';
 
-export default function MigrationPage() {
+export default function Migration() {
     const [status, setStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
     const [log, setLog] = useState<string[]>([]);
     const [stats, setStats] = useState({
@@ -12,6 +16,12 @@ export default function MigrationPage() {
         bills: 0,
         payments: 0
     });
+    const { isLoading: contextLoading } = useData();
+    const { showToast } = useToast();
+    const { showConfirm } = useConfirm();
+    const [activeTab, setActiveTab] = useState<'dealers' | 'purchases' | 'tools'>('dealers');
+    const [isClearing, setIsClearing] = useState(false);
+
 
     const addLog = (msg: string) => setLog(prev => [...prev, `${new Date().toLocaleTimeString()}: ${msg}`]);
 
@@ -103,16 +113,32 @@ export default function MigrationPage() {
         }
     };
 
-    const clearData = () => {
-        if (confirm("Are you sure you want to clear ALL purchase data (Suppliers, Bills, Payments)? This cannot be undone.")) {
-            localStorage.removeItem('sve_suppliers');
-            localStorage.removeItem('sve_purchase_bills');
-            localStorage.removeItem('sve_purchase_payments');
-            localStorage.removeItem('sve_purchase_allocations');
-            addLog("Cleared all purchase data.");
-            setStats({ suppliers: 0, bills: 0, payments: 0 });
+    const handleClearPurchases = async () => {
+        const confirmed = await showConfirm({
+            title: 'Clear All Purchase Data',
+            message: 'Are you sure you want to clear ALL purchase data (Suppliers, Bills, Payments)? This action is permanent and cannot be undone.',
+            confirmLabel: 'Clear All Data',
+            type: 'danger'
+        });
+
+        if (confirmed) {
+            setIsClearing(true);
+            try {
+                localStorage.removeItem('sve_suppliers');
+                localStorage.removeItem('sve_purchase_bills');
+                localStorage.removeItem('sve_purchase_payments');
+                localStorage.removeItem('sve_purchase_allocations');
+                showToast('All purchase data has been cleared.', 'success');
+                addLog("Cleared all purchase data.");
+                setStats({ suppliers: 0, bills: 0, payments: 0 });
+            } catch (error) {
+                console.error('Clear failed:', error);
+                showToast('Failed to clear data.', 'error');
+            } finally {
+                setIsClearing(false);
+            }
         }
-    }
+    };
 
     return (
         <div className="flex h-screen bg-gray-50">
@@ -142,7 +168,7 @@ export default function MigrationPage() {
                                 </button>
 
                                 <button
-                                    onClick={() => clearData()}
+                                    onClick={handleClearPurchases}
                                     className="px-6 py-2 rounded text-red-600 border border-red-200 hover:bg-red-50 font-medium"
                                 >
                                     Clear Existing Data

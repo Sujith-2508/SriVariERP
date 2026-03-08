@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmationContext';
 import {
     SupplierData,
     PurchaseBillData,
@@ -54,7 +56,9 @@ import { supabase } from '@/lib/supabase';
 type TabType = 'bills' | 'payments' | 'suppliers';
 
 export default function PurchasesPage() {
-    const { products } = useData(); // Get products from context
+    const { products } = useData();
+    const { showToast } = useToast();
+    const { showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState<TabType>('bills');
     const [searchTerm, setSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(true);
@@ -185,7 +189,7 @@ export default function PurchasesPage() {
             setDateRangeModal(prev => ({ ...prev, open: false }));
         } catch (error) {
             console.error('Error generating bulk suppliers PDF:', error);
-            alert('Failed to generate bulk PDF');
+            showToast('Failed to generate bulk PDF', 'error');
         } finally {
             setIsGeneratingPdf(false);
         }
@@ -402,8 +406,16 @@ export default function PurchasesPage() {
     };
 
     const handleDeleteSupplier = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this supplier?')) return;
-        await deleteSupplier(id);
+        const confirmed = await showConfirm({
+            title: 'Delete Supplier',
+            message: 'Are you sure you want to delete this supplier? This will remove all their data.',
+            confirmLabel: 'Delete',
+            type: 'danger'
+        });
+        if (confirmed) {
+            await deleteSupplier(id);
+            showToast('Supplier deleted successfully', 'info');
+        }
         loadData();
     };
 
@@ -438,7 +450,7 @@ export default function PurchasesPage() {
         // Validation: Prevent "Unknown"
         const supplier = suppliers.find(s => s.id === billForm.supplierId);
         if (!supplier || supplier.name === 'Unknown') {
-            alert('Please select a valid supplier (not "Unknown").');
+            showToast('Please select a valid supplier (not "Unknown").', 'warning');
             return;
         }
 
@@ -494,8 +506,16 @@ export default function PurchasesPage() {
     };
 
     const handleDeleteBill = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this bill? This will reverse the stock updates and supplier balance.')) return;
-        await deletePurchaseBill(id);
+        const confirmed = await showConfirm({
+            title: 'Delete Bill',
+            message: 'Are you sure you want to delete this bill? This will reverse the stock updates and supplier balance.',
+            confirmLabel: 'Delete',
+            type: 'danger'
+        });
+        if (confirmed) {
+            await deletePurchaseBill(id);
+            showToast('Bill deleted successfully', 'info');
+        }
         loadData();
     };
 
@@ -541,7 +561,7 @@ export default function PurchasesPage() {
         // Validation: Prevent "Unknown"
         const supplier = suppliers.find(s => s.id === paymentForm.supplierId);
         if (!supplier || supplier.name === 'Unknown') {
-            alert('Please select a valid supplier (not "Unknown").');
+            showToast('Please select a valid supplier (not "Unknown").', 'warning');
             return;
         }
 
@@ -571,8 +591,16 @@ export default function PurchasesPage() {
     };
 
     const handleDeletePayment = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this payment? This will revert allocations and update supplier balance.')) return;
-        await deletePurchasePayment(id);
+        const confirmed = await showConfirm({
+            title: 'Delete Payment',
+            message: 'Are you sure you want to delete this payment? This will revert allocations and update supplier balance.',
+            confirmLabel: 'Delete',
+            type: 'danger'
+        });
+        if (confirmed) {
+            await deletePurchasePayment(id);
+            showToast('Payment deleted successfully', 'info');
+        }
         loadData();
     };
 
@@ -702,7 +730,7 @@ export default function PurchasesPage() {
             doc.save(`bill_${bill.billNumber}.pdf`);
         } catch (error) {
             console.error('Error generating PDF:', error);
-            alert('Failed to generate PDF');
+            showToast('Failed to generate PDF', 'error');
         } finally {
             setIsGeneratingPdf(false);
         }
@@ -759,7 +787,7 @@ export default function PurchasesPage() {
             doc.save(`${selectedSupplier.name}_Statement.pdf`);
         } catch (error) {
             console.error('Error generating PDF:', error);
-            alert('Failed to generate PDF');
+            showToast('Failed to generate PDF', 'error');
         } finally {
             setIsGeneratingPdf(false);
         }

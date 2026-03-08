@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useEffect, useState } from 'react';
+import { useToast } from '@/contexts/ToastContext';
 import { useData } from '@/contexts/DataContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent, Wallet, Receipt, Download, RefreshCw, X, FileText, Search } from 'lucide-react';
@@ -10,9 +11,12 @@ import { getAllSuppliers, getPurchaseBills, getPurchasePayments } from '@/lib/pu
 import { getSalaryByMonth } from '@/lib/salaryService';
 import { getExpensesByMonth } from '@/lib/expenseService';
 import { CompanyExpense } from '@/types';
+import { useRouter } from 'next/navigation';
 
-export default function Dashboard() {
-    const { dealers, products, transactions, agents } = useData();
+export default function Home() {
+    const { dealers, products, transactions, agents, isLoading } = useData();
+    const { showToast } = useToast();
+    const router = useRouter();
     const [suppliers, setSuppliers] = useState<SupplierData[]>([]);
     const [purchaseBills, setPurchaseBills] = useState<PurchaseBillData[]>([]);
     const [purchasePayments, setPurchasePayments] = useState<PurchasePaymentData[]>([]);
@@ -190,8 +194,8 @@ export default function Dashboard() {
             URL.revokeObjectURL(url);
             setDateRangeModal(prev => ({ ...prev, open: false }));
         } catch (error) {
-            console.error('Error generating company statement PDF:', error);
-            alert('Failed to generate statement');
+            console.error('Statement error:', error); // Changed error message
+            showToast('Failed to generate statement', 'error'); // Replaced alert
         } finally {
             setIsGeneratingPdf(false);
         }
@@ -469,13 +473,13 @@ export default function Dashboard() {
                     <h3 className="text-2xl font-bold text-slate-800">{value}</h3>
                     {subtitle && <p className="text-xs text-slate-400 mt-1">{subtitle}</p>}
                     {trend && (
-                        <div className={`flex items-center gap-1 text-xs font-bold mt-2 ${trend.positive ? 'text-emerald-600' : 'text-red-600'}`}>
+                        <div className={`flex items - center gap - 1 text - xs font - bold mt - 2 ${trend.positive ? 'text-emerald-600' : 'text-red-600'} `}>
                             {trend.positive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                             {trend.value}
                         </div>
                     )}
                 </div>
-                <div className={`p-3 rounded-lg ${color}`}>
+                <div className={`p - 3 rounded - lg ${color} `}>
                     <Icon size={24} className="text-white" />
                 </div>
             </div>
@@ -656,7 +660,7 @@ export default function Dashboard() {
                             <BarChart data={chartData}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
-                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} tickFormatter={(v) => `₹${(v / 1000)}k`} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} tickFormatter={(v) => `₹${(v / 1000)} k`} />
                                 <Tooltip
                                     cursor={{ fill: '#f1f5f9' }}
                                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
@@ -782,10 +786,10 @@ export default function Dashboard() {
                                         <button
                                             key={opt.id}
                                             onClick={() => setDateRangeModal(prev => ({ ...prev, range: opt.id as any }))}
-                                            className={`p-3 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${dateRangeModal.range === opt.id
+                                            className={`p - 3 rounded - xl border - 2 flex flex - col items - center gap - 2 transition - all ${dateRangeModal.range === opt.id
                                                 ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
                                                 : 'border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50'
-                                                }`}
+                                                } `}
                                         >
                                             <Icon size={20} />
                                             <span className="text-xs font-bold">{opt.label}</span>

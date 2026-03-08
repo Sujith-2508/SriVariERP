@@ -3,6 +3,8 @@
 import React, { useState, useRef } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmationContext';
 import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw } from 'lucide-react';
 import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency, getISTDateString } from '@/lib/utils';
@@ -17,6 +19,8 @@ import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 
 export default function DealerLedger() {
     const { dealers, transactions, addDealer, updateDealer, deleteDealer, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers } = useData();
+    const { showToast } = useToast();
+    const { showConfirm } = useConfirm();
     const [isSyncing, setIsSyncing] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [isTallyImporting, setIsTallyImporting] = useState(false);
@@ -306,7 +310,7 @@ export default function DealerLedger() {
             });
         } catch (error) {
             console.error('Error adding dealer:', error);
-            alert('Failed to add dealer');
+            showToast('Failed to add dealer', 'error');
         }
     };
 
@@ -366,7 +370,7 @@ export default function DealerLedger() {
             });
         } catch (error) {
             console.error('Error updating dealer:', error);
-            alert('Failed to update dealer');
+            showToast('Failed to update dealer', 'error');
         }
     };
 
@@ -491,7 +495,7 @@ export default function DealerLedger() {
             console.error('Export PDF failed:', err);
             setExportingPdf(false);
             const errMsg = err?.message || (typeof err === 'string' ? err : 'Unknown error');
-            alert('Failed to generate PDF: ' + errMsg);
+            showToast('Failed to generate PDF: ' + errMsg, 'error');
         } finally {
             setExportingPdf(false);
         }
@@ -555,44 +559,62 @@ export default function DealerLedger() {
     };
 
     const handleBulkSync = async () => {
-        if (!confirm('This will re-sync ALL dealer data and individual ledgers to Google Sheets. This might take a few minutes. Continue?')) return;
+        const confirmed = await showConfirm({
+            title: 'Bulk Sync Data',
+            message: 'This will re-sync ALL dealer data and individual ledgers to Google Sheets. This might take a few minutes. Continue?',
+            confirmLabel: 'Sync Now',
+            type: 'warning'
+        });
+        if (!confirmed) return;
+
         setIsSyncing(true);
         try {
             await bulkSyncDealers();
-            alert('Full sync complete! All data and ledgers are now up-to-date in Google Sheets.');
+            showToast('Full sync complete! All data and ledgers are now up-to-date.', 'success');
         } catch (error) {
             console.error('Core sync failed:', error);
-            alert('Failed to sync. Please check your internet connection or Google Sheets connectivity.');
+            showToast('Failed to sync. Please check your internet connection or Google Sheets connectivity.', 'error');
         } finally {
             setIsSyncing(false);
         }
     };
 
     const handleImportFromSheet = async () => {
-        if (!confirm('This will import dealers from Google Sheets. Existing dealers will be updated. Continue?')) return;
+        const confirmed = await showConfirm({
+            title: 'Import from Sheets',
+            message: 'This will import dealers from Google Sheets. Existing dealers will be updated. Continue?',
+            confirmLabel: 'Import'
+        });
+        if (!confirmed) return;
 
         setIsImporting(true);
         try {
             const result = await importDealersFromSheet();
-            alert(`Import Complete!\nAdded: ${result.added} new dealers\nUpdated: ${result.updated} existing dealers`);
+            showToast(`Import Complete! Added: ${result.added}, Updated: ${result.updated}`, 'success');
         } catch (error) {
             console.error('Import failed:', error);
-            alert('Failed to import dealers from Google Sheets');
+            showToast('Failed to import dealers from Google Sheets', 'error');
         } finally {
             setIsImporting(false);
         }
     };
 
     const handleImportFromTally = async () => {
-        if (!confirm('This will parse the "Ledger Vouchers" Tally export to extract ACTUAL dealer names and balances. It will update current balances in Supabase. Continue?')) return;
+        const confirmed = await showConfirm({
+            title: 'Tally Migration',
+            message: 'This will parse the "Ledger Vouchers" Tally export to extract ACTUAL dealer names and balances. It will update current balances in Supabase. Continue?',
+            confirmLabel: 'Migrate',
+            type: 'warning'
+        });
+        if (!confirmed) return;
 
         setIsTallyImporting(true);
         try {
             const result = await importDealersFromTally();
-            alert(`Tally Migration Complete!\nBalanced Data for: ${result.added + result.updated} dealers migrated.`);
+            showToast(`Tally Migration Complete! Balanced Data for: ${result.added + result.updated} dealers migrated.`, 'success');
         } catch (error) {
             console.error('Tally migration failed:', error);
-            alert('Failed to import data from Tally Ledger Vouchers');
+            showToast('Failed to import data from Tally Ledger Vouchers', 'error');
         } finally {
             setIsTallyImporting(false);
         }
@@ -637,7 +659,7 @@ export default function DealerLedger() {
         } catch (err: any) {
             console.error('Bulk Export PDF failed:', err);
             const errMsg = err?.message || (typeof err === 'string' ? err : 'Unknown error');
-            alert('Failed to generate bulk PDF: ' + errMsg);
+            showToast('Failed to generate bulk PDF: ' + errMsg, 'error');
         } finally {
             setBulkExporting(false);
         }
@@ -1339,10 +1361,17 @@ export default function DealerLedger() {
 
                                     {d.balance === 0 && (
                                         <button
-                                            onClick={(e) => {
+                                            onClick={async (e) => {
                                                 e.stopPropagation();
-                                                if (window.confirm(`Are you sure you want to delete ${d.businessName}?`)) {
+                                                const confirmed = await showConfirm({
+                                                    title: 'Delete Dealer',
+                                                    message: `Are you sure you want to delete ${d.businessName}?`,
+                                                    confirmLabel: 'Delete',
+                                                    type: 'danger'
+                                                });
+                                                if (confirmed) {
                                                     deleteDealer(d.id);
+                                                    showToast('Dealer deleted successfully', 'info');
                                                 }
                                             }}
                                             className="w-full mt-2 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-red-200"
@@ -1666,11 +1695,18 @@ export default function DealerLedger() {
                                 {editingDealer?.balance === 0 && (
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            if (window.confirm(`Are you sure you want to delete ${editingDealer.businessName}?`)) {
+                                        onClick={async () => {
+                                            const confirmed = await showConfirm({
+                                                title: 'Delete Dealer',
+                                                message: `Are you sure you want to delete ${editingDealer.businessName}?`,
+                                                confirmLabel: 'Delete',
+                                                type: 'danger'
+                                            });
+                                            if (confirmed) {
                                                 deleteDealer(editingDealer.id);
                                                 setIsEditModalOpen(false);
                                                 setEditingDealer(null);
+                                                showToast('Dealer deleted successfully', 'info');
                                             }
                                         }}
                                         className="px-4 py-3 bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-100 transition-colors border border-red-200"

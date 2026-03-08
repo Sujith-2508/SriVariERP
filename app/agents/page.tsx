@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/contexts/DataContext';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmationContext';
 import { Agent } from '@/types';
 import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt, Activity } from 'lucide-react';
 import { LiveMap } from '@/components/LiveMap';
@@ -17,6 +19,8 @@ type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses' | 
 
 export default function AgentsPage() {
     const { agents, transactions, addAgent, updateAgent, deleteAgent, isLoading, trackingData, loadingTracking, refreshData } = useData();
+    const { showToast } = useToast();
+    const { showConfirm } = useConfirm();
     const searchParams = useSearchParams();
     const [activeTab, setActiveTab] = useState<TabType>('overview');
 
@@ -93,7 +97,7 @@ export default function AgentsPage() {
 
         // Validate phone number is exactly 10 digits
         if (!/^\d{10}$/.test(formData.phone)) {
-            alert('Phone number must be exactly 10 digits');
+            showToast('Phone number must be exactly 10 digits', 'warning');
             return;
         }
 
@@ -113,7 +117,7 @@ export default function AgentsPage() {
                 });
             } else {
                 if (!formData.agentId || !formData.password) {
-                    alert('Agent ID and Password are required for new agents.');
+                    showToast('Agent ID and Password are required for new agents.', 'warning');
                     return;
                 }
                 await addAgent({
@@ -132,7 +136,7 @@ export default function AgentsPage() {
             resetForm();
         } catch (error) {
             console.error('Error saving agent:', error);
-            alert('Failed to save agent. Please try again.');
+            showToast('Failed to save agent. Please try again.', 'error');
         }
     };
 
@@ -152,12 +156,20 @@ export default function AgentsPage() {
     };
 
     const handleDelete = async (id: string) => {
-        if (window.confirm('Are you sure you want to delete this agent?')) {
+        const confirmed = await showConfirm({
+            title: 'Delete Agent',
+            message: 'Are you sure you want to delete this agent? This action cannot be undone.',
+            confirmLabel: 'Delete',
+            type: 'danger'
+        });
+
+        if (confirmed) {
             try {
                 await deleteAgent(id);
+                showToast('Agent deleted successfully', 'success');
             } catch (error) {
                 console.error('Error deleting agent:', error);
-                alert('Failed to delete agent. Please try again.');
+                showToast('Failed to delete agent. Please try again.', 'error');
             }
         }
     };

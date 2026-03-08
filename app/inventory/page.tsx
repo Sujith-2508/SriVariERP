@@ -3,11 +3,15 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmationContext';
 import { Search, Edit2, Trash2, Plus, X, Package, RefreshCw, ChevronDown, Tag } from 'lucide-react';
 import { Product } from '@/types';
 
 export default function Inventory() {
     const { products, addProduct, updateProduct, deleteProduct } = useData();
+    const { showToast } = useToast();
+    const { showConfirm } = useConfirm();
     const [searchTerm, setSearchTerm] = useState('');
     const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
 
@@ -131,12 +135,26 @@ export default function Inventory() {
         setIsStockModalOpen(true);
     };
 
-    const handleDelete = (id: string) => {
-        if (window.confirm('Are you sure you want to delete this product?')) {
+    const handleDelete = async (id: string) => {
+        const confirmed = await showConfirm({
+            title: 'Delete Product',
+            message: 'Are you sure you want to delete this product? This action cannot be undone.',
+            confirmLabel: 'Delete',
+            type: 'danger'
+        });
+
+        if (confirmed) {
             setSyncStatus('syncing');
-            deleteProduct(id)
-                .then(() => { setSyncStatus('done'); setTimeout(() => setSyncStatus('idle'), 2000); })
-                .catch(() => { setSyncStatus('error'); setTimeout(() => setSyncStatus('idle'), 3000); });
+            try {
+                await deleteProduct(id);
+                setSyncStatus('done');
+                showToast('Product deleted successfully', 'success');
+                setTimeout(() => setSyncStatus('idle'), 2000);
+            } catch (error) {
+                setSyncStatus('error');
+                showToast('Failed to delete product', 'error');
+                setTimeout(() => setSyncStatus('idle'), 3000);
+            }
         }
     };
 
@@ -149,7 +167,7 @@ export default function Inventory() {
         );
 
         if (isDuplicate) {
-            alert(`Duplicate Product ID: "${formData.productId}" is already in use by another product.`);
+            showToast(`Duplicate Product ID: "${formData.productId}" is already in use by another product.`, 'warning');
             productIdRef.current?.focus();
             return;
         }
@@ -167,8 +185,16 @@ export default function Inventory() {
         setSyncStatus('syncing');
         const op = editingProduct ? updateProduct(finalData) : addProduct(finalData);
         op
-            .then(() => { setSyncStatus('done'); setTimeout(() => setSyncStatus('idle'), 2000); })
-            .catch(() => { setSyncStatus('error'); setTimeout(() => setSyncStatus('idle'), 3000); });
+            .then(() => {
+                setSyncStatus('done');
+                showToast(`Product ${editingProduct ? 'updated' : 'added'} successfully`, 'success');
+                setTimeout(() => setSyncStatus('idle'), 2000);
+            })
+            .catch(() => {
+                setSyncStatus('error');
+                showToast(`Failed to ${editingProduct ? 'update' : 'add'} product`, 'error');
+                setTimeout(() => setSyncStatus('idle'), 3000);
+            });
         setIsModalOpen(false);
     };
 

@@ -10,9 +10,13 @@ import {
 } from '@/lib/expenseService';
 import { Calendar, Receipt, Plus, Edit2, Trash2, X, Check } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmationContext';
 import { getISTDateString } from '@/lib/utils';
 
 export default function CompanyExpenseManagement() {
+    const { showToast } = useToast();
+    const { showConfirm } = useConfirm();
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [expenses, setExpenses] = useState<CompanyExpense[]>([]);
@@ -70,9 +74,22 @@ export default function CompanyExpenseManagement() {
     };
 
     const handleDelete = async (id: string) => {
-        if (window.confirm('Are you sure you want to delete this expense?')) {
-            await deleteCompanyExpense(id);
-            loadExpenses();
+        const confirmed = await showConfirm({
+            title: 'Delete Expense',
+            message: 'Are you sure you want to delete this expense? This action cannot be undone.',
+            confirmLabel: 'Delete',
+            type: 'danger'
+        });
+
+        if (confirmed) {
+            try {
+                await deleteCompanyExpense(id);
+                showToast('Expense deleted successfully', 'success');
+                loadExpenses();
+            } catch (error) {
+                console.error('Error deleting expense:', error);
+                showToast('Failed to delete expense', 'error');
+            }
         }
     };
 

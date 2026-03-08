@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useData } from '@/contexts/DataContext';
-import { Search, MapPin, Phone, Check, CheckCircle, Share2, Wallet, ArrowRight, FileText, User } from 'lucide-react';
+import { useToast } from '@/contexts/ToastContext';
+import { Search, MapPin, Phone, Check, CheckCircle, Share2, Wallet, ArrowRight, FileText, User, IndianRupee, Printer, CreditCard, Calendar, Trash2, Download, Building2, ChevronRight, MessageSquare, Plus, Edit2, AlertCircle } from 'lucide-react';
 import { Dealer } from '@/types';
 import { calculateDealerStatement } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
@@ -11,7 +12,8 @@ import { generateReceiptPDFBase64 } from '@/lib/pdfGenerator';
 import { uploadReceiptPDF } from '@/lib/googleDriveService';
 
 export default function Collections() {
-    const { dealers, transactions, agents, recordPayment, createInvoice } = useData();
+    const { dealers, transactions, agents, recordPayment, createInvoice, isLoading } = useData();
+    const { showToast } = useToast();
     const [searchTerm, setSearchTerm] = useState('');
     const [activeDealer, setActiveDealer] = useState<Dealer | null>(null);
     const [amount, setAmount] = useState('');
@@ -83,7 +85,7 @@ export default function Collections() {
 
         const amountNum = parseFloat(amount);
         if (isNaN(amountNum) || amountNum <= 0) {
-            alert("Please enter a valid amount");
+            showToast("Please enter a valid amount", "warning");
             return;
         }
 
@@ -191,9 +193,9 @@ export default function Collections() {
                 setChequeReturnRef('');
                 setChequeReturnReason('Insufficient Funds');
             }, 1800);
-        } catch (err) {
-            console.error('[Collections] Cheque Return failed:', err);
-            alert('Failed to record cheque return. Please try again.');
+        } catch (error) {
+            console.error('Cheque return error:', error);
+            showToast('Failed to record cheque return. Please try again.', 'error');
         } finally {
             setChequeReturnProcessing(false);
         }

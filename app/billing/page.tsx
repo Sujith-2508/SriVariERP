@@ -5,6 +5,8 @@ import { useData } from '@/contexts/DataContext';
 import { Dealer, InvoiceItem, Product, CompanySettings, TransactionType } from '@/types';
 import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2, Edit } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmationContext';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -18,6 +20,8 @@ import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder }
 
 export default function Billing() {
     const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading } = useData();
+    const { showToast } = useToast();
+    const { showConfirm } = useConfirm();
     const router = useRouter();
     const searchParams = useSearchParams();
     const editInvoiceId = searchParams.get('edit');
@@ -648,9 +652,12 @@ export default function Billing() {
     }, [invoiceItems]);
 
     const handleCreateBill = async () => {
-        if (!selectedDealer || invoiceItems.length === 0) return;
+        if (!selectedDealer || invoiceItems.length === 0) {
+            showToast('Please select a dealer and add at least one item.', 'warning', 'dealer-select');
+            return;
+        }
         if (invoiceNoExists) {
-            alert('Invoice number already exists. Please use a unique number.');
+            showToast('Invoice number already exists. Please use a unique number.', 'warning', 'manual-invoice-no-field');
             return;
         }
 
@@ -1000,7 +1007,10 @@ export default function Billing() {
         e.preventDefault();
         if (!crDealer || !crAmount) return;
         const amountNum = parseFloat(crAmount);
-        if (isNaN(amountNum) || amountNum <= 0) return;
+        if (isNaN(amountNum) || amountNum <= 0) {
+            showToast("Please enter a valid amount", "warning");
+            return;
+        }
 
         setCrProcessing(true);
         try {
@@ -1102,7 +1112,7 @@ export default function Billing() {
             }, 2000);
         } catch (err) {
             console.error('[Billing] Cheque Return failed:', err);
-            alert('Failed to record cheque return. Please try again.');
+            showToast('Failed to record cheque return. Please try again.', 'error');
         } finally {
             setCrProcessing(false);
         }
@@ -1110,7 +1120,7 @@ export default function Billing() {
 
     const handleAddNewDealer = () => {
         if (!newDealer.businessName || !newDealer.phone) {
-            alert('Please fill in business name and phone number');
+            showToast('Please fill in business name and phone number', 'warning');
             return;
         }
 
@@ -1167,9 +1177,15 @@ export default function Billing() {
         setDriveError(null);
     };
 
-    const handleNewInvoice = () => {
+    const handleNewInvoice = async () => {
         if (invoiceItems.length > 0) {
-            if (!confirm('You have unsaved items in the current invoice. Are you sure you want to start a new invoice?')) {
+            const confirmed = await showConfirm({
+                title: 'Unsaved Changes',
+                message: 'You have unsaved items in the current invoice. Are you sure you want to start a new invoice?',
+                confirmLabel: 'Yes, New Invoice',
+                type: 'warning'
+            });
+            if (!confirmed) {
                 return;
             }
         }
@@ -1181,7 +1197,7 @@ export default function Billing() {
 
     const handlePrint = async () => {
         if (!companySettings) {
-            alert('Company settings are missing. Please check your database settings.');
+            showToast('Company settings are missing. Please check your database settings.', 'error');
             return;
         }
         // Show the invoice in print-ready mode first
@@ -2110,7 +2126,7 @@ export default function Billing() {
                                         <button
                                             onClick={() => {
                                                 if (invoiceTotal <= 0.01) {
-                                                    alert("Cannot print invoice with 0 amount.");
+                                                    showToast("Cannot print invoice with 0 amount.", 'warning');
                                                     return;
                                                 }
                                                 handlePrint();
@@ -2155,7 +2171,7 @@ export default function Billing() {
                                     <button
                                         onClick={() => {
                                             if (invoiceTotal <= 0.01) {
-                                                alert("Cannot send invoice with 0 amount.");
+                                                showToast("Cannot send invoice with 0 amount.", 'warning');
                                                 return;
                                             }
                                             const invoiceData = {
