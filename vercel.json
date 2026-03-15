@@ -1,6 +1,7 @@
 {
-    "buildCommand": "next build",
-    "outputDirectory": ".next",
-    "installCommand": "npm install --ignore-scripts",
-    "framework": "nextjs"
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install --ignore-scripts",
+  "framework": "nextjs"
 }
+
