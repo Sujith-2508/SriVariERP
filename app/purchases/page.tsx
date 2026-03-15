@@ -417,7 +417,7 @@ export default function PurchasesPage() {
     const handleDeleteSupplier = async (id: string) => {
         const confirmed = await showConfirm({
             title: 'Delete Supplier',
-            message: 'Are you sure you want to delete this supplier? This will remove all their data.',
+            message: 'Are you sure you want to delete this supplier from the ERP? This will remove all their data locally, but will PRESERVE their data in the Google Spreadsheet tabs.',
             confirmLabel: 'Delete',
             type: 'danger'
         });

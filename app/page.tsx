@@ -191,10 +191,15 @@ export default function Home() {
             // Sort by date ascending
             allTransactions.sort((a, b) => a.date.getTime() - b.date.getTime());
 
+            // Calculate current company summary (current health)
+            const totalReceivables = dealers.reduce((sum, d) => sum + (d.balance || 0), 0);
+            const totalPayables = suppliers.reduce((sum, s) => sum + (s.balance || 0), 0);
+
             const base64 = await generateWholeCompanyStatementPDFBase64(
                 company as any,
                 allTransactions,
-                rangeLabel
+                rangeLabel,
+                { totalPayables, totalReceivables }
             );
 
             const binaryString = atob(base64);

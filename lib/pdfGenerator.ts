@@ -800,7 +800,7 @@ export const generateStatementPDFBase64 = async (
     const finalY = (doc as any).lastAutoTable.finalY + 15;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
-    doc.text('Note: This is an automatically generated account statement. Please contact us for any discrepancies.', 105, 280, { align: 'center' });
+    doc.text('Note: This is an automatically generated account statement. Please contact us for any discrepancies.', 105, Math.min(finalY, 280), { align: 'center' });
 
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
@@ -899,9 +899,10 @@ export const generateSupplierStatementPDFBase64 = async (
         margin: { left: 10, right: 10 }
     });
 
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
-    doc.text('Note: This is an automatically generated supplier statement.', 105, 280, { align: 'center' });
+    doc.text('Note: This is an automatically generated supplier statement.', 105, Math.min(finalY, 280), { align: 'center' });
 
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
@@ -913,7 +914,8 @@ export const generateSupplierStatementPDFBase64 = async (
 export const generateWholeCompanyStatementPDFBase64 = async (
     company: CompanySettings,
     transactions: any[],
-    dateRangeLabel: string
+    dateRangeLabel: string,
+    summary?: { totalPayables: number; totalReceivables: number }
 ): Promise<string> => {
     const doc = new jsPDF('p', 'mm', 'a4');
 
@@ -947,11 +949,12 @@ export const generateWholeCompanyStatementPDFBase64 = async (
     doc.line(100, 10, 100, 45);
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    doc.text('COMPANY STATEMENT', 150, 25, { align: 'center' });
+    // Moved up as requested
+    doc.text('COMPANY STATEMENT', 150, 22, { align: 'center' });
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text(dateRangeLabel, 150, 32, { align: 'center' });
-    doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 150, 36, { align: 'center' });
+    doc.text(dateRangeLabel, 150, 29, { align: 'center' });
+    // Line 954 removed (Generated date)
 
     doc.line(10, 45, 200, 45);
 
@@ -972,12 +975,48 @@ export const generateWholeCompanyStatementPDFBase64 = async (
         theme: 'grid',
         headStyles: { fillColor: [59, 130, 246] },
         styles: { fontSize: 8, cellPadding: 2 },
-        margin: { left: 10, right: 10 }
+        margin: { left: 10, right: 10, bottom: 40 }
     });
+
+    let currentY = (doc as any).lastAutoTable.finalY + 10;
+
+    // Check if summary can fit on this page
+    if (currentY > 240) {
+        doc.addPage();
+        // Redraw border on new page
+        doc.setDrawColor(0);
+        doc.setLineWidth(0.5);
+        doc.rect(10, 10, 190, 277);
+        currentY = 20;
+    }
+
+    // 4. SUMMARY TOTALS (Payables & Receivables)
+    if (summary) {
+        doc.setDrawColor(200);
+        doc.setFillColor(245, 245, 245);
+        doc.rect(110, currentY, 85, 25, 'F');
+        doc.rect(110, currentY, 85, 25, 'S');
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(0);
+        doc.text('Summary (Current Balance):', 115, currentY + 6);
+
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Total Payables (To Suppliers):', 115, currentY + 12);
+        doc.text(formatCurrencyPDF(summary.totalPayables), 190, currentY + 12, { align: 'right' });
+
+        doc.text('Total Receivables (From Dealers):', 115, currentY + 18);
+        doc.text(formatCurrencyPDF(summary.totalReceivables), 190, currentY + 18, { align: 'right' });
+
+        currentY += 35;
+    }
 
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
-    doc.text('Note: This is a consolidated company-wide financial statement.', 105, 280, { align: 'center' });
+    doc.setTextColor(100);
+    doc.text('Note: This is a consolidated company-wide financial statement.', 105, currentY, { align: 'center' });
 
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];

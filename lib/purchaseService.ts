@@ -15,7 +15,8 @@ const KEYS = {
     BILLS: 'sve_purchase_bills',
     PAYMENTS: 'sve_purchase_payments',
     ALLOCATIONS: 'sve_purchase_allocations',
-    PRODUCTS: 'sve_products'
+    PRODUCTS: 'sve_products',
+    DELETED_SUPPLIERS: 'sve_deleted_suppliers'
 };
 
 /**
@@ -61,7 +62,12 @@ export async function forceSyncPurchases(): Promise<boolean> {
         let currentSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
 
         if (refinedSuppliers.length > 0) {
-            currentSuppliers = refinedSuppliers.map(refined => {
+            const deletedSupplierNames = getLocalData<string>(KEYS.DELETED_SUPPLIERS);
+            const filteredRefined = refinedSuppliers.filter(refined => 
+                !deletedSupplierNames.some(name => normalizeSupplierName(name) === normalizeSupplierName(refined.name))
+            );
+
+            currentSuppliers = filteredRefined.map(refined => {
                 const existing = currentSuppliers.find(s => s.name?.toLowerCase().trim() === refined.name?.toLowerCase().trim());
                 if (existing) {
                     return {
@@ -395,6 +401,13 @@ export async function getSupplier(supplierId: string): Promise<SupplierData | nu
 export async function createSupplier(supplier: Omit<SupplierData, 'id' | 'createdAt' | 'updatedAt' | 'balance' | 'lastTransactionDate'>): Promise<SupplierData | null> {
     const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
 
+    // If this supplier was previously deleted, remove them from the deleted list
+    const deletedList = getLocalData<string>(KEYS.DELETED_SUPPLIERS);
+    const updatedDeletedList = deletedList.filter(name => normalizeSupplierName(name) !== normalizeSupplierName(supplier.name));
+    if (updatedDeletedList.length !== deletedList.length) {
+        saveLocalData(KEYS.DELETED_SUPPLIERS, updatedDeletedList);
+    }
+
     const newSupplier: SupplierData = {
         id: crypto.randomUUID(),
         ...supplier,
@@ -443,11 +456,33 @@ export async function suggestNextPaymentNumber(): Promise<string> {
 
 export async function deleteSupplier(supplierId: string): Promise<boolean> {
     const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplier = suppliers.find(s => s.id === supplierId);
+    if (!supplier) return false;
+
+    // 1. Add to deleted list to prevent re-sync
+    const deletedList = getLocalData<string>(KEYS.DELETED_SUPPLIERS);
+    if (!deletedList.includes(supplier.name)) {
+        deletedList.push(supplier.name);
+        saveLocalData(KEYS.DELETED_SUPPLIERS, deletedList);
+    }
+
+    // 2. Remove supplier
     const filtered = suppliers.filter(s => s.id !== supplierId);
-
-    if (filtered.length === suppliers.length) return false;
-
     saveLocalData(KEYS.SUPPLIERS, filtered);
+
+    // 3. Remove all related data locally
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS).filter(b => b.supplierId !== supplierId);
+    saveLocalData(KEYS.BILLS, bills);
+
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS).filter(p => p.supplierId !== supplierId);
+    saveLocalData(KEYS.PAYMENTS, payments);
+
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS).filter(a => {
+        const bill = bills.find(b => b.id === a.billId);
+        return bill && bill.supplierId !== supplierId;
+    });
+    saveLocalData(KEYS.ALLOCATIONS, allocations);
+
     return true;
 }
 
@@ -620,14 +655,16 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
     if (billIndex === -1) return false;
     const bill = bills[billIndex];
 
-    // 1. Revert Supplier Balance
-    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
-    const supplierIndex = suppliers.findIndex(s => s.id === bill.supplierId);
-    if (supplierIndex !== -1) {
-        suppliers[supplierIndex].balance = Math.max(0, suppliers[supplierIndex].balance - bill.amount);
-        suppliers[supplierIndex].updatedAt = new Date();
-        saveLocalData(KEYS.SUPPLIERS, suppliers);
-    }
+    // 1. Delete bill & allocations first so reallocate knows they are gone
+    const filteredBills = bills.filter(b => b.id !== billId);
+    saveLocalData(KEYS.BILLS, filteredBills);
+
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS);
+    const filteredAllocations = allocations.filter(a => a.billId !== billId);
+    saveLocalData(KEYS.ALLOCATIONS, filteredAllocations);
+
+    // 2. Reallocate & Recalculate Balance (This handles the supplier balance correctly)
+    await reallocateAllSupplierPayments(bill.supplierId);
 
     // 2. Revert Product Stock
     if (bill.items && Array.isArray(bill.items)) {
@@ -652,16 +689,7 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
         }
     }
 
-    // 3. Delete the bill
-    const filteredBills = bills.filter(b => b.id !== billId);
-    saveLocalData(KEYS.BILLS, filteredBills);
-
-    // 4. Also delete related allocations
-    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS);
-    const filteredAllocations = allocations.filter(a => a.billId !== billId);
-    saveLocalData(KEYS.ALLOCATIONS, filteredAllocations);
-
-    // Track change to Drive & Sheet
+    // 4. Track change to Drive & Sheet
     const latestSuppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
     const supplier = latestSuppliers.find(s => s.id === bill.supplierId);
     if (supplier && supplier.name !== 'Unknown') {
