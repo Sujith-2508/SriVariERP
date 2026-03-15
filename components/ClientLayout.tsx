@@ -43,16 +43,19 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
 
     // Handle redirect based on authentication status
     useEffect(() => {
-        if (!mounted || isAuthenticated === null) return;
+        if (!mounted) return;
 
-        if (!isPublicPage && !isAuthenticated) {
+        // Check source of truth directly for immediate redirect decisions
+        const currentAuthStatus = sessionStorage.getItem('isAuthenticated') === 'true';
+
+        if (!isPublicPage && !currentAuthStatus) {
             // Not on a public page and not authenticated - redirect to login
             router.replace('/login');
-        } else if (pathname === '/login' && isAuthenticated) {
+        } else if (pathname === '/login' && currentAuthStatus) {
             // On login page but already authenticated - redirect to dashboard
             router.replace('/');
         }
-    }, [mounted, isPublicPage, pathname, isAuthenticated, router]);
+    }, [mounted, isPublicPage, pathname, router]);
 
     // Map pathname to ViewState for active state detection
     const getViewState = (): ViewState => {

@@ -99,3 +99,16 @@ export async function getExpensesByMonth(month: number, year: number): Promise<C
         })
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
+
+export async function getExpensesByRange(startDate: Date, endDate: Date): Promise<CompanyExpense[]> {
+    const expenses = getLocalData<CompanyExpense>(KEY);
+    const start = startDate.getTime();
+    const end = endDate.getTime();
+
+    return expenses
+        .filter(e => {
+            const d = new Date(e.date).getTime();
+            return d >= start && d <= end;
+        })
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}

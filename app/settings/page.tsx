@@ -66,7 +66,10 @@ export default function SettingsPage() {
 
         // Load company settings from Supabase
         const loadCompany = async () => {
-            const { data, error } = await supabase.from('company_settings').select('*').limit(1);
+            const { data, error } = await supabase
+                .from('company_settings')
+                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
+                .limit(1);
             if (!error && data && data.length > 0) {
                 const s = data[0];
                 setCompanySettingsId(s.id);
@@ -105,7 +108,7 @@ export default function SettingsPage() {
                 pin_code: pinCode.trim(),
                 gst_number: gstNumber.trim().toUpperCase(),
                 pan_number: panNumber.trim().toUpperCase(),
-                phone: phone.replace(/\D/g, '').trim(), // Clean phone number to only digits
+                phone: phone.replace(/\D/g, '').trim(),
                 email: email.trim(),
                 bank_name: bankName.trim(),
                 bank_branch: bankBranch.trim(),
@@ -118,21 +121,30 @@ export default function SettingsPage() {
             let error;
             if (companySettingsId) {
                 // Update existing row
-                ({ error } = await supabase.from('company_settings').update(payload).eq('id', companySettingsId));
+                const { error: updateError } = await supabase
+                    .from('company_settings')
+                    .update(payload)
+                    .eq('id', companySettingsId);
+                error = updateError;
             } else {
-                // Insert new row
-                const { data, error: insertError } = await supabase.from('company_settings').insert(payload).select().single();
+                // Insert new row if none exists
+                const { data, error: insertError } = await supabase
+                    .from('company_settings')
+                    .insert(payload)
+                    .select()
+                    .single();
                 error = insertError;
                 if (data) setCompanySettingsId(data.id);
             }
 
             if (error) throw error;
-            setCompanyMessage({ type: 'success', text: 'Company & bank details saved! Invoices will now use these details.' });
+            setCompanyMessage({ type: 'success', text: 'Company & bank details saved successfully!' });
         } catch (err: any) {
+            console.error('Save settings error:', err);
             setCompanyMessage({ type: 'error', text: err.message || 'Failed to save. Please try again.' });
         } finally {
             setCompanySaving(false);
-            setTimeout(() => setCompanyMessage(null), 4000);
+            setTimeout(() => setCompanyMessage(null), 5000);
         }
     };
 
@@ -184,6 +196,7 @@ export default function SettingsPage() {
                 await electron.drive.saveTokens(tokens);
                 setDriveConnected(true);
                 setDriveMessage({ type: 'success', text: 'Google Drive connected! Invoices will now be saved automatically.' });
+                setDriveConnecting(false);
             }
             // -- WEB (BROWSER) FLOW --
             else {
@@ -262,6 +275,7 @@ export default function SettingsPage() {
         if (!newUsername.trim()) { setMessage({ type: 'error', text: 'Username cannot be empty' }); return; }
         if (!userId) { setMessage({ type: 'error', text: 'No active session' }); return; }
 
+        setMessage(null);
         const { error } = await supabase
             .from('users')
             .update({ username: newUsername.trim() })
@@ -275,14 +289,16 @@ export default function SettingsPage() {
             setNewUsername('');
             setMessage({ type: 'success', text: 'Username updated successfully!' });
         }
-        setTimeout(() => setMessage(null), 3000);
+        setTimeout(() => setMessage(null), 4000);
     };
 
     const handleUpdatePassword = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!userId) { setMessage({ type: 'error', text: 'No active session' }); return; }
 
-        // Fetch current password from DB to verify
+        setMessage(null);
+
+        // Fetch current user from DB to verify current password
         const { data: user, error: fetchError } = await supabase
             .from('users')
             .select('password')
@@ -321,7 +337,7 @@ export default function SettingsPage() {
             setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
             setMessage({ type: 'success', text: 'Password updated successfully!' });
         }
-        setTimeout(() => setMessage(null), 3000);
+        setTimeout(() => setMessage(null), 4000);
     };
 
     // Recovery info update removed
@@ -441,7 +457,7 @@ export default function SettingsPage() {
                                 <label className={labelCls}>Account Type</label>
                                 <select className={inputCls} value={accountType} onChange={e => setAccountType(e.target.value)}>
                                     <option>Current A/c</option>
-                                    <option>Savings A/c</option>
+                                    <option>Savings Account</option>
                                     <option>OD Account</option>
                                 </select>
                             </div>

@@ -121,7 +121,10 @@ export default function PurchasesPage() {
                 phone: '',
                 email: ''
             };
-            const { data: compData } = await supabase.from('company_settings').select('*').limit(1);
+            const { data: compData, error } = await supabase
+                .from('company_settings')
+                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
+                .limit(1);
             if (compData && compData[0]) {
                 const c = compData[0];
                 company = {

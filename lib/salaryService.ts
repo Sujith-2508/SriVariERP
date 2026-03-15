@@ -126,6 +126,46 @@ export async function getSalaryByMonth(month: number, year: number): Promise<Age
     return data ? data.map(mapAgentSalary) : [];
 }
 
+export async function getSalaryByRange(startDate: Date, endDate: Date): Promise<AgentSalaryData[]> {
+    // Generate all (month, year) pairs in the range
+    const months: { month: number, year: number }[] = [];
+    const current = new Date(startDate);
+    current.setDate(1); // Start at beginning of month
+
+    while (current <= endDate) {
+        months.push({ month: current.getMonth() + 1, year: current.getFullYear() });
+        current.setMonth(current.getMonth() + 1);
+    }
+
+    if (months.length === 0) return [];
+
+    // Construct the query for multiple month/year pairs
+    // Note: Supabase doesn't easily support (month, year) IN ((m1,y1), (m2,y2))
+    // So we'll fetch for the year range and filter in memory, or use OR
+    const minYear = Math.min(...months.map(m => m.year));
+    const maxYear = Math.max(...months.map(m => m.year));
+
+    const { data, error } = await supabase
+        .from('agent_salaries')
+        .select('*')
+        .gte('year', minYear)
+        .lte('year', maxYear)
+        .order('year', { ascending: true })
+        .order('month', { ascending: true });
+
+    if (error) {
+        console.warn('Salary range fetch error:', error);
+        return [];
+    }
+
+    if (!data) return [];
+
+    // Filter to exact months in range
+    return data
+        .map(mapAgentSalary)
+        .filter(s => months.some(m => m.month === s.month && m.year === s.year));
+}
+
 export async function getSalaryByAgent(agentId: string): Promise<AgentSalaryData[]> {
     const { data, error } = await supabase
         .from('agent_salaries')

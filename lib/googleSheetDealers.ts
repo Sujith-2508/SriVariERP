@@ -21,7 +21,8 @@ export const DEALER_HEADERS = [
     'GST Number',       // H
     'Address',          // I
     'Balance',          // J
-    'Supabase ID'       // K (Key for syncing)
+    'Opening Balance',  // K
+    'Supabase ID'       // L (Key for syncing)
 ];
 
 const INDIVIDUAL_LEDGER_HEADERS = [
@@ -142,6 +143,7 @@ function dealerToRow(dealer: Dealer): any[] {
         dealer.gstNumber || '',
         dealer.address || '',
         dealer.balance || 0,
+        dealer.openingBalance || 0,
         dealer.id
     ];
 }
@@ -370,13 +372,14 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
  */
 export async function batchWriteTransactionsToDealerSheet(
     dealerName: string,
-    transactions: any[]
+    transactions: any[],
+    openingBalance: number = 0
 ): Promise<boolean> {
     const name = sanitizeTabName(dealerName);
     if (transactions.length === 0) return true;
 
     try {
-        let balance = 0;
+        let balance = Number(openingBalance) || 0;
         const rows = transactions.map(txn => {
             const isInvoice = txn.type === 'INVOICE';
             if (isInvoice) balance += txn.amount;

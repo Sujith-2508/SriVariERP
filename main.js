@@ -19,7 +19,14 @@ function loadEnvFile() {
                 const parts = line.split('=');
                 if (parts.length >= 2) {
                     const key = parts[0].trim();
-                    const value = parts.slice(1).join('=').trim();
+                    let value = parts.slice(1).join('=').trim();
+                    
+                    // Strip surrounding quotes
+                    if ((value.startsWith("'") && value.endsWith("'")) || 
+                        (value.startsWith('"') && value.endsWith('"'))) {
+                        value = value.substring(1, value.length - 1);
+                    }
+                    
                     if (!process.env[key]) process.env[key] = value;
                 }
             });
@@ -157,11 +164,19 @@ function initWhatsApp() {
                 '--disable-extensions',
                 '--no-zygote',
                 '--disable-gpu',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-breakpad',
+                '--disable-component-extensions-with-background-pages',
+                '--disable-ipc-flooding-protection',
+                '--disable-renderer-backgrounding',
                 '--proxy-server="direct://"',
                 '--proxy-bypass-list=*'
             ]
         },
-        authTimeoutMs: 60000
+        authTimeoutMs: 120000 // Increased to 2 minutes for slower machines
     });
 
     let authToReadyTimeout;
@@ -229,8 +244,16 @@ function initWhatsApp() {
         if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
     });
 
-    whatsappClient.initialize().catch(err => {
+    console.log('Starting WhatsApp Client initialization...');
+    whatsappClient.initialize().then(() => {
+        console.log('WhatsApp Client initialization promise resolved');
+    }).catch(err => {
         console.error('WhatsApp Initialization Error:', err);
+        whatsappStatus = 'DISCONNECTED';
+        if (mainWindow) {
+            mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+            mainWindow.webContents.send('whatsapp:auth_failure', 'Initialization failed: ' + (err.message || 'Unknown error'));
+        }
     });
 }
 

@@ -138,7 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
           <p className="text-xs text-slate-400">Admin Billing Portal</p>
         </div>
       </div>
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 p-4 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700">
         {menuItems.map((item, index) => {
           const Icon = item.icon;
           const isActive = currentView === item.id;
@@ -178,33 +178,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
             </Link>
           );
         })}
-      </nav>
-      <div className="p-4 border-t border-slate-800 space-y-3">
-        <div className="bg-slate-800 rounded-lg p-3">
-          <p className="text-xs text-slate-400">System Status</p>
-          <div className="flex items-center gap-2 mt-2">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-xs font-medium">All Systems Active</span>
-          </div>
+
+        <div className="pt-4 mt-4 border-t border-slate-800 space-y-2">
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-800 hover:text-emerald-400 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={20} className={isRefreshing ? "animate-spin" : ""} />
+            <span className="font-medium">{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
+          </button>
+
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors"
+          >
+            <LogOut size={20} />
+            <span className="font-medium">Sign Out</span>
+          </button>
         </div>
-
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="w-full flex items-center gap-3 px-4 py-2 text-slate-400 hover:bg-slate-800 hover:text-emerald-400 rounded-lg transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={20} className={isRefreshing ? "animate-spin" : ""} />
-          <span className="font-medium">{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
-        </button>
-
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-4 py-2 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors"
-        >
-          <LogOut size={20} />
-          <span className="font-medium">Sign Out</span>
-        </button>
-      </div>
+      </nav>
     </div>
   );
 };

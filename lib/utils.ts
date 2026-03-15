@@ -38,7 +38,7 @@ export interface PaymentStatement {
     agentName?: string;
 }
 
-export function calculateDealerStatement(transactions: Transaction[]) {
+export function calculateDealerStatement(transactions: Transaction[], openingBalance: number = 0) {
     // 1. Separate Invoices and Payments
     const invoices: InvoiceStatement[] = [];
     const payments: PaymentStatement[] = [];
@@ -131,14 +131,15 @@ export function calculateDealerStatement(transactions: Transaction[]) {
     const totalPaidOnInvoices = invoices.reduce((sum, inv) => sum + inv.paid, 0);
     const totalUnapplied = payments.reduce((sum, p) => sum + p.remaining, 0);
 
-    // Total outstanding is Net Balance: Total Invoiced - Total Paid
+    // Total outstanding is Net Balance: Opening Balance + Total Invoiced - Total Paid
     // Positive if dealer owes us, negative if we owe dealer (advance)
-    const totalOutstanding = totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
+    const totalOutstanding = (openingBalance) + totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
 
     return {
         invoices,
         payments,
         summary: {
+            openingBalance: Math.round(openingBalance * 100) / 100,
             totalInvoiced: Math.round(totalInvoiced * 100) / 100,
             totalPaid: Math.round((totalPaidOnInvoices + totalUnapplied) * 100) / 100,
             totalOutstanding: Math.round(totalOutstanding * 100) / 100,

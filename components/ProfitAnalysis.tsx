@@ -4,8 +4,8 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { calculateInvoiceProfit, formatCurrency } from '@/lib/utils';
 import { TransactionType, AgentSalaryData, CompanyExpense } from '@/types';
-import { getSalaryByMonth } from '@/lib/salaryService';
-import { getExpensesByMonth } from '@/lib/expenseService';
+import { getSalaryByRange } from '@/lib/salaryService';
+import { getExpensesByRange } from '@/lib/expenseService';
 import { TrendingUp, TrendingDown, Calendar, ArrowLeft, ArrowRight, DollarSign, Percent, Package, Users } from 'lucide-react';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -15,26 +15,9 @@ export function ProfitAnalysis() {
     const [period, setPeriod] = useState<Period>('monthly');
     const [date, setDate] = useState(new Date());
 
-    // State for monthly expenses/salaries
+    // State for period-specific expenses/salaries
     const [agentSalaries, setAgentSalaries] = useState<AgentSalaryData[]>([]);
     const [companyExpenses, setCompanyExpenses] = useState<CompanyExpense[]>([]);
-
-    useEffect(() => {
-        const loadExpenses = async () => {
-            const month = date.getMonth() + 1;
-            const year = date.getFullYear();
-
-            const [salaries, expenses] = await Promise.all([
-                getSalaryByMonth(month, year),
-                getExpensesByMonth(month, year)
-            ]);
-
-            setAgentSalaries(salaries);
-            setCompanyExpenses(expenses);
-        };
-        loadExpenses();
-    }, [date.getMonth(), date.getFullYear()]);
-
 
     // --- DATA CALCULATION ---
 
@@ -50,11 +33,10 @@ export function ProfitAnalysis() {
             lbl = start.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         } else if (period === 'weekly') {
             const day = start.getDay();
-            const diff = start.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+            const diff = start.getDate() - day + (day === 0 ? -6 : 1);
             start.setDate(diff);
             start.setHours(0, 0, 0, 0);
-            end.setDate(start.getDate() + 6);
-            end.setHours(23, 59, 59, 999);
+            end.setTime(start.getTime() + (7 * 24 * 60 * 60 * 1000) - 1);
             lbl = `${start.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - ${end.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`;
         } else if (period === 'monthly') {
             start.setDate(1);
@@ -66,7 +48,8 @@ export function ProfitAnalysis() {
         } else if (period === 'yearly') {
             start.setMonth(0, 1);
             start.setHours(0, 0, 0, 0);
-            end.setMonth(11, 31);
+            end.setFullYear(start.getFullYear() + 1);
+            end.setMonth(0, 0);
             end.setHours(23, 59, 59, 999);
             lbl = start.toLocaleDateString('en-IN', { year: 'numeric' });
         }
@@ -74,18 +57,37 @@ export function ProfitAnalysis() {
         return { startDate: start, endDate: end, label: lbl };
     }, [period, date]);
 
+    useEffect(() => {
+        const loadExpenses = async () => {
+            // For Daily/Weekly, we still need the monthly context for fixed cost allocation
+            // but we'll fetch the range specifically for variable costs
+            const fetchStart = new Date(startDate);
+            const fetchEnd = new Date(endDate);
+
+            // Fetch salaries (usually monthly) and expenses in range
+            const [salaries, expenses] = await Promise.all([
+                getSalaryByRange(fetchStart, fetchEnd),
+                getExpensesByRange(fetchStart, fetchEnd)
+            ]);
+
+            setAgentSalaries(salaries);
+            setCompanyExpenses(expenses);
+        };
+        loadExpenses();
+    }, [startDate.getTime(), endDate.getTime()]);
+
+
     // 2. Filter Transactions
     const filteredInvoices = useMemo(() => {
         return transactions.filter(t => {
             if (t.type !== TransactionType.INVOICE) return false;
             const tDate = new Date(t.date);
-            // Use getTime() for safer comparison to avoid object reference issues
             return tDate.getTime() >= startDate.getTime() && tDate.getTime() <= endDate.getTime();
         });
     }, [transactions, startDate, endDate]);
 
     // 3. Calculate metrics
-    const { revenue, cogs, discounts, grossProfit, profit, margin, expensesDetails } = useMemo(() => {
+    const { revenue, cogs, discounts, grossProfit, profit, margin, expensesDetails, invoiceCount } = useMemo(() => {
         let rev = 0;
         let c = 0;
         let d = 0;
@@ -102,20 +104,19 @@ export function ProfitAnalysis() {
         });
 
         // Expenses handling
-        let allocatedExpenses = 0;
-        const totalMonthlyExpenses =
-            agentSalaries.reduce((acc, s) => acc + (s.totalExpense || 0) + s.baseSalary, 0) +
-            companyExpenses.reduce((acc, e) => acc + e.amount, 0);
+        // 1. Sum up all salaries in the range
+        const totalSalaries = agentSalaries.reduce((acc, s) => acc + (s.totalExpense || 0) + s.baseSalary, 0);
+        
+        // 2. Sum up all company expenses in the range
+        const totalCompExpenses = companyExpenses.reduce((acc, e) => acc + e.amount, 0);
 
-        if (period === 'monthly') {
-            allocatedExpenses = totalMonthlyExpenses;
-        } else if (period === 'yearly') {
-            allocatedExpenses = totalMonthlyExpenses * 12; // Estimate
-        } else if (period === 'weekly') {
-            allocatedExpenses = (totalMonthlyExpenses / 30) * 7;
-        } else if (period === 'daily') {
-            allocatedExpenses = totalMonthlyExpenses / 30;
-        }
+        // Allocation logic:
+        // If the range doesn't have any salaries/expenses recorded (common for daily/weekly),
+        // we might still want to estimate fixed costs.
+        // But with getSalaryByRange/getExpensesByRange, if they are recorded for the month,
+        // and our range spans that month, we get them.
+        
+        let allocatedExpenses = totalSalaries + totalCompExpenses;
 
         const netProfit = p - allocatedExpenses;
         const m = rev > 0 ? (netProfit / rev) * 100 : 0;
@@ -127,9 +128,10 @@ export function ProfitAnalysis() {
             grossProfit: gp,
             profit: netProfit,
             margin: m,
-            expensesDetails: allocatedExpenses
+            expensesDetails: allocatedExpenses,
+            invoiceCount: filteredInvoices.length
         };
-    }, [filteredInvoices, products, agentSalaries, companyExpenses, period]);
+    }, [filteredInvoices, products, agentSalaries, companyExpenses]);
 
     // Handlers
     const handlePrev = () => {

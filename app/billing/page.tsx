@@ -193,18 +193,16 @@ export default function Billing() {
     // Invoice Date
     const [invoiceDate, setInvoiceDate] = useState(getISTDateString());
     const [invoiceNoExists, setInvoiceNoExists] = useState(false);
-
+    const [manualInvNoTouched, setManualInvNoTouched] = useState(false);
     const checkInvoiceNumberExists = (no: string) => {
+        if (!no.trim()) {
+            setInvoiceNoExists(false);
+            return;
+        }
         const exists = transactions.some(t =>
-            t.type === 'INVOICE' &&
             t.id !== editInvoiceId &&
-            (t.referenceId === `INV${no}` ||
-                (t.notes && (() => {
-                    try {
-                        const n = JSON.parse(t.notes);
-                        return n.manualInvoiceNo === no;
-                    } catch { return false; }
-                })()))
+            t.type === 'INVOICE' &&
+            (t.referenceId === `INV${no.trim()}` || (t.notes && t.notes.includes(`"manualInvoiceNo":"${no.trim()}"`)))
         );
         setInvoiceNoExists(exists);
     };
@@ -236,7 +234,7 @@ export default function Billing() {
             try {
                 const { data, error } = await supabase
                     .from('company_settings')
-                    .select('*')
+                    .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
                     .limit(1);
 
                 if (error) {
@@ -261,7 +259,8 @@ export default function Billing() {
                         bankBranch: settings.bank_branch,
                         accountNumber: settings.account_number,
                         ifscCode: settings.ifsc_code,
-                        accountHolderName: settings.account_holder_name
+                        accountHolderName: settings.account_holder_name,
+                        accountType: settings.account_type
                     });
                 } else {
                     console.warn('No company settings found in DB, using defaults');
@@ -665,9 +664,11 @@ export default function Billing() {
 
         setIsSubmitting(true);
         await new Promise(resolve => setTimeout(resolve, 1500));
+        let finalId = editInvoiceId || '';
+        let finalRefId = '';
 
         if (editInvoiceId) {
-            await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
+            const { id, refId } = await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
                 vehicleName,
                 vehicleNumber,
                 destination,
@@ -675,6 +676,8 @@ export default function Billing() {
                 paymentTerms,
                 discountPercent: parseFloat(globalDiscount) || 0,
                 creditDays: parseInt(creditDays) || 30,
+                invoiceDate: new Date(invoiceDate),
+                manualInvoiceNo: manualInvoiceNo.trim(),
                 notes: JSON.stringify({
                     buyerOrderNo,
                     buyerOrderDate,
@@ -711,10 +714,8 @@ export default function Billing() {
                     }))
                 })
             });
-            // For update, we might want to just show success and then redirect back or stay
-            // Here reusing generatedRef as the existing ID
-            setGeneratedRef(transactions.find(t => t.id === editInvoiceId)?.referenceId || 'UPDATED');
-            setCreatedInvoiceId(editInvoiceId);
+            finalId = id;
+            finalRefId = refId;
         } else {
             const { id, refId } = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
                 vehicleName,
@@ -725,16 +726,7 @@ export default function Billing() {
                 discountPercent: parseFloat(globalDiscount) || 0,
                 creditDays: parseInt(creditDays) || 30,
                 invoiceDate: new Date(invoiceDate),
-                // Add new fields to referenceId logic manually if needed, 
-                // but createInvoice doesn't take them as args directly in existing signature.
-                // We should update createInvoice signature OR pass them in metadata/notes if we don't want to change schema too much.
-                // However, user wants them on PRINT.
-                // I will add them to a 'meta' object if createInvoice supports it, or just rely on them being state for now 
-                // and we might need to save them to notes or a new jsonb column if we want persistence.
-                // For now, let's assume we just need to print them. But persistence is better.
-                // Since I haven't added columns for these, I'll put them in 'notes' as JSON string for now as a quick hack 
-                // OR add columns. I should have added columns to transactions table.
-                // NOTES HACK for now:
+                manualInvoiceNo: manualInvoiceNo.trim(),
                 notes: JSON.stringify({
                     buyerOrderNo,
                     buyerOrderDate,
@@ -771,9 +763,12 @@ export default function Billing() {
                     }))
                 })
             });
-            setGeneratedRef((manualInvoiceNo ? `INV${manualInvoiceNo}` : refId));
-            setCreatedInvoiceId(id);
+            finalId = id;
+            finalRefId = refId;
         }
+
+        setGeneratedRef(finalRefId);
+        setCreatedInvoiceId(finalId);
 
         // Real-time Sync to Google Sheets (disabled — month-wise Drive storage is used instead)
         // syncInvoiceToSheets has been removed as ERP Invoices tab is no longer needed.
@@ -783,13 +778,13 @@ export default function Billing() {
             // Background process to avoid blocking UI success screen
             (async () => {
                 try {
-                    const invoiceData = {
-                        id: (editInvoiceId || 'NEW'),
+                    const invoiceDataToSave = {
+                        id: (finalId || 'NEW'),
                         customerId: selectedDealer.id,
                         type: TransactionType.INVOICE,
                         amount: invoiceTotal,
                         date: new Date(invoiceDate),
-                        referenceId: (manualInvoiceNo ? `INV${manualInvoiceNo}` : (editInvoiceId || 'NEW')),
+                        referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
                         items: invoiceItems,
                         vehicleName,
                         vehicleNumber,
@@ -806,15 +801,15 @@ export default function Billing() {
                     };
 
                     const invoiceBase64 = await generateInvoicePDFBase64(
-                        invoiceData as any,
-                        selectedDealer!,
+                        invoiceDataToSave as any,
+                        selectedDealer,
                         invoiceItems,
                         companySettings
                     );
 
                     const driveFileName = buildInvoiceFileName(
-                        invoiceData.referenceId,
-                        selectedDealer!.businessName,
+                        invoiceDataToSave.referenceId,
+                        selectedDealer.businessName,
                         new Date(invoiceDate) // use invoice date → correct month folder
                     );
 
@@ -838,13 +833,13 @@ export default function Billing() {
 
         // Prepare data for WhatsApp Preview instead of sending automatically
         if (selectedDealer && selectedDealer.phone) {
-            const invoiceData = {
-                id: editInvoiceId || '',
+            const invoiceDataForPreview = {
+                id: (finalId || ''),
                 customerId: selectedDealer.id,
                 type: TransactionType.INVOICE,
                 amount: invoiceTotal,
                 date: new Date(invoiceDate),
-                referenceId: (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP'),
+                referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
                 items: invoiceItems,
                 vehicleName,
                 vehicleNumber,
@@ -869,13 +864,13 @@ export default function Billing() {
                     globalIGST
                 })
             };
-            setPreviewData({ dealer: selectedDealer, invoiceData });
+            setPreviewData({ dealer: selectedDealer, invoiceData: invoiceDataForPreview });
             setShowWhatsAppPreview(true);
         }
     };
 
     const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
-        if (!companySettings) return;
+        if (!companySettings || !selectedDealer) return;
 
         setWhatsappSending('sending');
         setWhatsappError(null);
@@ -889,16 +884,11 @@ export default function Billing() {
             }
 
             // 1. Generate Invoice PDF
-            const invoiceBase64 = await generateInvoicePDFBase64(
-                invoiceData,
-                dealer,
-                invoiceItems,
-                companySettings
-            );
+            const invoiceBase64 = await generateInvoicePDFBase64(invoiceData, selectedDealer, invoiceItems, companySettings);
 
             // 2. Generate Statement PDF
             // Ensure the newly created invoice is included in the statement calculation
-            const filteredTxns = transactions.filter(t => t.customerId === dealer.id);
+            const filteredTxns = transactions.filter(t => t.customerId === selectedDealer.id);
             // Check if context already has this invoice to avoid duplication
             const alreadyIncluded = filteredTxns.some(t =>
                 (t.referenceId === invoiceData.referenceId && t.referenceId !== 'TMP') ||
@@ -912,38 +902,39 @@ export default function Billing() {
             const totalInvoiced = stmtInvoices.reduce((sum, inv) => sum + inv.amount, 0);
             const totalPaid = stmtPayments.reduce((sum, p) => sum + p.amount, 0);
             const totalOutstanding = totalInvoiced - totalPaid;
+            const summary = { totalInvoiced, totalPaid, totalOutstanding };
 
             const statementBase64 = await generateStatementPDFBase64(
-                dealer,
+                selectedDealer,
                 stmtInvoices,
                 stmtPayments,
                 companySettings,
-                { totalInvoiced, totalPaid, totalOutstanding }
+                summary
             );
 
             // 3. Send Invoice
             if (window.electron?.whatsapp?.sendPDF) {
                 await window.electron.whatsapp.sendPDF(
-                    dealer.phone,
+                    selectedDealer.phone,
                     invoiceBase64,
                     `Invoice_${invoiceData.referenceId}.pdf`,
-                    `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
+                    `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
                 );
             } else {
                 // WEB FALLBACK: Upload to Drive and share Link
                 try {
                     setWhatsappSending('sending');
                     const link = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
-                    const message = `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${link}`;
-                    const whatsappUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${link}`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
                     // Small delay to simulate sending
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 } catch (err: any) {
                     console.error('Web WhatsApp share failed:', err);
                     // Fallback to text only if drive fails
-                    const message = `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}.`;
-                    const whatsappUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}.`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
                 }
             }

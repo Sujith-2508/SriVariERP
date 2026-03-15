@@ -19,6 +19,7 @@ interface InvoiceData {
     creditDays?: number;
     notes?: string;
     invoiceDate?: Date;
+    manualInvoiceNo?: string;
 }
 
 interface DataContextType {
@@ -36,7 +37,7 @@ interface DataContextType {
     loadingTracking: boolean;
     // Methods
     createInvoice: (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
-    updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<void>;
+    updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
     recordPayment: (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => Promise<string>;
     updateStock: (productId: string, quantity: number) => Promise<void>;
     addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
@@ -46,7 +47,7 @@ interface DataContextType {
     updateDealer: (dealer: Dealer) => Promise<void>;
     deleteDealer: (id: string) => Promise<void>;
     deleteTransaction: (id: string) => Promise<void>;
-    getDealerTransactions: (dealerId: string) => Transaction[];
+    getDealerTransactions: (dealerId: string, customTxns?: Transaction[]) => Transaction[];
     getInvoicePaymentHistory: (invoiceId: string) => PaymentAllocation[];
     refreshData: () => Promise<void>;
     bulkSyncDealers: () => Promise<void>;
@@ -269,8 +270,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
             }
 
-            // Fetch company settings
-            const { data: companyData } = await supabase.from('company_settings').select('*').single();
+            // Fetch company settings - Explicitly select columns to avoid schema mismatch with account_type
+            const { data: companyData } = await supabase
+                .from('company_settings')
+                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
+                .single();
             if (companyData) {
                 setCompanySettings({
                     id: companyData.id,
@@ -288,7 +292,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     bankBranch: companyData.bank_branch,
                     accountNumber: companyData.account_number,
                     ifscCode: companyData.ifsc_code,
-                    accountHolderName: companyData.account_holder_name
+                    accountHolderName: companyData.account_holder_name,
+                    accountType: companyData.account_type
                 });
             }
 
@@ -805,7 +810,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const createInvoice = async (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {
-        const invoiceNumber = `INV${String(invoiceCount).padStart(3, '0')}`;
+        let invoiceNumber = '';
+        if (invoiceData?.manualInvoiceNo) {
+            invoiceNumber = `INV${invoiceData.manualInvoiceNo}`;
+        } else {
+            // Robust auto-generation: Find the highest existing numeric INV suffix
+            const invoiceSuffixes = transactions
+                .filter(t => t.type === 'INVOICE' && t.referenceId?.startsWith('INV'))
+                .map(t => {
+                    const suffix = t.referenceId?.replace('INV', '');
+                    return suffix && /^\d+$/.test(suffix) ? parseInt(suffix) : 0;
+                })
+                .filter(n => n > 0);
+
+            const maxSuffix = invoiceSuffixes.length > 0 ? Math.max(...invoiceSuffixes) : 0;
+            const nextNo = Math.max(maxSuffix + 1, invoiceCount + 1);
+            invoiceNumber = `INV${String(nextNo).padStart(3, '0')}`;
+        }
+
         const invoiceDate = invoiceData?.invoiceDate || new Date();
 
         const creditDays = invoiceData?.creditDays || 30;
@@ -1013,6 +1035,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .from('transactions')
             .update({
                 amount: totalAmount,
+                reference_id: invoiceData?.manualInvoiceNo ? `INV${invoiceData.manualInvoiceNo.trim()}` : existingTxn.referenceId,
                 credit_days: creditDays,
                 due_date: dueDate.toISOString(),
                 vehicle_name: invoiceData?.vehicleName,
@@ -1065,6 +1088,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return {
                     ...t,
                     amount: totalAmount,
+                    referenceId: invoiceData?.manualInvoiceNo ? `INV${invoiceData.manualInvoiceNo.trim()}` : t.referenceId,
                     creditDays: creditDays,
                     dueDate: dueDate,
                     vehicleName: invoiceData?.vehicleName,
@@ -1078,6 +1102,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
             return t;
         }));
+
+        return { id: invoiceId, refId: invoiceData?.manualInvoiceNo ? `INV${invoiceData.manualInvoiceNo.trim()}` : (existingTxn.referenceId || 'UPDATED') };
     };
 
     const recordPayment = async (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => {
@@ -1501,7 +1527,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await clearDealerTransactionsForSync(dealer.businessName);
 
         // 3. Re-append ALL transactions in ONE batch call
-        await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns);
+        await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns, dealer.openingBalance || 0);
     };
 
     /**
@@ -1529,7 +1555,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 // 3. Write ALL transactions in ONE API call (batch instead of per-row)
                 const dealerTxns = getDealerTransactions(dealer.id);
-                await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns);
+                await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns, dealer.openingBalance || 0);
 
                 synced++;
             } catch (e) {

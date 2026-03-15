@@ -102,8 +102,8 @@ export const generateInvoicePDFBase64 = async (
         doc.text(company.addressLine1 || '', 12, 20);
         doc.text(company.addressLine2 || '', 12, 24);
         doc.text(company.city || '', 12, 28);
-        doc.text(`GST NO: ${company.gstNumber || 'N/A'}`, 12, 32);
-        doc.text(`PAN NO: ${company.panNumber || 'N/A'}`, 12, 36);
+        doc.text(`Ph: ${company.phone || 'N/A'}  Email: ${company.email || 'N/A'}`, 12, 32);
+        doc.text(`GST NO: ${company.gstNumber || 'N/A'}  PAN NO: ${company.panNumber || 'N/A'}`, 12, 36);
 
         // Horizontal line after company details
         doc.line(10, 40, 105, 40);
@@ -534,6 +534,7 @@ export const generateReceiptPDFBase64 = async (
     doc.text(`${company.addressLine1 || ''}, ${company.addressLine2 || ''}`, 105, 25, { align: 'center' });
     doc.text(`${company.city || ''} - ${company.pinCode || ''}`, 105, 29, { align: 'center' });
     doc.text(`GST NO: ${company.gstNumber || 'N/A'}`, 105, 33, { align: 'center' });
+    doc.text(`Ph: ${company.phone || ''} | ${company.email || ''}`, 105, 36, { align: 'center' });
 
     doc.setLineWidth(0.3);
     doc.line(10, 38, 200, 38);
@@ -680,31 +681,35 @@ export const generateStatementPDFBase64 = async (
     // 4. SUMMARY BOXES
     doc.setDrawColor(200);
     doc.setFillColor(245, 245, 245);
-    doc.rect(110, 50, 85, 30, 'F');
-    doc.rect(110, 50, 85, 30, 'S');
+    // Increased height to 38 for extra row and better spacing
+    doc.rect(110, 50, 85, 38, 'F');
+    doc.rect(110, 50, 85, 38, 'S');
 
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.text('Account Summary:', 115, 56);
 
     doc.setFont('helvetica', 'normal');
-    doc.text('Total Invoiced:', 115, 62);
-    doc.text(formatCurrencyPDF(summary.totalInvoiced), 190, 62, { align: 'right' });
+    doc.text('Opening Balance:', 115, 62);
+    doc.text(formatCurrencyPDF(summary.openingBalance || 0), 190, 62, { align: 'right' });
 
-    doc.text('Total Collected:', 115, 68);
-    doc.text(formatCurrencyPDF(summary.totalPaid), 190, 68, { align: 'right' });
+    doc.text('Total Invoiced:', 115, 68);
+    doc.text(formatCurrencyPDF(summary.totalInvoiced), 190, 68, { align: 'right' });
 
-    doc.line(115, 71, 190, 71);
+    doc.text('Total Collected:', 115, 74);
+    doc.text(formatCurrencyPDF(summary.totalPaid), 190, 74, { align: 'right' });
+
+    doc.line(115, 77, 190, 77);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(220, 38, 38); // Red
-    doc.text('Outstanding:', 115, 76);
+    doc.text('Outstanding:', 115, 83);
     const outstandingStr = formatCurrencyPDF(summary.totalOutstanding);
     const balanceType = summary.totalOutstanding >= 0 ? ' (Cr)' : ' (Dr)';
-    doc.text(outstandingStr + balanceType, 190, 76, { align: 'right' });
+    doc.text(outstandingStr + balanceType, 190, 83, { align: 'right' });
     doc.setTextColor(0);
 
-    doc.line(10, 85, 200, 85);
+    doc.line(10, 93, 200, 93);
 
     // 5. COMBINED TRANSACTION HISTORY TABLE
     doc.setFontSize(10);
@@ -713,6 +718,18 @@ export const generateStatementPDFBase64 = async (
 
     // Combine and sort invoices and payments
     const statementEntries = [
+        // Add Opening Balance as a virtual entry if non-zero
+        ...(summary.openingBalance !== 0 ? [{
+            date: invoices.length > 0 || payments.length > 0 
+                ? new Date(Math.min(...invoices.map(i => i.date.getTime()), ...payments.map(p => p.date.getTime()))) 
+                : new Date(),
+            ref: 'Balance B/F',
+            type: 'Opening Balance',
+            amount: summary.openingBalance > 0 ? Math.abs(summary.openingBalance) : 0,
+            paid: summary.openingBalance < 0 ? Math.abs(summary.openingBalance) : 0,
+            balance: summary.openingBalance,
+            createdAt: undefined
+        }] : []),
         ...invoices.map(inv => ({
             date: new Date(inv.date),
             ref: inv.referenceId,
@@ -770,8 +787,8 @@ export const generateStatementPDFBase64 = async (
             entry.date.toLocaleDateString('en-GB'),
             entry.ref,
             entry.type,
-            (entry.type === 'Invoice' || entry.type === 'Cheque Return') ? formatCurrencyPDF(entry.amount) : '-',
-            (entry.type === 'Receipt' || entry.type === 'Stock Return') ? formatCurrencyPDF(entry.paid) : '-',
+            (entry.type === 'Invoice' || entry.type === 'Cheque Return' || entry.type === 'Opening Balance') ? formatCurrencyPDF(entry.amount) : '-',
+            (entry.type === 'Receipt' || entry.type === 'Stock Return' || (entry.type === 'Opening Balance' && entry.paid > 0)) ? formatCurrencyPDF(entry.paid) : '-',
             (entry as any).agent || '-'
         ]),
         theme: 'grid',

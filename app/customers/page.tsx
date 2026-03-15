@@ -70,7 +70,7 @@ export default function DealerLedger() {
         const loadCompanySettings = async () => {
             const { data, error } = await supabase
                 .from('company_settings')
-                .select('*')
+                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
                 .single();
 
             if (!error && data) {
@@ -90,7 +90,8 @@ export default function DealerLedger() {
                     bankBranch: data.bank_branch,
                     accountNumber: data.account_number,
                     ifscCode: data.ifsc_code,
-                    accountHolderName: data.account_holder_name
+                    accountHolderName: data.account_holder_name,
+                    accountType: data.account_type
                 });
             }
             setSettingsLoading(false);
@@ -367,7 +368,7 @@ export default function DealerLedger() {
                 pinCode: editDealer.pinCode,
                 gstNumber: editDealer.gstNumber,
                 openingBalance: Number(editDealer.openingBalance) || 0,
-                balance: Number(editDealer.openingBalance) || 0 // Warning: resetting balance to OB on edit might be dangerous if transactions exist, but for migration it's fine. Actually, it's better to only update openingBalance and let DB handle state if possible. But here we usually want to KEEP current balance plus or minus OB change? No, usually OB is set once.
+                balance: (editingDealer.balance - (editingDealer.openingBalance || 0)) + (Number(editDealer.openingBalance) || 0)
             });
             setIsEditModalOpen(false);
             setEditingDealer(null);
@@ -419,8 +420,9 @@ export default function DealerLedger() {
 
     // Get transactions for selected dealer and calculate FIFO payments
     const getDealerStatement = (dealerId: string) => {
+        const d = dealers.find(d => d.id === dealerId);
         const dealerTransactions = transactions.filter(t => t.customerId === dealerId);
-        return calculateDealerStatement(dealerTransactions);
+        return calculateDealerStatement(dealerTransactions, d?.openingBalance || 0);
     };
 
     // ─── Date range helpers ────────────────────────────────────────────────
@@ -466,15 +468,26 @@ export default function DealerLedger() {
         const filteredInvoices = invoices.filter(inv => new Date(inv.date) >= from && new Date(inv.date) <= to);
         const filteredPayments = payments.filter(p => new Date(p.date) >= from && new Date(p.date) <= to);
 
+        // For ranged statements, the "Opening Balance" is the dealer's static OB + everything before this range
+        const beforeInvoices = invoices.filter(inv => new Date(inv.date) < from);
+        const beforePayments = payments.filter(p => new Date(p.date) < from);
+        const staticOB = summary.openingBalance || 0;
+        
+        const periodOpeningBalance = staticOB + 
+            beforeInvoices.reduce((s, i) => s + i.amount, 0) - 
+            beforePayments.reduce((s, p) => s + p.amount, 0);
+
         const totalInvoiced = filteredInvoices.reduce((s, inv) => s + inv.amount, 0);
         const totalPaidOnInvoices = filteredInvoices.reduce((s, inv) => s + inv.paid, 0);
         const totalUnapplied = filteredPayments.reduce((s, p) => s + (p.remaining || 0), 0);
-        const totalOutstanding = totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
+        
+        const totalOutstanding = periodOpeningBalance + totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
 
         return {
             invoices: filteredInvoices,
             payments: filteredPayments,
             summary: {
+                openingBalance: periodOpeningBalance,
                 totalInvoiced,
                 totalPaid: totalPaidOnInvoices + totalUnapplied,
                 totalOutstanding,
@@ -961,6 +974,37 @@ export default function DealerLedger() {
             products
         );
 
+        // Combine and sort invoices and payments for statement generation
+        const statementEntries = [
+            // Add Opening Balance as a virtual entry if non-zero
+            ...(summary.openingBalance !== 0 ? [{
+                date: invoices.length > 0 ? new Date(Math.min(...invoices.map(i => i.date.getTime()), ...payments.map(p => p.date.getTime()))) : new Date(),
+                reference: 'Balance B/F',
+                type: 'Opening Balance',
+                debit: summary.openingBalance < 0 ? Math.abs(summary.openingBalance) : 0, 
+                credit: summary.openingBalance > 0 ? Math.abs(summary.openingBalance) : 0,
+                balance: summary.openingBalance
+            }] : []),
+            ...invoices.map(inv => ({
+                date: inv.date,
+                reference: inv.referenceId,
+                type: 'Invoice',
+                debit: inv.amount,
+                credit: 0,
+                balance: 0, // Will be calculated dynamically
+                originalTransaction: inv.originalTransaction
+            })),
+            ...payments.map(pay => ({
+                date: pay.date,
+                reference: pay.receiptRef,
+                type: 'Payment',
+                debit: 0,
+                credit: pay.amount,
+                balance: 0, // Will be calculated dynamically
+                originalTransaction: pay // Keep original payment object for details
+            }))
+        ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
                 {/* Header */}
@@ -1025,9 +1069,13 @@ export default function DealerLedger() {
 
                 <div className="p-6">
                     {/* Summary Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
                         <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Total Invoiced</p>
+                            <p className="text-xs text-slate-500 font-medium mb-1">Opening Balance</p>
+                            <p className="text-xl font-bold text-slate-800">₹{(summary.openingBalance || 0).toLocaleString()}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-200">
+                            <p className="text-xs text-slate-500 font-medium mb-1">Invoiced</p>
                             <p className="text-xl font-bold text-slate-800">₹{totalInvoiced.toLocaleString()}</p>
                         </div>
                         <div className="bg-white p-4 rounded-xl border border-slate-200">
@@ -1035,7 +1083,7 @@ export default function DealerLedger() {
                             <p className="text-xl font-bold text-emerald-600">₹{totalPaid.toLocaleString()}</p>
                         </div>
                         <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Outstanding Balance</p>
+                            <p className="text-xs text-slate-500 font-medium mb-1">Net Outstanding</p>
                             <p className="text-xl font-bold text-red-600">₹{totalBalance.toLocaleString()}</p>
                         </div>
                         <div className="bg-white p-4 rounded-xl border border-slate-200">
