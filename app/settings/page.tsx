@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect } from 'react';
 import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive, Building2, Landmark } from 'lucide-react';
@@ -105,7 +105,7 @@ export default function SettingsPage() {
                 pin_code: pinCode.trim(),
                 gst_number: gstNumber.trim().toUpperCase(),
                 pan_number: panNumber.trim().toUpperCase(),
-                phone: phone.trim(),
+                phone: phone.replace(/\D/g, '').trim(), // Clean phone number to only digits
                 email: email.trim(),
                 bank_name: bankName.trim(),
                 bank_branch: bankBranch.trim(),
@@ -395,7 +395,7 @@ export default function SettingsPage() {
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className={labelCls}>Phone</label>
-                                <input className={inputCls} value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210" />
+                                <input className={inputCls} value={phone} onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))} placeholder="10-digit mobile number" maxLength={10} />
                             </div>
                             <div>
                                 <label className={labelCls}>Email</label>

@@ -29,6 +29,7 @@ export default function Billing() {
     const [selectedDealer, setSelectedDealer] = useState<Dealer | null>(null);
     const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isAddingDealer, setIsAddingDealer] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
     const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
     const [generatedRef, setGeneratedRef] = useState<string>('');
@@ -70,7 +71,8 @@ export default function Billing() {
         city: '',
         pinCode: '',
         address: '',
-        gstNumber: ''
+        gstNumber: '',
+        openingBalance: 0
     });
 
     // Refs for Enter key navigation in Add Dealer modal
@@ -1117,35 +1119,58 @@ export default function Billing() {
             setCrProcessing(false);
         }
     };
-
-    const handleAddNewDealer = () => {
+    const handleAddNewDealer = async () => {
         if (!newDealer.businessName || !newDealer.phone) {
             showToast('Please fill in business name and phone number', 'warning');
             return;
         }
 
-        addDealer({
-            ...newDealer,
-            balance: 0
-        });
-
-        // Select the newly added dealer
-        const addedDealer = dealers.find(d => d.phone === newDealer.phone);
-        if (addedDealer) {
-            setSelectedDealer(addedDealer);
+        if (newDealer.phone.length !== 10) {
+            showToast('Phone number must be exactly 10 digits', 'warning');
+            return;
         }
 
-        setShowAddDealerModal(false);
-        setNewDealer({
-            businessName: '',
-            contactPerson: '',
-            phone: '',
-            district: '',
-            city: '',
-            pinCode: '',
-            address: '',
-            gstNumber: ''
-        });
+        if (isAddingDealer) return;
+        setIsAddingDealer(true);
+
+        try {
+            const addedDealerId = await addDealer({
+                ...newDealer,
+                balance: Number(newDealer.openingBalance) || 0,
+                openingBalance: Number(newDealer.openingBalance) || 0
+            });
+
+            // Select the newly added dealer using the returned ID
+            // Since dealers state might not have updated yet in THIS execution context,
+            // we create a temporary dealer object for the selection
+            const temporaryDealer: Dealer = {
+                id: addedDealerId,
+                ...newDealer,
+                balance: Number(newDealer.openingBalance) || 0,
+                openingBalance: Number(newDealer.openingBalance) || 0
+            };
+            setSelectedDealer(temporaryDealer);
+
+            showToast(`Dealer ${newDealer.businessName} added successfully`, 'success');
+
+            setShowAddDealerModal(false);
+            setNewDealer({
+                businessName: '',
+                contactPerson: '',
+                phone: '',
+                district: '',
+                city: '',
+                pinCode: '',
+                address: '',
+                gstNumber: '',
+                openingBalance: 0
+            });
+        } catch (err) {
+            console.error('[Billing] Failed to add dealer:', err);
+            showToast('Failed to add dealer. Please try again.', 'error');
+        } finally {
+            setIsAddingDealer(false);
+        }
     };
 
     const resetForm = () => {
@@ -1958,7 +1983,7 @@ export default function Billing() {
                                             required
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={newDealer.phone}
-                                            onChange={e => setNewDealer({ ...newDealer, phone: e.target.value })}
+                                            onChange={e => setNewDealer({ ...newDealer, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 10) })}
                                             onKeyDown={(e) => handleDealerKeyDown(e, 2)}
                                         />
                                     </div>
@@ -2025,6 +2050,16 @@ export default function Billing() {
                                         onKeyDown={(e) => handleDealerKeyDown(e, 7)}
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        value={newDealer.openingBalance}
+                                        onChange={e => setNewDealer({ ...newDealer, openingBalance: Number(e.target.value) })}
+                                        placeholder="0.00"
+                                    />
+                                </div>
 
                                 <div className="pt-4 flex gap-3">
                                     <button
@@ -2036,9 +2071,17 @@ export default function Billing() {
                                     </button>
                                     <button
                                         onClick={() => handleAddNewDealer()}
-                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
+                                        disabled={isAddingDealer}
+                                        className={`flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 ${isAddingDealer ? 'opacity-70 cursor-not-allowed' : ''}`}
                                     >
-                                        Add Dealer
+                                        {isAddingDealer ? (
+                                            <>
+                                                <Loader2 size={20} className="animate-spin" />
+                                                Adding...
+                                            </>
+                                        ) : (
+                                            'Add Dealer'
+                                        )}
                                     </button>
                                 </div>
                             </div>

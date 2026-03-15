@@ -56,8 +56,10 @@ function base64url(str: string): string {
 export function sanitizeTabName(name: string): string {
     if (!name) return 'Untitled';
     let sanitized = name
-        .replace(/[:\\/?*\[\]]/g, ' ') // Replace invalid chars with space
+        .replace(/[:\\/?*\[\]]/g, ' ') // Replace invalid sheets chars with space
         .replace(/'/g, '')             // Remove single quotes
+        .replace(/[^\w\s\.\,&-]/g, '') // Remove other special characters (keep words, spaces, dots, commas, ampersands, hyphens)
+        .replace(/\s+/g, ' ')          // Collapse multiple spaces
         .trim();
 
     // Truncate to 31 characters
@@ -65,7 +67,9 @@ export function sanitizeTabName(name: string): string {
         sanitized = sanitized.substring(0, 31).trim();
     }
 
-    return sanitized || 'Untitled';
+    const finalName = sanitized || 'Untitled';
+    console.log(`[SheetsDealers] Sanitized tab name: "${name}" -> "${finalName}"`);
+    return finalName;
 }
 
 // Auth: Get access token
@@ -143,13 +147,15 @@ function dealerToRow(dealer: Dealer): any[] {
 }
 
 export async function syncDealerToSheet(dealer: Dealer, companyInfo?: any): Promise<boolean> {
+    const name = sanitizeTabName(dealer.businessName);
+    console.log(`[SheetsDealers] Starting sync for dealer: ${dealer.businessName} (sanitized: ${name})`);
     try {
         // 1. Ensure master index is updated
         const rowIndex = await findRowByValue(10, dealer.id);
         const rowData = dealerToRow(dealer);
 
         if (rowIndex > 0) {
-            console.log(`[SheetsDealers] Updating Index: ${dealer.businessName}`);
+            console.log(`[SheetsDealers] Updating Index row ${rowIndex} for: ${dealer.businessName}`);
             await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A${rowIndex}:K${rowIndex}?valueInputOption=USER_ENTERED`, 'PUT', { values: [rowData] });
         } else {
             console.log(`[SheetsDealers] Adding to Index: ${dealer.businessName}`);
@@ -158,13 +164,14 @@ export async function syncDealerToSheet(dealer: Dealer, companyInfo?: any): Prom
             await sheetsRequest(`/values/${DEALERS_SHEET_NAME}!A:A:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', { values: [rowData] });
         }
 
-
         // 2. Initialize the PROFESSIONAL LEDGER Sheet for this dealer
+        console.log(`[SheetsDealers] Initializing ledger for: "${dealer.businessName}" (Sanitized: "${name}")`);
         await initializeDealerLedger(dealer, companyInfo);
 
+        console.log(`[SheetsDealers] Sync complete for member of "${dealer.businessName}"`);
         return true;
     } catch (e) {
-        console.error('[SheetsDealers] Sync fail:', e);
+        console.error(`[SheetsDealers] Sync fail for ${dealer.businessName}:`, e);
         return false;
     }
 }
@@ -173,17 +180,23 @@ export async function syncDealerToSheet(dealer: Dealer, companyInfo?: any): Prom
  * Creates a professional Tally-style header for a dealer's ledger
  */
 export async function initializeDealerLedger(dealer: Dealer, companyInfo: any): Promise<void> {
+    if (!dealer || !dealer.businessName) {
+        console.error('[SheetsDealers] Cannot initialize ledger: Invalid dealer data', dealer);
+        return;
+    }
     const name = sanitizeTabName(dealer.businessName);
+    console.log(`[SheetsDealers] Initializing ledger for ${dealer.businessName} (Tab: ${name})`);
     try {
         const res = await sheetsRequest('?fields=sheets.properties.title,sheets.properties.sheetId');
         const sheet = (res.sheets || []).find((s: any) => s.properties.title === name);
 
         if (!sheet) {
-            console.log(`[SheetsDealers] Creating professional tab: ${name}`);
+            console.log(`[SheetsDealers] Tab "${name}" missing. Creating professional tab for "${dealer.businessName}"...`);
             const newSheetRes = await sheetsRequest(':batchUpdate', 'POST', {
                 requests: [{ addSheet: { properties: { title: name } } }]
             });
             const sheetId = newSheetRes.replies[0].addSheet.properties.sheetId;
+            console.log(`[SheetsDealers] Created new sheet with ID: ${sheetId} for tab: "${name}"`);
 
             // Prepare Header Rows (1-10)
             const rows = [
@@ -196,7 +209,7 @@ export async function initializeDealerLedger(dealer: Dealer, companyInfo: any): 
                 [`Period: 01 Apr 2019 To ${new Date().toLocaleDateString('en-IN')}`, '', '', '', '', '', '', '', ''], // 7
                 ['', '', '', '', '', '', '', '', ''], // 8
                 INDIVIDUAL_LEDGER_HEADERS, // 9
-                ['', 'Opening Balance', '', '', '', '0', '0', '0', ''] // 10
+                ['', 'Opening Balance', '', '', '', '0', '0', String(dealer.openingBalance || 0), ''] // 10
             ];
 
             await sheetsRequest(`/values/'${name}'!A1:I10?valueInputOption=USER_ENTERED`, 'PUT', { values: rows });

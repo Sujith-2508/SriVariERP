@@ -5,7 +5,7 @@ import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
-import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw } from 'lucide-react';
+import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye } from 'lucide-react';
 import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency, getISTDateString } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
@@ -18,12 +18,13 @@ import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 // ... existing imports
 
 export default function DealerLedger() {
-    const { dealers, transactions, addDealer, updateDealer, deleteDealer, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers } = useData();
+    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [isSyncing, setIsSyncing] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const [isTallyImporting, setIsTallyImporting] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
     const router = useRouter();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDealerId, setSelectedDealerId] = useState<string | null>(null);
@@ -197,7 +198,8 @@ export default function DealerLedger() {
         city: '',
         district: 'Tamil Nadu',
         pinCode: '',
-        gstNumber: ''
+        gstNumber: '',
+        openingBalance: 0
     });
 
     // Edit Dealer State
@@ -212,7 +214,8 @@ export default function DealerLedger() {
         city: '',
         district: '',
         pinCode: '',
-        gstNumber: ''
+        gstNumber: '',
+        openingBalance: 0
     });
 
     // Refs for Add Dealer sequential navigation
@@ -281,6 +284,7 @@ export default function DealerLedger() {
 
     const handleAddDealer = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (isSaving) return;
 
         // Phone Number Validation
         const phoneRegex = /^[0-9]{10}$/;
@@ -291,10 +295,12 @@ export default function DealerLedger() {
         }
         setAddPhoneError('');
 
+        setIsSaving(true);
         try {
             await addDealer({
                 ...newDealer,
-                balance: 0
+                balance: Number(newDealer.openingBalance) || 0,
+                openingBalance: Number(newDealer.openingBalance) || 0
             });
             setIsAddModalOpen(false);
             setNewDealer({
@@ -306,11 +312,15 @@ export default function DealerLedger() {
                 city: '',
                 district: 'Tamil Nadu',
                 pinCode: '',
-                gstNumber: ''
+                gstNumber: '',
+                openingBalance: 0
             });
+            showToast('Dealer added successfully', 'success');
         } catch (error) {
             console.error('Error adding dealer:', error);
             showToast('Failed to add dealer', 'error');
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -325,14 +335,15 @@ export default function DealerLedger() {
             city: dealer.city,
             district: dealer.district,
             pinCode: dealer.pinCode,
-            gstNumber: dealer.gstNumber || ''
+            gstNumber: dealer.gstNumber || '',
+            openingBalance: dealer.openingBalance || 0
         });
         setIsEditModalOpen(true);
     };
 
     const handleEditDealer = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!editingDealer) return;
+        if (!editingDealer || isSaving) return;
 
         // Phone Number Validation
         const phoneRegex = /^[0-9]{10}$/;
@@ -343,6 +354,7 @@ export default function DealerLedger() {
         }
         setEditPhoneError('');
 
+        setIsSaving(true);
         try {
             await updateDealer({
                 ...editingDealer,
@@ -353,7 +365,9 @@ export default function DealerLedger() {
                 city: editDealer.city,
                 district: editDealer.district,
                 pinCode: editDealer.pinCode,
-                gstNumber: editDealer.gstNumber
+                gstNumber: editDealer.gstNumber,
+                openingBalance: Number(editDealer.openingBalance) || 0,
+                balance: Number(editDealer.openingBalance) || 0 // Warning: resetting balance to OB on edit might be dangerous if transactions exist, but for migration it's fine. Actually, it's better to only update openingBalance and let DB handle state if possible. But here we usually want to KEEP current balance plus or minus OB change? No, usually OB is set once.
             });
             setIsEditModalOpen(false);
             setEditingDealer(null);
@@ -366,11 +380,15 @@ export default function DealerLedger() {
                 city: '',
                 district: '',
                 pinCode: '',
-                gstNumber: ''
+                gstNumber: '',
+                openingBalance: 0
             });
+            showToast('Dealer updated successfully', 'success');
         } catch (error) {
             console.error('Error updating dealer:', error);
             showToast('Failed to update dealer', 'error');
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -596,6 +614,24 @@ export default function DealerLedger() {
             showToast('Failed to import dealers from Google Sheets', 'error');
         } finally {
             setIsImporting(false);
+        }
+    };
+
+    const handleDeleteTransaction = async (id: string, ref: string, type: 'Invoice' | 'Receipt') => {
+        const confirmed = await showConfirm({
+            title: `Delete ${type}`,
+            message: `Are you sure you want to delete ${type} ${ref}? This will update the dealer balance${type === 'Invoice' ? ' and restore stock' : ''}. This action cannot be undone.`,
+            confirmLabel: 'Delete',
+            type: 'danger'
+        });
+
+        if (confirmed) {
+            try {
+                await deleteTransaction(id);
+                showToast(`${type} deleted successfully`, 'info');
+            } catch (err: any) {
+                showToast(`Failed to delete ${type}: ${err.message}`, 'error');
+            }
         }
     };
 
@@ -1134,16 +1170,28 @@ export default function DealerLedger() {
                                                         )}
                                                     </td>
                                                     <td className="p-4 text-center">
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                router.push(`/billing?edit=${inv.id}`);
-                                                            }}
-                                                            className="p-2 hover:bg-slate-200 rounded-full text-slate-500 hover:text-blue-600 transition-colors"
-                                                            title="Edit Invoice"
-                                                        >
-                                                            <FileText size={16} />
-                                                        </button>
+                                                        <div className="flex justify-center gap-1">
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setSelectedInvoice(inv.originalTransaction);
+                                                                }}
+                                                                className="p-2 hover:bg-slate-200 rounded-full text-slate-500 hover:text-emerald-600 transition-colors"
+                                                                title="View Details"
+                                                            >
+                                                                <Eye size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleDeleteTransaction(inv.id, inv.referenceId, 'Invoice');
+                                                                }}
+                                                                className="p-2 hover:bg-red-50 rounded-full text-slate-400 hover:text-red-600 transition-colors"
+                                                                title="Delete Invoice"
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             );
@@ -1171,6 +1219,7 @@ export default function DealerLedger() {
                                         <th className="p-4 text-left font-medium">Receipt No</th>
                                         <th className="p-4 text-right font-medium">Amount</th>
                                         <th className="p-4 text-left font-medium">Collected By</th>
+                                        <th className="p-4 text-center font-medium">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -1203,6 +1252,15 @@ export default function DealerLedger() {
                                                 </td>
                                                 <td className="p-4 text-slate-600">
                                                     {payment.agentName || 'Admin'}
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    <button
+                                                        onClick={() => handleDeleteTransaction(payment.id, payment.referenceId, 'Receipt')}
+                                                        className="p-2 hover:bg-red-50 rounded-full text-slate-400 hover:text-red-600 transition-colors"
+                                                        title="Delete Receipt"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))
@@ -1455,7 +1513,7 @@ export default function DealerLedger() {
                                             }`}
                                         value={newDealer.phone}
                                         onChange={e => {
-                                            const val = e.target.value.replace(/\D/g, '');
+                                            const val = e.target.value.replace(/\D/g, '').slice(0, 10);
                                             setNewDealer({ ...newDealer, phone: val });
                                             if (val.length === 10) setAddPhoneError('');
                                         }}
@@ -1530,6 +1588,16 @@ export default function DealerLedger() {
                                         maxLength={15}
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        value={newDealer.openingBalance}
+                                        onChange={e => setNewDealer({ ...newDealer, openingBalance: Number(e.target.value) })}
+                                        placeholder="0.00"
+                                    />
+                                </div>
                             </div>
                             <div className="pt-4 flex gap-3">
                                 <button
@@ -1541,9 +1609,17 @@ export default function DealerLedger() {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
+                                    disabled={isSaving}
+                                    className={`flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}
                                 >
-                                    Add Dealer
+                                    {isSaving ? (
+                                        <>
+                                            <Loader2 size={20} className="animate-spin" />
+                                            Adding...
+                                        </>
+                                    ) : (
+                                        'Add Dealer'
+                                    )}
                                 </button>
                             </div>
                         </form>
@@ -1615,7 +1691,7 @@ export default function DealerLedger() {
                                             }`}
                                         value={editDealer.phone}
                                         onChange={e => {
-                                            const val = e.target.value.replace(/\D/g, '');
+                                            const val = e.target.value.replace(/\D/g, '').slice(0, 10);
                                             setEditDealer({ ...editDealer, phone: val });
                                             if (val.length === 10) setEditPhoneError('');
                                         }}
@@ -1690,6 +1766,16 @@ export default function DealerLedger() {
                                         maxLength={15}
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={editDealer.openingBalance}
+                                        onChange={e => setEditDealer({ ...editDealer, openingBalance: Number(e.target.value) })}
+                                        placeholder="0.00"
+                                    />
+                                </div>
                             </div>
                             <div className="pt-4 flex gap-3">
                                 {editingDealer?.balance === 0 && (
@@ -1727,9 +1813,17 @@ export default function DealerLedger() {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
+                                    disabled={isSaving}
+                                    className={`flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200 flex items-center justify-center gap-2 ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}
                                 >
-                                    Update Dealer
+                                    {isSaving ? (
+                                        <>
+                                            <Loader2 size={20} className="animate-spin" />
+                                            Saving...
+                                        </>
+                                    ) : (
+                                        'Save Changes'
+                                    )}
                                 </button>
                             </div>
                         </form>

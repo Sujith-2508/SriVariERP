@@ -11,6 +11,7 @@ export interface Dealer {
   address?: string;
   gstNumber?: string;
   balance: number;
+  openingBalance?: number;
   lastTransactionDate?: Date;
 }
 

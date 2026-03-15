@@ -7,6 +7,7 @@ import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusU
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
 import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
+import { useToast } from './ToastContext';
 
 interface InvoiceData {
     vehicleName?: string;
@@ -44,6 +45,7 @@ interface DataContextType {
     addDealer: (dealer: Omit<Dealer, 'id'>) => Promise<string>;
     updateDealer: (dealer: Dealer) => Promise<void>;
     deleteDealer: (id: string) => Promise<void>;
+    deleteTransaction: (id: string) => Promise<void>;
     getDealerTransactions: (dealerId: string) => Transaction[];
     getInvoicePaymentHistory: (invoiceId: string) => PaymentAllocation[];
     refreshData: () => Promise<void>;
@@ -94,6 +96,7 @@ const transformDealer = (row: any): Dealer => ({
     address: row.address,
     gstNumber: row.gst_number,
     balance: Number(row.balance) || 0,
+    openingBalance: Number(row.opening_balance) || 0,
     lastTransactionDate: row.last_transaction_date ? new Date(row.last_transaction_date) : undefined,
 });
 
@@ -190,6 +193,7 @@ const transformAgent = (row: any): Agent => ({
 });
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const { showToast } = useToast();
     const [products, setProducts] = useState<Product[]>([]);
     const [dealers, setDealers] = useState<Dealer[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -627,9 +631,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 district: dealerData.district,
                 city: dealerData.city,
                 pin_code: dealerData.pinCode,
-                address: dealerData.address,
-                gst_number: dealerData.gstNumber,
-                balance: dealerData.balance || 0,
+                address: (dealerData as any).address,
+                gst_number: (dealerData as any).gstNumber,
+                balance: (dealerData as any).openingBalance || 0,
+                opening_balance: (dealerData as any).openingBalance || 0,
             })
             .select()
             .single();
@@ -642,10 +647,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const newDealer = transformDealer(data);
         setDealers(prev => [newDealer, ...prev]);
 
-        // Sync to Google Sheets in background
-        syncDealerToSheet(newDealer, companySettings).catch(e =>
-            console.warn('[DataContext] Dealer sync to Google Sheet failed:', e)
-        );
+        // Sync to Google Sheets and await it for robustness
+        try {
+            await syncDealerToSheet(newDealer, companySettings);
+            console.log(`[DataContext] Successfully synced new dealer ${newDealer.businessName} to Google Sheets`);
+        } catch (e) {
+            console.error('[DataContext] Dealer sync to Google Sheet failed:', e);
+            // We don't throw here to avoid blocking the UI if only the sheet sync fails,
+            // but we log it clearly and notify the user.
+            try {
+                showToast(`New dealer added to DB, but Google Sheet sync failed for ${newDealer.businessName}.`, 'warning');
+            } catch (toastErr) {
+                console.error('[DataContext] Failed to show sync error toast:', toastErr);
+            }
+        }
 
         return newDealer.id;
     };
@@ -663,6 +678,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 address: updatedDealer.address,
                 gst_number: updatedDealer.gstNumber,
                 balance: updatedDealer.balance,
+                opening_balance: updatedDealer.openingBalance || 0,
             })
             .eq('id', updatedDealer.id);
 
@@ -673,10 +689,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setDealers(prev => prev.map(d => d.id === updatedDealer.id ? updatedDealer : d));
 
-        // Sync to Google Sheets in background
-        syncDealerToSheet(updatedDealer, companySettings).catch(e =>
-            console.warn('[DataContext] Dealer update sync to Google Sheet failed:', e)
-        );
+        // Sync to Google Sheets and await it for robustness
+        try {
+            await syncDealerToSheet(updatedDealer, companySettings);
+            console.log(`[DataContext] Successfully updated dealer ${updatedDealer.businessName} in Google Sheets`);
+        } catch (e) {
+            console.error('[DataContext] Dealer update sync to Google Sheet failed:', e);
+        }
     };
 
     const deleteDealer = async (id: string) => {
@@ -708,6 +727,58 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 console.warn('[DataContext] Dealer removal sync to Google Sheet failed:', e)
             );
         }
+    };
+
+    const deleteTransaction = async (id: string) => {
+        // 1. Find the transaction
+        const txn = transactions.find(t => t.id === id);
+        if (!txn) throw new Error("Transaction not found");
+
+        const dealerId = txn.customerId;
+        const dealer = dealers.find(d => d.id === dealerId);
+        if (!dealer) throw new Error("Dealer not found");
+
+        // 2. If it's an INVOICE, restore stock
+        if (txn.type === 'INVOICE') {
+            const items = txn.items || [];
+            for (const item of items) {
+                await updateStock(item.productId, -item.quantity);
+            }
+        }
+
+        // 3. Delete from Supabase
+        // Note: payment_allocations should have CASCADE DELETE in DB, 
+        // but we'll be safe and assume the items in notes JSON/invoice_items table are handled.
+        const { error } = await supabase
+            .from('transactions')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            console.error('Error deleting transaction:', error);
+            throw error;
+        }
+
+        // 4. Update Dealer Balance
+        // For INVOICE: newBalance = oldBalance - amount
+        // For PAYMENT: newBalance = oldBalance + amount
+        const balanceAdj = txn.type === 'INVOICE' ? -txn.amount : txn.amount;
+        const newBalance = dealer.balance + balanceAdj;
+
+        await supabase
+            .from('dealers')
+            .update({ balance: newBalance })
+            .eq('id', dealerId);
+
+        // 5. Update local state
+        setTransactions(prev => prev.filter(t => t.id !== id));
+        setDealers(prev => prev.map(d => d.id === dealerId ? { ...d, balance: newBalance } : d));
+
+        // 6. Re-sync Dealer Ledger to Google Sheet
+        // We do a full re-sync to ensure the balance chain in the sheet is correct
+        syncDealerLedgerToSheet(dealerId).catch(e =>
+            console.warn('[DataContext] Failed to re-sync dealer ledger after transaction deletion:', e)
+        );
     };
 
     const getDealerTransactions = (dealerId: string, customTxns?: Transaction[]): Transaction[] => {
@@ -1630,6 +1701,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             addDealer,
             updateDealer,
             deleteDealer,
+            deleteTransaction,
             getDealerTransactions,
             getInvoicePaymentHistory,
             refreshData,

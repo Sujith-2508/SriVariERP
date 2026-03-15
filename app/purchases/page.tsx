@@ -356,6 +356,12 @@ export default function PurchasesPage() {
 
     const handleSupplierSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (supplierForm.phone && supplierForm.phone.length !== 10) {
+            showToast('Phone number must be exactly 10 digits', 'warning');
+            return;
+        }
+
         if (editingSupplier) {
             await updateSupplier(editingSupplier.id, supplierForm);
         } else {
@@ -1151,7 +1157,7 @@ export default function PurchasesPage() {
                                             type="text"
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={supplierForm.phone}
-                                            onChange={e => setSupplierForm({ ...supplierForm, phone: e.target.value })}
+                                            onChange={e => setSupplierForm({ ...supplierForm, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 10) })}
                                         />
                                     </div>
                                     <div>

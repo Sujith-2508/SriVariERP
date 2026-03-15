@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS dealers (
     address TEXT,
     gst_number TEXT,
     balance DECIMAL(12, 2) DEFAULT 0,
+    opening_balance DECIMAL(12, 2) DEFAULT 0,
     last_transaction_date TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
