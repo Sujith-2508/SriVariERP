@@ -72,7 +72,8 @@ export default function Billing() {
         pinCode: '',
         address: '',
         gstNumber: '',
-        openingBalance: 0
+        openingBalance: '' as string | number,
+        openingBalanceDate: getISTDateString()
     });
 
     // Refs for Enter key navigation in Add Dealer modal
@@ -84,6 +85,8 @@ export default function Billing() {
     const dealerPinCodeRef = useRef<HTMLInputElement>(null);
     const dealerGstRef = useRef<HTMLInputElement>(null);
     const dealerAddressRef = useRef<HTMLTextAreaElement>(null);
+    const dealerOpeningBalanceRef = useRef<HTMLInputElement>(null);
+    const dealerOpeningBalanceDateRef = useRef<HTMLInputElement>(null);
 
     const dealerFieldRefs = [
         dealerBusinessNameRef,
@@ -93,7 +96,9 @@ export default function Billing() {
         dealerDistrictRef,
         dealerPinCodeRef,
         dealerGstRef,
-        dealerAddressRef
+        dealerAddressRef,
+        dealerOpeningBalanceRef,
+        dealerOpeningBalanceDateRef
     ] as any;
     const { handleKeyDown: handleDealerKeyDown } = useEnterKeyNavigation(dealerFieldRefs);
 
@@ -1121,6 +1126,12 @@ export default function Billing() {
             return;
         }
 
+        if (newDealer.openingBalance === '') {
+            showToast('Please enter an opening balance (enter 0 if none)', 'warning');
+            dealerOpeningBalanceRef.current?.focus();
+            return;
+        }
+
         if (isAddingDealer) return;
         setIsAddingDealer(true);
 
@@ -1128,17 +1139,17 @@ export default function Billing() {
             const addedDealerId = await addDealer({
                 ...newDealer,
                 balance: Number(newDealer.openingBalance) || 0,
-                openingBalance: Number(newDealer.openingBalance) || 0
+                openingBalance: Number(newDealer.openingBalance) || 0,
+                openingBalanceDate: newDealer.openingBalanceDate
             });
 
             // Select the newly added dealer using the returned ID
-            // Since dealers state might not have updated yet in THIS execution context,
-            // we create a temporary dealer object for the selection
             const temporaryDealer: Dealer = {
                 id: addedDealerId,
                 ...newDealer,
                 balance: Number(newDealer.openingBalance) || 0,
-                openingBalance: Number(newDealer.openingBalance) || 0
+                openingBalance: Number(newDealer.openingBalance) || 0,
+                openingBalanceDate: newDealer.openingBalanceDate
             };
             setSelectedDealer(temporaryDealer);
 
@@ -1154,7 +1165,8 @@ export default function Billing() {
                 pinCode: '',
                 address: '',
                 gstNumber: '',
-                openingBalance: 0
+                openingBalance: '',
+                openingBalanceDate: getISTDateString()
             });
         } catch (err) {
             console.error('[Billing] Failed to add dealer:', err);
@@ -2041,15 +2053,31 @@ export default function Billing() {
                                         onKeyDown={(e) => handleDealerKeyDown(e, 7)}
                                     />
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
-                                    <input
-                                        type="number"
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                                        value={newDealer.openingBalance}
-                                        onChange={e => setNewDealer({ ...newDealer, openingBalance: Number(e.target.value) })}
-                                        placeholder="0.00"
-                                    />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹) *</label>
+                                        <input
+                                            ref={dealerOpeningBalanceRef}
+                                            type="number"
+                                            required
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            placeholder="Enter 0 if none"
+                                            value={newDealer.openingBalance}
+                                            onChange={e => setNewDealer({ ...newDealer, openingBalance: e.target.value })}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 8)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Balance Date</label>
+                                        <input
+                                            ref={dealerOpeningBalanceDateRef}
+                                            type="date"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={newDealer.openingBalanceDate}
+                                            onChange={e => setNewDealer({ ...newDealer, openingBalanceDate: e.target.value })}
+                                            onKeyDown={(e) => handleDealerKeyDown(e, 9)}
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="pt-4 flex gap-3">

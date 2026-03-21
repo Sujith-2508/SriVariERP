@@ -98,6 +98,7 @@ const transformDealer = (row: any): Dealer => ({
     gstNumber: row.gst_number,
     balance: Number(row.balance) || 0,
     openingBalance: Number(row.opening_balance) || 0,
+    openingBalanceDate: row.opening_balance_date,
     lastTransactionDate: row.last_transaction_date ? new Date(row.last_transaction_date) : undefined,
 });
 
@@ -640,6 +641,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 gst_number: (dealerData as any).gstNumber,
                 balance: (dealerData as any).openingBalance || 0,
                 opening_balance: (dealerData as any).openingBalance || 0,
+                opening_balance_date: (dealerData as any).openingBalanceDate,
             })
             .select()
             .single();
@@ -651,6 +653,32 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const newDealer = transformDealer(data);
         setDealers(prev => [newDealer, ...prev]);
+
+        // NEW: Create 'BAL B/F' transaction for FIFO allocation
+        if (newDealer.openingBalance && newDealer.openingBalance > 0) {
+            try {
+                const { data: txnData, error: txnError } = await supabase
+                    .from('transactions')
+                    .insert({
+                        customer_id: newDealer.id,
+                        type: 'INVOICE',
+                        amount: newDealer.openingBalance,
+                        date: newDealer.openingBalanceDate || new Date().toISOString(),
+                        reference_id: 'BAL B/F',
+                        notes: 'Opening Balance',
+                        source: 'SYSTEM',
+                        synced_to_sheet: true
+                    })
+                    .select()
+                    .single();
+                
+                if (!txnError && txnData) {
+                    setTransactions(prev => [transformTransaction(txnData), ...prev]);
+                }
+            } catch (e) {
+                console.warn('[DataContext] Failed to create BAL B/F transaction:', e);
+            }
+        }
 
         // Sync to Google Sheets and await it for robustness
         try {
@@ -684,6 +712,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 gst_number: updatedDealer.gstNumber,
                 balance: updatedDealer.balance,
                 opening_balance: updatedDealer.openingBalance || 0,
+                opening_balance_date: updatedDealer.openingBalanceDate,
             })
             .eq('id', updatedDealer.id);
 
@@ -693,6 +722,61 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         setDealers(prev => prev.map(d => d.id === updatedDealer.id ? updatedDealer : d));
+
+        // NEW: Update or Create 'BAL B/F' transaction for FIFO allocation
+        try {
+            const { data: existingTxns } = await supabase
+                .from('transactions')
+                .select('id')
+                .eq('customer_id', updatedDealer.id)
+                .eq('reference_id', 'BAL B/F');
+
+            const hasOB = updatedDealer.openingBalance && updatedDealer.openingBalance > 0;
+            const existingOB = existingTxns && existingTxns.length > 0 ? existingTxns[0] : null;
+
+            if (hasOB) {
+                if (existingOB) {
+                    // Update existing
+                    const { data: updatedTxn } = await supabase
+                        .from('transactions')
+                        .update({
+                            amount: updatedDealer.openingBalance,
+                            date: updatedDealer.openingBalanceDate || new Date().toISOString(),
+                        })
+                        .eq('id', existingOB.id)
+                        .select()
+                        .single();
+                    if (updatedTxn) {
+                        setTransactions(prev => prev.map(t => t.id === existingOB.id ? transformTransaction(updatedTxn) : t));
+                    }
+                } else {
+                    // Create new
+                    const { data: newTxn } = await supabase
+                        .from('transactions')
+                        .insert({
+                            customer_id: updatedDealer.id,
+                            type: 'INVOICE',
+                            amount: updatedDealer.openingBalance,
+                            date: updatedDealer.openingBalanceDate || new Date().toISOString(),
+                            reference_id: 'BAL B/F',
+                            notes: 'Opening Balance',
+                            source: 'SYSTEM',
+                            synced_to_sheet: true
+                        })
+                        .select()
+                        .single();
+                    if (newTxn) {
+                        setTransactions(prev => [transformTransaction(newTxn), ...prev]);
+                    }
+                }
+            } else if (existingOB) {
+                // Delete if opening balance is now 0
+                await supabase.from('transactions').delete().eq('id', existingOB.id);
+                setTransactions(prev => prev.filter(t => t.id !== existingOB.id));
+            }
+        } catch (e) {
+            console.warn('[DataContext] Failed to manage BAL B/F transaction update:', e);
+        }
 
         // Sync to Google Sheets and await it for robustness
         try {

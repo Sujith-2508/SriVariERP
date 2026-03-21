@@ -170,7 +170,7 @@ export default function PurchasesPage() {
                 if (statement.length === 0) continue;
 
                 const base64 = await generateSupplierStatementPDFBase64(
-                    { ...supplier, balance: statement[statement.length - 1].balance },
+                    { ...supplier, balance: statement[statement.length - 1].balance, openingBalance: supplier.openingBalance } as any,
                     statement,
                     company as any
                 );
@@ -217,7 +217,9 @@ export default function PurchasesPage() {
         phone: '',
         city: '',
         gstNumber: '',
-        address: ''
+        address: '',
+        openingBalance: '' as string | number,
+        openingBalanceDate: getISTDateString()
     });
 
     const [billForm, setBillForm] = useState({
@@ -254,6 +256,8 @@ export default function PurchasesPage() {
     const supplierPhoneRef = useRef<HTMLInputElement>(null);
     const supplierCityRef = useRef<HTMLInputElement>(null);
     const supplierGstRef = useRef<HTMLInputElement>(null);
+    const supplierOpeningBalanceRef = useRef<HTMLInputElement>(null);
+    const supplierOpeningBalanceDateRef = useRef<HTMLInputElement>(null);
     const supplierAddressRef = useRef<HTMLTextAreaElement>(null);
 
     const supplierRefs = [
@@ -262,6 +266,8 @@ export default function PurchasesPage() {
         supplierPhoneRef,
         supplierCityRef,
         supplierGstRef,
+        supplierOpeningBalanceRef,
+        supplierOpeningBalanceDateRef,
         supplierAddressRef
     ];
     const { handleKeyDown: handleSupplierKeyDown } = useEnterKeyNavigation(supplierRefs);
@@ -365,50 +371,66 @@ export default function PurchasesPage() {
             return;
         }
 
-        if (editingSupplier) {
-            await updateSupplier(editingSupplier.id, supplierForm);
-        } else {
-            const newSupplier = await createSupplier(supplierForm);
-            // Create corresponding Google Sheet tab for new supplier
-            if (newSupplier) {
-                setSheetTabStatus('Creating Google Sheet tab...');
-
-                // Load company settings from Supabase (set in the Settings page)
-                let company: CompanySheetDetails = {};
-                try {
-                    const { data: compData } = await supabase
-                        .from('company_settings')
-                        .select('company_name, address_line1, address_line2, city, gst_number, phone, email')
-                        .limit(1);
-                    if (compData && compData.length > 0) {
-                        const c = compData[0];
-                        company = {
-                            companyName: c.company_name,
-                            address: [c.address_line1, c.address_line2].filter(Boolean).join(', '),
-                            city: c.city,
-                            gstNumber: c.gst_number,
-                            phone: c.phone,
-                            email: c.email
-                        };
-                    }
-                } catch { /* ignore — company info is optional */ }
-
-                const supplierDetails: SupplierSheetDetails = {
-                    supplierName: supplierForm.name,
-                    supplierAddress: supplierForm.address,
-                    supplierCity: supplierForm.city,
-                    supplierGst: supplierForm.gstNumber,
-                    supplierPhone: supplierForm.phone,
-                    supplierContactPerson: supplierForm.contactPerson
-                };
-
-                const ok = await createSupplierSheetTab(supplierDetails, company).catch(() => false);
-                setSheetTabStatus(ok
-                    ? `✓ Sheet tab "${supplierForm.name}" created in Supplier_Group3_Ledger`
-                    : '⚠ Supplier saved. Sheet tab creation failed (check network/permissions)');
-                setTimeout(() => setSheetTabStatus(null), 6000);
-            }
+        if (supplierForm.openingBalance === '') {
+            showToast('Opening balance is compulsory (Enter 0 if none)', 'warning');
+            return;
         }
+
+        const numericForm = {
+            ...supplierForm,
+            openingBalance: typeof supplierForm.openingBalance === 'string' 
+                ? parseFloat(supplierForm.openingBalance) || 0 
+                : supplierForm.openingBalance
+        };
+
+        if (editingSupplier) {
+            await updateSupplier(editingSupplier.id, numericForm);
+        } else {
+            await createSupplier(numericForm);
+        }
+
+        // Always Update/Create corresponding Google Sheet tab
+        setSheetTabStatus('Updating Google Sheet tab...');
+
+        // Load company settings from Supabase (set in the Settings page)
+        let company: CompanySheetDetails = {};
+        try {
+            const { data: compData } = await supabase
+                .from('company_settings')
+                .select('company_name, address_line1, address_line2, city, gst_number, phone, email')
+                .limit(1);
+            if (compData && compData.length > 0) {
+                const c = compData[0];
+                company = {
+                    companyName: c.company_name,
+                    address: [c.address_line1, c.address_line2].filter(Boolean).join(', '),
+                    city: c.city,
+                    gstNumber: c.gst_number,
+                    phone: c.phone,
+                    email: c.email
+                };
+            }
+        } catch { /* ignore — company info is optional */ }
+
+        const supplierDetails: SupplierSheetDetails = {
+            supplierName: supplierForm.name,
+            supplierAddress: supplierForm.address,
+            supplierCity: supplierForm.city,
+            supplierGst: supplierForm.gstNumber,
+            supplierPhone: supplierForm.phone,
+            supplierContactPerson: supplierForm.contactPerson,
+            openingBalance: typeof supplierForm.openingBalance === 'string' 
+                ? parseFloat(supplierForm.openingBalance) || 0 
+                : (supplierForm.openingBalance || 0),
+            openingBalanceDate: supplierForm.openingBalanceDate
+        };
+
+        const ok = await createSupplierSheetTab(supplierDetails, company).catch(() => false);
+        setSheetTabStatus(ok
+            ? `✓ Sheet tab "${supplierForm.name}" updated in Google Sheets`
+            : '⚠ Supplier saved. Sheet sync failed (check network/permissions)');
+        setTimeout(() => setSheetTabStatus(null), 6000);
+
         setIsSupplierModalOpen(false);
         resetSupplierForm();
         loadData();
@@ -436,7 +458,13 @@ export default function PurchasesPage() {
             phone: supplier.phone || '',
             city: supplier.city || '',
             gstNumber: supplier.gstNumber || '',
-            address: supplier.address || ''
+            address: supplier.address || '',
+            openingBalance: supplier.openingBalance?.toString() || '0',
+            openingBalanceDate: supplier.openingBalanceDate
+                ? (typeof supplier.openingBalanceDate === 'string'
+                    ? supplier.openingBalanceDate
+                    : supplier.openingBalanceDate.toISOString().split('T')[0])
+                : getISTDateString()
         });
         setIsSupplierModalOpen(true);
     };
@@ -449,7 +477,9 @@ export default function PurchasesPage() {
             phone: '',
             city: '',
             gstNumber: '',
-            address: ''
+            address: '',
+            openingBalance: '',
+            openingBalanceDate: getISTDateString()
         });
     };
 
@@ -644,7 +674,7 @@ export default function PurchasesPage() {
     const viewStatement = async (supplier: SupplierData) => {
         const statement = await getSupplierStatement(supplier.id);
         const lastEntry = statement.length > 0 ? statement[statement.length - 1] : null;
-        const finalBalance = lastEntry ? lastEntry.balance : 0;
+        const finalBalance = lastEntry ? lastEntry.balance : (supplier.openingBalance || 0);
         setSelectedSupplier({ ...supplier, balance: finalBalance });
         setStatementData(statement);
         setIsStatementModalOpen(true);
@@ -778,7 +808,7 @@ export default function PurchasesPage() {
             const tableColumn = ["Date", "Type", "Reference", "Particulars", "Debit (+)", "Credit (-)", "Balance"];
             const tableRows = statementData.map(entry => [
                 new Date(entry.date).toLocaleDateString(),
-                entry.type === 'BILL' ? 'Pur. Bill' : 'Payment',
+                entry.reference?.toUpperCase() === 'BAL B/F' ? 'Balance' : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment'),
                 entry.reference,
                 entry.notes || '-',
                 entry.debit > 0 ? entry.debit.toLocaleString() : '-',
@@ -1183,6 +1213,29 @@ export default function PurchasesPage() {
                                             className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                             value={supplierForm.gstNumber}
                                             onChange={e => setSupplierForm({ ...supplierForm, gstNumber: e.target.value.toUpperCase() })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                        <input
+                                            ref={supplierOpeningBalanceRef}
+                                            onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                            type="number"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={supplierForm.openingBalance}
+                                            onChange={e => setSupplierForm({ ...supplierForm, openingBalance: e.target.value })}
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance Date</label>
+                                        <input
+                                            ref={supplierOpeningBalanceDateRef}
+                                            onKeyDown={(e) => handleSupplierKeyDown(e)}
+                                            type="date"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            value={supplierForm.openingBalanceDate}
+                                            onChange={e => setSupplierForm({ ...supplierForm, openingBalanceDate: e.target.value })}
                                         />
                                     </div>
                                 </div>

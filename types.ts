@@ -12,6 +12,7 @@ export interface Dealer {
   gstNumber?: string;
   balance: number;
   openingBalance?: number;
+  openingBalanceDate?: Date | string;
   lastTransactionDate?: Date;
 }
 
@@ -143,6 +144,8 @@ export interface Supplier {
   address?: string;
   gstNumber?: string;
   isActive: boolean;
+  openingBalance?: number;
+  openingBalanceDate?: Date | string;
 }
 
 // Purchase bill from supplier
@@ -247,6 +250,8 @@ export interface SupplierData {
   city?: string;
   gstNumber?: string;
   balance: number; // Credit owed TO supplier
+  openingBalance?: number; // Opening balance when created
+  openingBalanceDate?: Date | string;
   lastTransactionDate?: Date;
   createdAt: Date;
   updatedAt: Date;

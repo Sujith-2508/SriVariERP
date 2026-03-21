@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive, Building2, Landmark } from 'lucide-react';
 import WhatsAppSection from '@/components/WhatsAppSection';
+import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { supabase } from '@/lib/supabase';
 import { validatePassword } from '@/lib/validation';
 
@@ -45,6 +46,30 @@ export default function SettingsPage() {
     const [accountType, setAccountType] = useState('Current A/c');
     const [companySaving, setCompanySaving] = useState(false);
     const [companyMessage, setCompanyMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    // Refs for Company Details
+    const companyNameRef = useRef<HTMLInputElement>(null);
+    const addr1Ref = useRef<HTMLInputElement>(null);
+    const addr2Ref = useRef<HTMLInputElement>(null);
+    const cityRef = useRef<HTMLInputElement>(null);
+    const stateRef = useRef<HTMLInputElement>(null);
+    const pinRef = useRef<HTMLInputElement>(null);
+    const gstRef = useRef<HTMLInputElement>(null);
+    const panRef = useRef<HTMLInputElement>(null);
+    const phoneRef = useRef<HTMLInputElement>(null);
+    const emailRef = useRef<HTMLInputElement>(null);
+    const bankNameRef = useRef<HTMLInputElement>(null);
+    const branchRef = useRef<HTMLInputElement>(null);
+    const accNumRef = useRef<HTMLInputElement>(null);
+    const ifscRef = useRef<HTMLInputElement>(null);
+    const holderRef = useRef<HTMLInputElement>(null);
+    const typeRef = useRef<HTMLSelectElement>(null);
+
+    const companyRefs = [
+        companyNameRef, addr1Ref, addr2Ref, cityRef, stateRef, pinRef, gstRef, panRef, phoneRef, emailRef,
+        bankNameRef, branchRef, accNumRef, ifscRef, holderRef, typeRef
+    ];
+    const { handleKeyDown: handleCompanyKeyDown } = useEnterKeyNavigation(companyRefs);
 
     useEffect(() => {
         // Load user from session
@@ -368,54 +393,128 @@ export default function SettingsPage() {
                         {/* Company Name */}
                         <div>
                             <label className={labelCls}>Company Name *</label>
-                            <input className={inputCls} value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="e.g. Sri Vari Enterprises" required />
+                            <input
+                                ref={companyNameRef}
+                                onKeyDown={handleCompanyKeyDown}
+                                className={inputCls}
+                                value={companyName}
+                                onChange={e => setCompanyName(e.target.value)}
+                                placeholder="e.g. Sri Vari Enterprises"
+                                required
+                            />
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className={labelCls}>Address Line 1</label>
-                                <input className={inputCls} value={addressLine1} onChange={e => setAddressLine1(e.target.value)} placeholder="Street / Door No." />
+                                <input
+                                    ref={addr1Ref}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={addressLine1}
+                                    onChange={e => setAddressLine1(e.target.value)}
+                                    placeholder="Street / Door No."
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>Address Line 2</label>
-                                <input className={inputCls} value={addressLine2} onChange={e => setAddressLine2(e.target.value)} placeholder="Area / Landmark" />
+                                <input
+                                    ref={addr2Ref}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={addressLine2}
+                                    onChange={e => setAddressLine2(e.target.value)}
+                                    placeholder="Area / Landmark"
+                                />
                             </div>
                         </div>
 
                         <div className="grid grid-cols-3 gap-3">
                             <div>
                                 <label className={labelCls}>City</label>
-                                <input className={inputCls} value={city} onChange={e => setCity(e.target.value)} placeholder="e.g. Chennai" />
+                                <input
+                                    ref={cityRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={city}
+                                    onChange={e => setCity(e.target.value)}
+                                    placeholder="e.g. Chennai"
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>State</label>
-                                <input className={inputCls} value={stateField} onChange={e => setStateField(e.target.value)} placeholder="e.g. Tamil Nadu" />
+                                <input
+                                    ref={stateRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={stateField}
+                                    onChange={e => setStateField(e.target.value)}
+                                    placeholder="e.g. Tamil Nadu"
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>Pin Code</label>
-                                <input className={inputCls} value={pinCode} onChange={e => setPinCode(e.target.value.replace(/[^0-9]/g, ''))} placeholder="600001" maxLength={6} />
+                                <input
+                                    ref={pinRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={pinCode}
+                                    onChange={e => setPinCode(e.target.value.replace(/[^0-9]/g, ''))}
+                                    placeholder="600001"
+                                    maxLength={6}
+                                />
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className={labelCls}>GST Number</label>
-                                <input className={inputCls} value={gstNumber} onChange={e => setGstNumber(e.target.value.toUpperCase())} placeholder="e.g. 33AAAAA0000A1Z5" />
+                                <input
+                                    ref={gstRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={gstNumber}
+                                    onChange={e => setGstNumber(e.target.value.toUpperCase())}
+                                    placeholder="e.g. 33AAAAA0000A1Z5"
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>PAN Number</label>
-                                <input className={inputCls} value={panNumber} onChange={e => setPanNumber(e.target.value.toUpperCase())} placeholder="e.g. AAAAA0000A" />
+                                <input
+                                    ref={panRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={panNumber}
+                                    onChange={e => setPanNumber(e.target.value.toUpperCase())}
+                                    placeholder="e.g. AAAAA0000A"
+                                />
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className={labelCls}>Phone</label>
-                                <input className={inputCls} value={phone} onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))} placeholder="10-digit mobile number" maxLength={10} />
+                                <input
+                                    ref={phoneRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={phone}
+                                    onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))}
+                                    placeholder="10-digit mobile number"
+                                    maxLength={10}
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>Email</label>
-                                <input className={inputCls} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="office@srivari.com" />
+                                <input
+                                    ref={emailRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    type="email"
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    placeholder="office@srivari.com"
+                                />
                             </div>
                         </div>
 
@@ -429,33 +528,74 @@ export default function SettingsPage() {
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className={labelCls}>Bank Name</label>
-                                <input className={inputCls} value={bankName} onChange={e => setBankName(e.target.value)} placeholder="e.g. State Bank of India" />
+                                <input
+                                    ref={bankNameRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={bankName}
+                                    onChange={e => setBankName(e.target.value)}
+                                    placeholder="e.g. State Bank of India"
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>Branch</label>
-                                <input className={inputCls} value={bankBranch} onChange={e => setBankBranch(e.target.value)} placeholder="e.g. Anna Nagar" />
+                                <input
+                                    ref={branchRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={bankBranch}
+                                    onChange={e => setBankBranch(e.target.value)}
+                                    placeholder="e.g. Anna Nagar"
+                                />
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className={labelCls}>Account Number</label>
-                                <input className={inputCls} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="e.g. 123456789012" />
+                                <input
+                                    ref={accNumRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={accountNumber}
+                                    onChange={e => setAccountNumber(e.target.value)}
+                                    placeholder="e.g. 123456789012"
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>IFSC Code</label>
-                                <input className={inputCls} value={ifscCode} onChange={e => setIfscCode(e.target.value.toUpperCase())} placeholder="e.g. SBIN0001234" />
+                                <input
+                                    ref={ifscRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={ifscCode}
+                                    onChange={e => setIfscCode(e.target.value.toUpperCase())}
+                                    placeholder="e.g. SBIN0001234"
+                                />
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className={labelCls}>Account Holder Name</label>
-                                <input className={inputCls} value={accountHolderName} onChange={e => setAccountHolderName(e.target.value)} placeholder="e.g. Sri Vari Enterprises" />
+                                <input
+                                    ref={holderRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={accountHolderName}
+                                    onChange={e => setAccountHolderName(e.target.value)}
+                                    placeholder="e.g. Sri Vari Enterprises"
+                                />
                             </div>
                             <div>
                                 <label className={labelCls}>Account Type</label>
-                                <select className={inputCls} value={accountType} onChange={e => setAccountType(e.target.value)}>
+                                <select
+                                    ref={typeRef}
+                                    onKeyDown={handleCompanyKeyDown}
+                                    className={inputCls}
+                                    value={accountType}
+                                    onChange={e => setAccountType(e.target.value)}
+                                >
                                     <option>Current A/c</option>
                                     <option>Savings Account</option>
                                     <option>OD Account</option>

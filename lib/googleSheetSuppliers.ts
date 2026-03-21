@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Google Sheets Suppliers Service
  * 
  * Fetches "refined suppliers" from Google Sheets for the Purchase Management module.
@@ -369,6 +369,8 @@ export interface SupplierSheetDetails {
     supplierGst?: string;
     supplierPhone?: string;
     supplierContactPerson?: string;
+    openingBalance?: number;
+    openingBalanceDate?: string;
 }
 
 export interface CompanySheetDetails {
@@ -466,10 +468,34 @@ export async function createSupplierSheetTab(
             [supplierContact || ''],                                                    // Row 7
             [period],                                                                   // Row 8
             [''],                                                                       // Row 9 (blank)
-            ['Date', 'Particulars', 'Vch Type', 'Vch Ref.', 'Vch No.', 'Debit (\u20b9)', 'Credit (\u20b9)', 'Balance (\u20b9)', 'Balance Type', '']  // Row 10 â€“ column headers
+            ['Date', 'Particulars', 'Vch Type', 'Vch Ref.', 'Vch No.', 'Debit (\u20b9)', 'Credit (\u20b9)', 'Balance (\u20b9)', 'Balance Type', '']  // Row 10
         ];
 
-        const sheetRange = `'${supplierName}'!A1:J10`;
+        const isCredit = (supplier.openingBalance || 0) >= 0;
+        const balanceVal = Math.abs(supplier.openingBalance || 0);
+
+        // Determine Opening Balance Date
+        let dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+        if (supplier.openingBalanceDate) {
+            dateStr = new Date(supplier.openingBalanceDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+        }
+
+        // Always add the Opening Balance row (even if 0) for consistency with Dealer ledger
+        headerRows.push([
+            dateStr,
+            'Opening Balance',
+            'Balance B/F',
+            '',
+            'OPEN BAL',
+            '', // Debit Column (Blank)
+            '', // Credit Column (Blank)
+            String(balanceVal),
+            isCredit ? 'Cr' : 'Dr',
+            ''
+        ]);
+
+
+        const sheetRange = `'${supplierName}'!A1:J11`;
         const writeRes = await fetchWithRetry(
             `${SHEETS_API_BASE}/values/${encodeURIComponent(sheetRange)}?valueInputOption=RAW`,
             {
@@ -524,15 +550,36 @@ export async function createSupplierSheetTab(
                                     range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 0, endColumnIndex: 10 },
                                     cell: {
                                         userEnteredFormat: {
-                                            backgroundColor: { red: 0.1, green: 0.18, blue: 0.34 },
-                                            textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontSize: 10 },
+                                            backgroundColor: { red: 0.07, green: 0.14, blue: 0.28 },
+                                            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true },
                                             horizontalAlignment: 'CENTER'
                                         }
                                     },
                                     fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                                 }
                             },
-                            // Freeze first 10 rows
+                            // Format Row 11 (Opening Balance) specifically
+                            {
+                                repeatCell: {
+                                    range: { sheetId, startRowIndex: 10, endRowIndex: 11, startColumnIndex: 0, endColumnIndex: 10 },
+                                    cell: {
+                                        userEnteredFormat: {
+                                            textFormat: { bold: true },
+                                            horizontalAlignment: 'LEFT'
+                                        }
+                                    },
+                                    fields: 'userEnteredFormat(textFormat,horizontalAlignment)'
+                                }
+                            },
+                            // Right align Debit/Credit/Balance for Row 11
+                            {
+                                repeatCell: {
+                                    range: { sheetId, startRowIndex: 10, endRowIndex: 11, startColumnIndex: 5, endColumnIndex: 8 },
+                                    cell: { userEnteredFormat: { horizontalAlignment: 'RIGHT' } },
+                                    fields: 'userEnteredFormat.horizontalAlignment'
+                                }
+                            },
+                            // Freeze first 11 rows
                             {
                                 updateSheetProperties: {
                                     properties: {
@@ -601,6 +648,10 @@ export async function appendToSupplierSheetTab(
     supplierName: string,
     row: SheetRowData
 ): Promise<boolean> {
+    if (row.vchNo === 'BAL B/F') {
+        console.log('[GoogleSheetSuppliers] Skipping append for BAL B/F row (already in header)');
+        return true;
+    }
     try {
         const token = await getAccessToken();
         const sheetId = await getSheetIdByName(token, supplierName);

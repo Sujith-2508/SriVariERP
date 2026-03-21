@@ -56,12 +56,15 @@ export function useEnterKeyNavigation(
         return true; // select / button — always allow
     };
 
-    /** True when the text cursor sits at the end of the value */
     const cursorAtEnd = (el: EventTarget) => {
         if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
             return (el.selectionStart ?? 0) >= (el.value?.length ?? 0);
         }
         return true;
+    };
+
+    const isNumberInput = (el: EventTarget) => {
+        return el instanceof HTMLInputElement && el.type === 'number';
     };
 
     const handleKeyDown = (e: React.KeyboardEvent, passedIndex?: number) => {
@@ -76,14 +79,14 @@ export function useEnterKeyNavigation(
             return;
         }
 
-        if (e.key === 'ArrowRight' && cursorAtEnd(e.currentTarget)) {
+        if (e.key === 'ArrowRight' && !isNumberInput(e.currentTarget) && cursorAtEnd(e.currentTarget)) {
             // Only hijack arrow when cursor is at the end of text
             e.preventDefault();
             focusNext(activeIndex);
             return;
         }
 
-        if (e.key === 'ArrowLeft' && cursorAtStart(e.currentTarget)) {
+        if (e.key === 'ArrowLeft' && !isNumberInput(e.currentTarget) && cursorAtStart(e.currentTarget)) {
             // Only hijack arrow when cursor is at the start of text
             e.preventDefault();
             focusPrev(activeIndex);

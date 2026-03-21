@@ -190,33 +190,63 @@ export async function initializeDealerLedger(dealer: Dealer, companyInfo: any): 
     console.log(`[SheetsDealers] Initializing ledger for ${dealer.businessName} (Tab: ${name})`);
     try {
         const res = await sheetsRequest('?fields=sheets.properties.title,sheets.properties.sheetId');
-        const sheet = (res.sheets || []).find((s: any) => s.properties.title === name);
+        const sheet = (res.sheets || []).find((s: any) => 
+            s.properties.title.trim().toLowerCase() === name.trim().toLowerCase()
+        );
+
+        let sheetId: number | undefined;
 
         if (!sheet) {
             console.log(`[SheetsDealers] Tab "${name}" missing. Creating professional tab for "${dealer.businessName}"...`);
-            const newSheetRes = await sheetsRequest(':batchUpdate', 'POST', {
-                requests: [{ addSheet: { properties: { title: name } } }]
-            });
-            const sheetId = newSheetRes.replies[0].addSheet.properties.sheetId;
-            console.log(`[SheetsDealers] Created new sheet with ID: ${sheetId} for tab: "${name}"`);
+            try {
+                const newSheetRes = await sheetsRequest(':batchUpdate', 'POST', {
+                    requests: [{ addSheet: { properties: { title: name } } }]
+                });
+                sheetId = newSheetRes.replies[0].addSheet.properties.sheetId;
+                console.log(`[SheetsDealers] Created new sheet with ID: ${sheetId} for tab: "${name}"`);
+            } catch (createErr: any) {
+                const errMsg = createErr.message || '';
+                if (errMsg.includes('already exists')) {
+                    console.log(`[SheetsDealers] Tab "${name}" was created by another process, fetching ID...`);
+                    const refreshRes = await sheetsRequest('?fields=sheets.properties.title,sheets.properties.sheetId');
+                    const foundSheet = (refreshRes.sheets || []).find((s: any) => 
+                        s.properties.title.trim().toLowerCase() === name.trim().toLowerCase()
+                    );
+                    if (!foundSheet) throw createErr;
+                    sheetId = foundSheet.properties.sheetId;
+                } else {
+                    throw createErr;
+                }
+            }
+        } else {
+            sheetId = sheet.properties.sheetId;
+        }
 
-            // Prepare Header Rows (1-10)
-            const rows = [
-                [companyInfo?.companyName || 'SRI VARI ENTERPRISES', '', '', '', '', '', '', '', ''], // 1
-                [companyInfo?.addressLine1 || '', '', '', '', '', '', '', '', ''], // 2
-                [`GST IN: ${companyInfo?.gstNumber || ''} | MOB: ${companyInfo?.phone || ''} | Email: ${companyInfo?.email || ''}`, '', '', '', '', '', '', '', ''], // 3
-                ['', '', '', '', '', '', '', '', ''], // 4
-                [`${dealer.businessName} - Ledger Account`, '', '', '', '', '', '', '', ''], // 5
-                [`${dealer.address || ''} | CELL: ${dealer.phone} | GST: ${dealer.gstNumber || ''}`, '', '', '', '', '', '', '', ''], // 6
-                [`Period: 01 Apr 2019 To ${new Date().toLocaleDateString('en-IN')}`, '', '', '', '', '', '', '', ''], // 7
-                ['', '', '', '', '', '', '', '', ''], // 8
-                INDIVIDUAL_LEDGER_HEADERS, // 9
-                ['', 'Opening Balance', '', '', '', '0', '0', String(dealer.openingBalance || 0), ''] // 10
-            ];
+        const openingBalanceDateStr = dealer.openingBalanceDate
+            ? new Date(dealer.openingBalanceDate).toLocaleDateString('en-GB')
+            : new Date().toLocaleDateString('en-GB');
 
-            await sheetsRequest(`/values/'${name}'!A1:I10?valueInputOption=USER_ENTERED`, 'PUT', { values: rows });
+        const isDebit = (dealer.openingBalance || 0) >= 0;
+        const balanceVal = Math.abs(dealer.openingBalance || 0);
 
-            // Apply Professional Formatting (Colors, Merging, Alignment)
+        // Prepare Header Rows (1-10)
+        const rows = [
+            [companyInfo?.companyName || 'SRI VARI ENTERPRISES', '', '', '', '', '', '', '', ''], // 1
+            [companyInfo?.addressLine1 || '', '', '', '', '', '', '', '', ''], // 2
+            [`GST IN: ${companyInfo?.gstNumber || ''} | MOB: ${companyInfo?.phone || ''} | Email: ${companyInfo?.email || ''}`, '', '', '', '', '', '', '', ''], // 3
+            ['', '', '', '', '', '', '', '', ''], // 4
+            [`${dealer.businessName} - Ledger Account`, '', '', '', '', '', '', '', ''], // 5
+            [`${dealer.address || ''} | CELL: ${dealer.phone} | GST: ${dealer.gstNumber || ''}`, '', '', '', '', '', '', '', ''], // 6
+            [`Period: 01 Apr 2019 To ${new Date().toLocaleDateString('en-IN')}`, '', '', '', '', '', '', '', ''], // 7
+            ['', '', '', '', '', '', '', '', ''], // 8
+            INDIVIDUAL_LEDGER_HEADERS, // 9
+            [openingBalanceDateStr, 'Opening Balance', '', '', '', '', '', String(balanceVal), isDebit ? 'Dr' : 'Cr'] // 10
+        ];
+
+        await sheetsRequest(`/values/'${name}'!A1:I10?valueInputOption=USER_ENTERED`, 'PUT', { values: rows });
+
+        if (!sheet && sheetId !== undefined) {
+            // APPLY formatting ONLY for new sheets
             await sheetsRequest(':batchUpdate', 'POST', {
                 requests: [
                     { mergeCells: { range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 9 }, mergeType: 'MERGE_ALL' } },
@@ -308,6 +338,10 @@ export async function deleteDealerSheet(sheetName: string): Promise<boolean> {
  * Appends a transaction to the dealer's individual ledger sheet
  */
 export async function syncTransactionToDealerSheet(dealerName: string, transaction: any, runningBalance: number): Promise<boolean> {
+    if (transaction.referenceId === 'BAL B/F') {
+        console.log('[SheetsDealers] Skipping sync for BAL B/F transaction (already in header)');
+        return true;
+    }
     const name = sanitizeTabName(dealerName);
     try {
         const isInvoice = transaction.type === 'INVOICE';
@@ -376,11 +410,12 @@ export async function batchWriteTransactionsToDealerSheet(
     openingBalance: number = 0
 ): Promise<boolean> {
     const name = sanitizeTabName(dealerName);
-    if (transactions.length === 0) return true;
+    const filteredTxns = transactions.filter(t => t.referenceId !== 'BAL B/F');
+    if (filteredTxns.length === 0) return true;
 
     try {
         let balance = Number(openingBalance) || 0;
-        const rows = transactions.map(txn => {
+        const rows = filteredTxns.map(txn => {
             const isInvoice = txn.type === 'INVOICE';
             if (isInvoice) balance += txn.amount;
             else balance -= txn.amount;
@@ -546,17 +581,24 @@ async function ensureIndexTabExists(): Promise<void> {
 async function ensureTabExists(name: string = DEALERS_SHEET_NAME, headers: string[] = DEALER_HEADERS): Promise<void> {
     try {
         const res = await sheetsRequest('?fields=sheets.properties.title');
-        const existing = (res.sheets || []).map((s: any) => s.properties.title);
+        const existing = (res.sheets || []).map((s: any) => s.properties.title.trim().toLowerCase());
 
-        if (!existing.includes(name)) {
+        if (!existing.includes(name.trim().toLowerCase())) {
             console.log(`[SheetsDealers] Creating tab: ${name}`);
-            await sheetsRequest(':batchUpdate', 'POST', {
-                requests: [{
-                    addSheet: {
-                        properties: { title: name }
-                    }
-                }]
-            });
+            try {
+                await sheetsRequest(':batchUpdate', 'POST', {
+                    requests: [{
+                        addSheet: {
+                            properties: { title: name }
+                        }
+                    }]
+                });
+            } catch (createErr: any) {
+                if (!createErr.message?.includes('already exists')) {
+                    throw createErr;
+                }
+                console.log(`[SheetsDealers] Tab ${name} already exists, skipping creation.`);
+            }
 
             // Initialize with headers
             const colLetter = String.fromCharCode(64 + headers.length);

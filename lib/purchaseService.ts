@@ -411,12 +411,35 @@ export async function createSupplier(supplier: Omit<SupplierData, 'id' | 'create
     const newSupplier: SupplierData = {
         id: crypto.randomUUID(),
         ...supplier,
-        balance: 0,
+        balance: supplier.openingBalance || 0,
         createdAt: new Date(),
         updatedAt: new Date()
     };
 
     saveLocalData(KEYS.SUPPLIERS, [newSupplier, ...suppliers]);
+
+    // NEW: Create 'BAL B/F' bill for FIFO allocation
+    if (newSupplier.openingBalance && newSupplier.openingBalance > 0) {
+        try {
+            const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+            const newBill: PurchaseBillData = {
+                id: crypto.randomUUID(),
+                supplierId: newSupplier.id,
+                supplierName: newSupplier.name,
+                billNumber: 'BAL B/F',
+                billDate: newSupplier.openingBalanceDate ? new Date(newSupplier.openingBalanceDate) : new Date(),
+                amount: newSupplier.openingBalance,
+                paidAmount: 0,
+                balance: newSupplier.openingBalance,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+            saveLocalData(KEYS.BILLS, [newBill, ...bills]);
+        } catch (e) {
+            console.warn('[PurchaseService] Failed to create BAL B/F bill:', e);
+        }
+    }
+
     return newSupplier;
 }
 
@@ -434,6 +457,55 @@ export async function updateSupplier(supplierId: string, updates: Partial<Suppli
 
     suppliers[index] = updatedSupplier;
     saveLocalData(KEYS.SUPPLIERS, suppliers);
+
+    // NEW: Update or Create 'BAL B/F' bill for FIFO allocation
+    if (updates.openingBalance !== undefined || updates.openingBalanceDate !== undefined) {
+        try {
+            const bills = getLocalData<PurchaseBillData>(KEYS.BILLS);
+            const existingOBBill = bills.find(b => b.supplierId === supplierId && b.billNumber === 'BAL B/F');
+            
+            const hasOB = updatedSupplier.openingBalance && updatedSupplier.openingBalance > 0;
+            
+            if (hasOB) {
+                const obAmount = updatedSupplier.openingBalance || 0;
+                if (existingOBBill) {
+                    existingOBBill.amount = obAmount;
+                    existingOBBill.balance = obAmount - existingOBBill.paidAmount;
+                    if (updatedSupplier.openingBalanceDate) {
+                        existingOBBill.billDate = new Date(updatedSupplier.openingBalanceDate);
+                    }
+                    existingOBBill.updatedAt = new Date();
+                } else {
+                    const newBill: PurchaseBillData = {
+                        id: crypto.randomUUID(),
+                        supplierId: updatedSupplier.id,
+                        supplierName: updatedSupplier.name,
+                        billNumber: 'BAL B/F',
+                        billDate: updatedSupplier.openingBalanceDate ? new Date(updatedSupplier.openingBalanceDate) : new Date(),
+                        amount: obAmount,
+                        paidAmount: 0,
+                        balance: obAmount,
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    };
+                    bills.push(newBill);
+                }
+                saveLocalData(KEYS.BILLS, bills);
+            } else if (existingOBBill) {
+                // Remove if OB is now 0
+                const filteredBills = bills.filter(b => b.id !== existingOBBill.id);
+                saveLocalData(KEYS.BILLS, filteredBills);
+            }
+        } catch (e) {
+            console.warn('[PurchaseService] Failed to manage BAL B/F bill update:', e);
+        }
+    }
+
+    // If openingBalance was updated, we need to recalculate balance
+    if (updates.openingBalance !== undefined) {
+        await recalculateSupplierBalance(supplierId);
+    }
+
     return updatedSupplier;
 }
 
@@ -1054,12 +1126,25 @@ export async function getSupplierStatement(
     startDate?: Date,
     endDate?: Date
 ): Promise<SupplierStatementEntry[]> {
+    const supplier = getLocalData<SupplierData>(KEYS.SUPPLIERS).find(s => s.id === supplierId);
+    const openingBalanceRow: SupplierStatementEntry[] = (supplier?.openingBalance && supplier.openingBalance !== 0) ? [{
+        date: supplier.openingBalanceDate ? new Date(supplier.openingBalanceDate) : new Date('2000-01-01'),
+        type: 'BILL' as any,
+        reference: 'Bal B/F',
+        debit: 0,
+        credit: 0,
+        balance: supplier.openingBalance,
+        notes: 'Opening Balance'
+    }] : [];
+
+    // Map Bills (Purchases) as CREDIT (Increase amount we owe)
+    // Map Payments as DEBIT (Decrease amount we owe)
     const bills = (await getPurchaseBills(supplierId)).map(b => ({
         date: new Date(b.billDate),
         type: 'BILL' as const,
         reference: b.billNumber,
-        debit: b.amount,
-        credit: 0,
+        debit: 0,
+        credit: b.amount,
         balance: 0,
         notes: b.notes
     }));
@@ -1068,13 +1153,40 @@ export async function getSupplierStatement(
         date: new Date(p.paymentDate),
         type: 'PAYMENT' as const,
         reference: p.paymentNumber,
-        debit: 0,
-        credit: p.amount,
+        debit: p.amount,
+        credit: 0,
         balance: 0,
         notes: p.notes
     }));
 
-    let entries = [...bills, ...payments];
+    // If we have a 'BAL B/F' bill, we don't need the manual openingBalanceRow
+    const obBill = bills.find(b => b.reference === 'BAL B/F');
+    const hasBALBF = !!obBill;
+
+    // Create a specialized opening row from the bill if it exists, or from supplier data
+    let finalOpeningRow: SupplierStatementEntry[] = [];
+    if (hasBALBF) {
+        finalOpeningRow = [{
+            date: obBill.date,
+            type: 'BILL' as any,
+            reference: 'BAL B/F',
+            debit: 0,
+            credit: 0, // Hide from columns as requested
+            balance: obBill.credit, // This will be the starting point
+            notes: 'Opening Balance'
+        }];
+    } else if (openingBalanceRow.length > 0) {
+        finalOpeningRow = [{
+            ...openingBalanceRow[0],
+            debit: 0,
+            credit: 0
+        }];
+    }
+
+    // Filter out the 'BAL B/F' from the main bills list to avoid double counting and handle it separately
+    const otherBills = bills.filter(b => b.reference !== 'BAL B/F');
+
+    let entries = [...finalOpeningRow, ...otherBills, ...payments];
 
     if (startDate) {
         entries = entries.filter(e => e.date >= startDate);
@@ -1083,15 +1195,29 @@ export async function getSupplierStatement(
         entries = entries.filter(e => e.date <= endDate);
     }
 
-    entries.sort((a, b) => a.date.getTime() - b.date.getTime());
-
-    let runningBalance = 0;
-    entries.forEach(entry => {
-        runningBalance += entry.debit - entry.credit;
-        entry.balance = runningBalance;
+    // Sort by date then type (BILL before PAYMENT on same date)
+    entries.sort((a, b) => {
+        if (a.date.getTime() !== b.date.getTime()) {
+            return a.date.getTime() - b.date.getTime();
+        }
+        // If same date, Opening Balance (BAL B/F) first
+        if (a.reference === 'BAL B/F') return -1;
+        if (b.reference === 'BAL B/F') return 1;
+        return a.type === 'BILL' ? -1 : 1;
     });
 
-    return entries;
+    // Calculate running balance starting from the Opening Balance
+    let currentBalance = 0;
+    const result = entries.map(e => {
+        if (e.reference === 'BAL B/F') {
+            currentBalance = e.balance;
+            return { ...e };
+        }
+        currentBalance += (e.credit - e.debit);
+        return { ...e, balance: currentBalance };
+    });
+
+    return result;
 }
 
 // ============================================
@@ -1108,14 +1234,22 @@ export async function getTotalPayables(): Promise<number> {
 // ============================================
 
 export async function recalculateSupplierBalance(supplierId: string): Promise<number> {
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplier = suppliers.find(s => s.id === supplierId);
+    if (!supplier) return 0;
+
     const bills = await getPurchaseBills(supplierId);
     const payments = await getPurchasePayments(supplierId);
 
     const totalBills = bills.reduce((sum, b) => sum + b.amount, 0);
     const totalPayments = payments.reduce((sum, p) => sum + p.amount, 0);
-    const newBalance = totalBills - totalPayments;
+    
+    // Debit (+) increases balance (what we owe), Credit (-) decreases it (payments)
+    // If a 'BAL B/F' bill exists, it's already in totalBills, so we use 0 for the initial term
+    const hasBALBF = bills.some(b => b.billNumber === 'BAL B/F');
+    const baseBalance = hasBALBF ? 0 : (supplier.openingBalance || 0);
+    const newBalance = baseBalance + totalBills - totalPayments;
 
-    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
     const index = suppliers.findIndex(s => s.id === supplierId);
     if (index !== -1) {
         suppliers[index].balance = newBalance;
@@ -1187,52 +1321,75 @@ export async function syncHistoricalVouchers(vouchers: HistoricalVoucher[], supp
             const isPayment = vchTypeLower.includes('pay') || vchTypeLower.includes('rec') ||
                 vchTypeLower.includes('jou') || (vch.debit > 0 && vch.credit === 0);
             const isOpening = particulars.includes('opening balance');
-
             if (isPurchase || (isOpening && vch.credit > 0)) {
-                const existing = currentBills.find(b => b.id === deterministicId);
-                if (!existing) {
-                    const billDate = isOpening ? new Date('2019-04-01') : vchDate;
-                    currentBills.push({
-                        id: deterministicId,
-                        supplierId: supplier.id,
-                        supplierName: supplier.name,
-                        billNumber: vch.vchNo || (isOpening ? 'OPENING' : `P-${dateStr}`),
-                        billDate: billDate,
-                        amount: vch.credit || vch.debit || 0,
-                        paidAmount: 0,
-                        balance: vch.credit || vch.debit || 0,
-                        notes: `Historical: ${vch.particulars}`,
-                        createdAt: new Date(),
-                        updatedAt: new Date()
-                    });
-                    billsModified = true;
-                    suppliersToReallocate.add(supplier.id);
+                const amount = vch.credit || vch.debit || 0;
+                const billDate = isOpening ? new Date('2019-04-01') : vchDate;
+
+                // Deduplication: Check if a manual bill with same ref, amount and date exists
+                const manualMatch = manualBills.find(b =>
+                    b.supplierId === supplier.id &&
+                    b.billNumber === vch.vchNo &&
+                    Math.abs(b.amount - amount) < 0.01 &&
+                    new Date(b.billDate).toDateString() === billDate.toDateString()
+                );
+
+                if (!manualMatch) {
+                    const existing = currentBills.find(b => b.id === deterministicId);
+                    if (!existing) {
+                        currentBills.push({
+                            id: deterministicId,
+                            supplierId: supplier.id,
+                            supplierName: supplier.name,
+                            billNumber: vch.vchNo || (isOpening ? 'OPENING' : `P-${dateStr}`),
+                            billDate: billDate,
+                            amount: amount,
+                            paidAmount: 0,
+                            balance: amount,
+                            notes: `Historical: ${vch.particulars}`,
+                            createdAt: new Date(),
+                            updatedAt: new Date()
+                        });
+                        billsModified = true;
+                        suppliersToReallocate.add(supplier.id);
+                    }
                 }
             } else if (isPayment || (isOpening && vch.debit > 0)) {
-                const existing = currentPayments.find(p => p.id === deterministicId);
-                if (!existing) {
-                    const payDate = isOpening ? new Date('2019-04-01') : vchDate;
+                const amount = vch.debit || vch.credit || 0;
+                const payDate = isOpening ? new Date('2019-04-01') : vchDate;
 
-                    // Detect Payment Mode from Particulars
-                    let paymentMode: any = 'OTHER';
-                    if (particulars.includes('cash')) paymentMode = 'CASH';
-                    if (particulars.includes('cheque')) paymentMode = 'CHEQUE';
-                    if (particulars.includes('bank') || particulars.includes('neft') || particulars.includes('transfer')) paymentMode = 'BANK_TRANSFER';
-                    if (particulars.includes('upi') || particulars.includes('gpay')) paymentMode = 'UPI';
+                // Deduplication: Check if a manual payment with same ref, amount and date exists
+                const manualMatch = manualPayments.find(p =>
+                    p.supplierId === supplier.id &&
+                    (p.paymentNumber === vch.vchNo || p.referenceNumber === vch.vchNo) &&
+                    Math.abs(p.amount - amount) < 0.01 &&
+                    new Date(p.paymentDate).toDateString() === payDate.toDateString()
+                );
 
-                    currentPayments.push({
-                        id: deterministicId,
-                        supplierId: supplier.id,
-                        supplierName: supplier.name,
-                        paymentNumber: vch.vchNo || (isOpening ? 'OPENING-PMT' : `PMT-${dateStr}`),
-                        paymentDate: payDate,
-                        amount: vch.debit || vch.credit || 0,
-                        paymentMode: paymentMode,
-                        notes: `Historical: ${vch.particulars}`,
-                        createdAt: new Date()
-                    });
-                    paymentsModified = true;
-                    suppliersToReallocate.add(supplier.id);
+                if (!manualMatch) {
+                    const existing = currentPayments.find(p => p.id === deterministicId);
+                    if (!existing) {
+                        // Detect Payment Mode from Particulars
+                        let paymentMode: any = 'OTHER';
+                        if (particulars.includes('cash')) paymentMode = 'CASH';
+                        if (particulars.includes('cheque')) paymentMode = 'CHEQUE';
+                        if (particulars.includes('bank') || particulars.includes('neft') || particulars.includes('transfer')) paymentMode = 'BANK_TRANSFER';
+                        if (particulars.includes('upi') || particulars.includes('gpay')) paymentMode = 'UPI';
+
+                        currentPayments.push({
+                            id: deterministicId,
+                            supplierId: supplier.id,
+                            supplierName: supplier.name,
+                            paymentNumber: vch.vchNo || (isOpening ? 'OPENING-PMT' : `PMT-${dateStr}`),
+                            paymentDate: payDate,
+                            amount: amount,
+                            paymentMode: paymentMode,
+                            referenceNumber: vch.vchNo,
+                            notes: `Historical: ${vch.particulars}`,
+                            createdAt: new Date()
+                        });
+                        paymentsModified = true;
+                        suppliersToReallocate.add(supplier.id);
+                    }
                 }
             }
         });

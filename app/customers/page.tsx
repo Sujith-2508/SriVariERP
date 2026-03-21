@@ -200,7 +200,8 @@ export default function DealerLedger() {
         district: 'Tamil Nadu',
         pinCode: '',
         gstNumber: '',
-        openingBalance: 0
+        openingBalance: '' as number | '',
+        openingBalanceDate: getISTDateString()
     });
 
     // Edit Dealer State
@@ -216,7 +217,8 @@ export default function DealerLedger() {
         district: '',
         pinCode: '',
         gstNumber: '',
-        openingBalance: 0
+        openingBalance: '' as number | '',
+        openingBalanceDate: getISTDateString()
     });
 
     // Refs for Add Dealer sequential navigation
@@ -229,6 +231,8 @@ export default function DealerLedger() {
         useRef<HTMLInputElement>(null),
         useRef<HTMLInputElement>(null),
         useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null), // opening balance
+        useRef<HTMLInputElement>(null), // opening balance date
     ];
     const { handleKeyDown: handleAddKeyDownBase } = useEnterKeyNavigation(addRefs);
     const [addPhoneError, setAddPhoneError] = useState<string>('');
@@ -260,6 +264,8 @@ export default function DealerLedger() {
         useRef<HTMLInputElement>(null),
         useRef<HTMLInputElement>(null),
         useRef<HTMLInputElement>(null),
+        useRef<HTMLInputElement>(null), // opening balance
+        useRef<HTMLInputElement>(null), // opening balance date
     ];
     const { handleKeyDown: handleEditKeyDownBase } = useEnterKeyNavigation(editRefs);
     const [editPhoneError, setEditPhoneError] = useState<string>('');
@@ -301,7 +307,8 @@ export default function DealerLedger() {
             await addDealer({
                 ...newDealer,
                 balance: Number(newDealer.openingBalance) || 0,
-                openingBalance: Number(newDealer.openingBalance) || 0
+                openingBalance: Number(newDealer.openingBalance) || 0,
+                openingBalanceDate: newDealer.openingBalanceDate
             });
             setIsAddModalOpen(false);
             setNewDealer({
@@ -314,7 +321,8 @@ export default function DealerLedger() {
                 district: 'Tamil Nadu',
                 pinCode: '',
                 gstNumber: '',
-                openingBalance: 0
+                openingBalance: '' as number | '',
+                openingBalanceDate: getISTDateString()
             });
             showToast('Dealer added successfully', 'success');
         } catch (error) {
@@ -337,7 +345,12 @@ export default function DealerLedger() {
             district: dealer.district,
             pinCode: dealer.pinCode,
             gstNumber: dealer.gstNumber || '',
-            openingBalance: dealer.openingBalance || 0
+            openingBalance: (dealer.openingBalance === 0 ? '' : dealer.openingBalance) as number | '',
+            openingBalanceDate: dealer.openingBalanceDate
+                ? (typeof dealer.openingBalanceDate === 'string'
+                    ? dealer.openingBalanceDate
+                    : dealer.openingBalanceDate.toISOString().split('T')[0])
+                : getISTDateString()
         });
         setIsEditModalOpen(true);
     };
@@ -368,6 +381,7 @@ export default function DealerLedger() {
                 pinCode: editDealer.pinCode,
                 gstNumber: editDealer.gstNumber,
                 openingBalance: Number(editDealer.openingBalance) || 0,
+                openingBalanceDate: editDealer.openingBalanceDate,
                 balance: (editingDealer.balance - (editingDealer.openingBalance || 0)) + (Number(editDealer.openingBalance) || 0)
             });
             setIsEditModalOpen(false);
@@ -382,7 +396,8 @@ export default function DealerLedger() {
                 district: '',
                 pinCode: '',
                 gstNumber: '',
-                openingBalance: 0
+                openingBalance: '' as number | '',
+                openingBalanceDate: getISTDateString()
             });
             showToast('Dealer updated successfully', 'success');
         } catch (error) {
@@ -422,7 +437,7 @@ export default function DealerLedger() {
     const getDealerStatement = (dealerId: string) => {
         const d = dealers.find(d => d.id === dealerId);
         const dealerTransactions = transactions.filter(t => t.customerId === dealerId);
-        return calculateDealerStatement(dealerTransactions, d?.openingBalance || 0);
+        return calculateDealerStatement(dealerTransactions, d?.openingBalance || 0, d?.openingBalanceDate);
     };
 
     // ─── Date range helpers ────────────────────────────────────────────────
@@ -975,35 +990,48 @@ export default function DealerLedger() {
         );
 
         // Combine and sort invoices and payments for statement generation
+        let runningBalance = 0;
         const statementEntries = [
-            // Add Opening Balance as a virtual entry if non-zero
-            ...(summary.openingBalance !== 0 ? [{
-                date: invoices.length > 0 ? new Date(Math.min(...invoices.map(i => i.date.getTime()), ...payments.map(p => p.date.getTime()))) : new Date(),
-                reference: 'Balance B/F',
-                type: 'Opening Balance',
-                debit: summary.openingBalance < 0 ? Math.abs(summary.openingBalance) : 0, 
-                credit: summary.openingBalance > 0 ? Math.abs(summary.openingBalance) : 0,
-                balance: summary.openingBalance
-            }] : []),
             ...invoices.map(inv => ({
                 date: inv.date,
                 reference: inv.referenceId,
-                type: 'Invoice',
-                debit: inv.amount,
+                type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
+                debit: inv.referenceId === 'BAL B/F' ? 0 : inv.amount,
                 credit: 0,
-                balance: 0, // Will be calculated dynamically
+                balance: 0,
                 originalTransaction: inv.originalTransaction
             })),
             ...payments.map(pay => ({
                 date: pay.date,
-                reference: pay.receiptRef,
+                reference: pay.referenceId,
                 type: 'Payment',
                 debit: 0,
                 credit: pay.amount,
-                balance: 0, // Will be calculated dynamically
-                originalTransaction: pay // Keep original payment object for details
+                balance: 0,
+                originalTransaction: pay.originalTransaction
             }))
-        ].sort((a, b) => a.date.getTime() - b.date.getTime());
+        ]
+        .sort((a, b) => {
+            const dateA = a.date.getTime();
+            const dateB = b.date.getTime();
+            if (dateA !== dateB) return dateA - dateB;
+            
+            // BAL B/F always first if dates match
+            if (a.reference === 'BAL B/F') return -1;
+            if (b.reference === 'BAL B/F') return 1;
+            
+            return 0;
+        })
+        .map((entry, idx) => {
+            if (idx === 0) {
+                runningBalance = entry.debit - entry.credit;
+                entry.balance = runningBalance;
+            } else {
+                runningBalance += entry.debit - entry.credit;
+                entry.balance = runningBalance;
+            }
+            return entry;
+        });
 
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
@@ -1110,209 +1138,90 @@ export default function DealerLedger() {
                         </p>
                     </div>
 
-                    {/* Statement Table */}
+                    {/* Unified Ledger Account Table */}
                     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50">
-                            <h3 className="font-semibold text-slate-700">Invoice History (FIFO View)</h3>
+                        <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                <h3 className="font-semibold text-slate-700">Ledger Account</h3>
+                                <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-100 uppercase tracking-wider">
+                                    <Clock size={10} />
+                                    FIFO Consolidated
+                                </div>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-medium italic">Dr = Receivable (Sale/OB) | Cr = Received (Receipt)</span>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                                     <tr>
-                                        <th className="p-4 text-left font-medium">
-                                            <div className="flex items-center gap-1">
-                                                <Calendar size={14} />
-                                                Bill Date
-                                            </div>
-                                        </th>
-                                        <th className="p-4 text-left font-medium">Invoice No</th>
-                                        <th className="p-4 text-right font-medium">Amount</th>
-                                        <th className="p-4 text-right font-medium">Paid</th>
-                                        <th className="p-4 text-right font-medium">Balance</th>
-                                        <th className="p-4 text-center font-medium">Credit Days</th>
-                                        <th className="p-4 text-center font-medium">Due Date</th>
-                                        <th className="p-4 text-right font-medium text-emerald-600">Profit</th>
-                                        <th className="p-4 text-center font-medium">Status</th>
+                                        <th className="p-4 text-left font-medium w-32">Date</th>
+                                        <th className="p-4 text-left font-medium">Particulars</th>
+                                        <th className="p-4 text-left font-medium w-32">Vch Type</th>
+                                        <th className="p-4 text-left font-medium">Vch Ref.</th>
+                                        <th className="p-4 text-right font-medium">Debit (₹)</th>
+                                        <th className="p-4 text-right font-medium">Credit (₹)</th>
+                                        <th className="p-4 text-right font-medium">Balance (₹)</th>
+                                        <th className="p-4 text-center font-medium">Type</th>
                                         <th className="p-4 text-center font-medium">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {invoices.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={9} className="p-8 text-center text-slate-400">
-                                                No invoices found for this dealer
+                                    {statementEntries.map((entry, idx) => (
+                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                            <td className="p-4 text-slate-700">
+                                                {entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                                             </td>
-                                        </tr>
-                                    ) : (
-                                        invoices.map((inv) => {
-                                            const isOverdueRow = inv.isOverdue && inv.balance > 0;
-                                            const daysOverdue = getDaysOverdue(inv.dueDate || undefined);
-                                            return (
-                                                <tr
-                                                    key={inv.id}
-                                                    onClick={() => setSelectedInvoice(inv.originalTransaction)}
-                                                    className={`cursor-pointer transition-all ${isOverdueRow
-                                                        ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-500'
-                                                        : 'hover:bg-slate-50'
-                                                        }`}
-                                                >
-                                                    <td className="p-4 text-slate-700">
-                                                        {inv.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <span className={`font-mono px-2 py-1 rounded text-xs font-bold ${isOverdueRow ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
-                                                            }`}>
-                                                            {inv.referenceId}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-right font-medium text-slate-800">
-                                                        ₹{inv.amount.toLocaleString()}
-                                                    </td>
-                                                    <td className="p-4 text-right text-emerald-600 font-medium">
-                                                        ₹{inv.paid.toLocaleString()}
-                                                    </td>
-                                                    <td className="p-4 text-right font-bold text-red-600">
-                                                        {inv.balance > 0 ? `₹${inv.balance.toLocaleString()}` : '-'}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <span className="text-slate-600">{inv.creditDays} days</span>
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <span className={`text-sm ${isOverdueRow ? 'text-red-600 font-bold' : 'text-slate-600'}`}>
-                                                            {inv.dueDate?.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) || 'N/A'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-right">
-                                                        {(() => {
-                                                            const profit = calculateInvoiceProfit(inv.originalTransaction, products);
-                                                            return (
-                                                                <div className="flex flex-col items-end">
-                                                                    <span className="font-bold text-emerald-600 text-sm">
-                                                                        {formatCurrency(profit.netProfit)}
-                                                                    </span>
-                                                                    <span className="text-xs text-slate-400">
-                                                                        {profit.profitPercentage.toFixed(1)}%
-                                                                    </span>
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        {inv.balance === 0 ? (
-                                                            <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">
-                                                                Paid
-                                                            </span>
-                                                        ) : isOverdueRow ? (
-                                                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold flex items-center justify-center gap-1">
-                                                                <AlertTriangle size={10} />
-                                                                {daysOverdue}d overdue
-                                                            </span>
-                                                        ) : inv.paid > 0 ? (
-                                                            <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">
-                                                                Partial
-                                                            </span>
-                                                        ) : (
-                                                            <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">
-                                                                Pending
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <div className="flex justify-center gap-1">
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setSelectedInvoice(inv.originalTransaction);
-                                                                }}
-                                                                className="p-2 hover:bg-slate-200 rounded-full text-slate-500 hover:text-emerald-600 transition-colors"
-                                                                title="View Details"
-                                                            >
-                                                                <Eye size={16} />
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleDeleteTransaction(inv.id, inv.referenceId, 'Invoice');
-                                                                }}
-                                                                className="p-2 hover:bg-red-50 rounded-full text-slate-400 hover:text-red-600 transition-colors"
-                                                                title="Delete Invoice"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="p-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 flex items-center gap-2">
-                            <span className="text-blue-600">💡</span>
-                            <span>Click on any invoice row to view detailed payment history</span>
-                        </div>
-                    </div>
-
-                    {/* Collection History */}
-                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50">
-                            <h3 className="font-semibold text-slate-700">Collection History</h3>
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                                    <tr>
-                                        <th className="p-4 text-left font-medium">Date</th>
-                                        <th className="p-4 text-left font-medium">Receipt No</th>
-                                        <th className="p-4 text-right font-medium">Amount</th>
-                                        <th className="p-4 text-left font-medium">Collected By</th>
-                                        <th className="p-4 text-center font-medium">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {payments.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={4} className="p-8 text-center text-slate-400">
-                                                No collections recorded yet
+                                            <td className="p-4 font-medium text-slate-800">
+                                                {entry.type === 'Opening Balance' ? 'Opening Balance' : 
+                                                 entry.type === 'Invoice' ? `Sales - ${selectedDealer.businessName}` : 
+                                                 `Receipt - ${selectedDealer.businessName}`}
                                             </td>
-                                        </tr>
-                                    ) : (
-                                        payments.map((payment, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-50">
-                                                <td className="p-4 text-slate-700">
-                                                    {payment.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-mono text-emerald-600 bg-emerald-50 px-2 py-1 rounded text-xs font-bold">
-                                                            {payment.referenceId}
-                                                        </span>
-                                                        {payment.notes?.toLowerCase().includes('stock return') && (
-                                                            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-bold uppercase">
-                                                                Stock Return
-                                                            </span>
-                                                        )}
+                                            <td className="p-4 text-slate-500 font-medium italic text-xs">
+                                                {entry.type}
+                                            </td>
+                                            <td className="p-4">
+                                                <span className="font-mono px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">
+                                                    {entry.reference}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-right text-red-600 font-bold">
+                                                {entry.debit > 0 ? entry.debit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
+                                            </td>
+                                            <td className="p-4 text-right text-emerald-600 font-bold">
+                                                {entry.credit > 0 ? entry.credit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
+                                            </td>
+                                            <td className="p-4 text-right font-bold text-slate-900 bg-slate-50/30">
+                                                ₹{Math.abs(entry.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter ${
+                                                    entry.balance >= 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                                                }`}>
+                                                    {entry.balance >= 0 ? 'Dr' : 'Cr'}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                {entry.originalTransaction && (
+                                                    <div className="flex justify-center gap-1">
+                                                        <button
+                                                            onClick={() => setSelectedInvoice(entry.originalTransaction)}
+                                                            className="p-1.5 hover:bg-slate-200 rounded-full text-slate-400 hover:text-emerald-600 transition-colors"
+                                                            title="View Details"
+                                                        >
+                                                            <Eye size={14} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteTransaction(entry.originalTransaction.id, entry.reference, entry.type === 'Invoice' ? 'Invoice' : 'Receipt')}
+                                                            className="p-1.5 hover:bg-red-50 rounded-full text-slate-400 hover:text-red-600 transition-colors"
+                                                            title="Delete"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
                                                     </div>
-                                                </td>
-                                                <td className="p-4 text-right font-bold text-emerald-600">
-                                                    ₹{payment.amount.toLocaleString()}
-                                                </td>
-                                                <td className="p-4 text-slate-600">
-                                                    {payment.agentName || 'Admin'}
-                                                </td>
-                                                <td className="p-4 text-center">
-                                                    <button
-                                                        onClick={() => handleDeleteTransaction(payment.id, payment.referenceId, 'Receipt')}
-                                                        className="p-2 hover:bg-red-50 rounded-full text-slate-400 hover:text-red-600 transition-colors"
-                                                        title="Delete Receipt"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
@@ -1639,11 +1548,24 @@ export default function DealerLedger() {
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
                                     <input
+                                        ref={addRefs[8] as React.RefObject<HTMLInputElement>}
+                                        onKeyDown={(e) => handleAddKeyDown(e)}
                                         type="number"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                                         value={newDealer.openingBalance}
-                                        onChange={e => setNewDealer({ ...newDealer, openingBalance: Number(e.target.value) })}
+                                        onChange={e => setNewDealer({ ...newDealer, openingBalance: e.target.value === '' ? '' : Number(e.target.value) })}
                                         placeholder="0.00"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance Date</label>
+                                    <input
+                                        ref={addRefs[9] as React.RefObject<HTMLInputElement>}
+                                        onKeyDown={(e) => handleAddKeyDown(e)}
+                                        type="date"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                                        value={newDealer.openingBalanceDate}
+                                        onChange={e => setNewDealer({ ...newDealer, openingBalanceDate: e.target.value })}
                                     />
                                 </div>
                             </div>
@@ -1817,11 +1739,24 @@ export default function DealerLedger() {
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
                                     <input
+                                        ref={editRefs[8] as React.RefObject<HTMLInputElement>}
+                                        onKeyDown={(e) => handleEditKeyDown(e)}
                                         type="number"
                                         className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                         value={editDealer.openingBalance}
-                                        onChange={e => setEditDealer({ ...editDealer, openingBalance: Number(e.target.value) })}
+                                        onChange={e => setEditDealer({ ...editDealer, openingBalance: e.target.value === '' ? '' : Number(e.target.value) })}
                                         placeholder="0.00"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance Date</label>
+                                    <input
+                                        ref={editRefs[9] as React.RefObject<HTMLInputElement>}
+                                        onKeyDown={(e) => handleEditKeyDown(e)}
+                                        type="date"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={editDealer.openingBalanceDate}
+                                        onChange={e => setEditDealer({ ...editDealer, openingBalanceDate: e.target.value })}
                                     />
                                 </div>
                             </div>

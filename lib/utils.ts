@@ -36,9 +36,10 @@ export interface PaymentStatement {
     remaining: number; // For calculation purposes
     notes?: string;
     agentName?: string;
+    originalTransaction: Transaction;
 }
 
-export function calculateDealerStatement(transactions: Transaction[], openingBalance: number = 0) {
+export function calculateDealerStatement(transactions: Transaction[], openingBalance: number = 0, openingBalanceDate?: Date | string) {
     // 1. Separate Invoices and Payments
     const invoices: InvoiceStatement[] = [];
     const payments: PaymentStatement[] = [];
@@ -48,6 +49,10 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
         const dateA = new Date(a.date).getTime();
         const dateB = new Date(b.date).getTime();
         if (dateA !== dateB) return dateA - dateB;
+
+        // Special case: BAL B/F always first among same-day transactions
+        if (a.referenceId === 'BAL B/F') return -1;
+        if (b.referenceId === 'BAL B/F') return 1;
 
         // Fallback to creation time for same-day transactions
         const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -86,7 +91,8 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
                 amount: txn.amount,
                 remaining: txn.amount,
                 notes: txn.notes,
-                agentName: txn.agentName
+                agentName: txn.agentName,
+                originalTransaction: txn
             });
         }
     });
@@ -127,7 +133,9 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
     });
 
     // 3. Return structured data with summary precision fixed
-    const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.amount, 0);
+    // IMPORTANT: If we have a 'BAL B/F' transaction, it's already in the 'invoices' array.
+    // We filter it out of 'totalInvoiced' to avoid double-counting when we add 'openingBalance' in line 138.
+    const totalInvoiced = invoices.filter(inv => inv.referenceId !== 'BAL B/F').reduce((sum, inv) => sum + inv.amount, 0);
     const totalPaidOnInvoices = invoices.reduce((sum, inv) => sum + inv.paid, 0);
     const totalUnapplied = payments.reduce((sum, p) => sum + p.remaining, 0);
 
@@ -140,6 +148,7 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
         payments,
         summary: {
             openingBalance: Math.round(openingBalance * 100) / 100,
+            openingBalanceDate,
             totalInvoiced: Math.round(totalInvoiced * 100) / 100,
             totalPaid: Math.round((totalPaidOnInvoices + totalUnapplied) * 100) / 100,
             totalOutstanding: Math.round(totalOutstanding * 100) / 100,

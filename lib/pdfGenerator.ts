@@ -718,23 +718,11 @@ export const generateStatementPDFBase64 = async (
 
     // Combine and sort invoices and payments
     const statementEntries = [
-        // Add Opening Balance as a virtual entry if non-zero
-        ...(summary.openingBalance !== 0 ? [{
-            date: invoices.length > 0 || payments.length > 0 
-                ? new Date(Math.min(...invoices.map(i => i.date.getTime()), ...payments.map(p => p.date.getTime()))) 
-                : new Date(),
-            ref: 'Balance B/F',
-            type: 'Opening Balance',
-            amount: summary.openingBalance > 0 ? Math.abs(summary.openingBalance) : 0,
-            paid: summary.openingBalance < 0 ? Math.abs(summary.openingBalance) : 0,
-            balance: summary.openingBalance,
-            createdAt: undefined
-        }] : []),
         ...invoices.map(inv => ({
             date: new Date(inv.date),
             ref: inv.referenceId,
-            type: 'Invoice',
-            amount: inv.amount,
+            type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
+            amount: inv.referenceId === 'BAL B/F' ? 0 : inv.amount,
             paid: inv.paid,
             balance: inv.balance,
             notes: inv.originalTransaction?.notes || '',
@@ -863,31 +851,39 @@ export const generateSupplierStatementPDFBase64 = async (
     // 4. SUMMARY BOX
     doc.setDrawColor(200);
     doc.setFillColor(245, 245, 245);
-    doc.rect(130, 50, 65, 25, 'F');
-    doc.rect(130, 50, 65, 25, 'S');
+    doc.rect(130, 48, 65, 30, 'F');
+    doc.rect(130, 48, 65, 30, 'S');
 
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text('Current Balance:', 135, 58);
+    doc.setTextColor(100);
+    doc.text('Opening Balance:', 135, 54);
+    doc.text(`Rs. ${(supplier as any).openingBalance?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '0.00'}`, 190, 54, { align: 'right' });
+
+    doc.setTextColor(0);
+    doc.text('Current Balance:', 135, 62);
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     if (supplier.balance > 0) doc.setTextColor(220, 38, 38);
-    doc.text(`Rs. ${supplier.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 135, 66);
+    doc.text(`Rs. ${supplier.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 135, 70);
     doc.setTextColor(0);
 
     doc.line(10, 80, 200, 80);
 
     // 5. TRANSACTION TABLE
-    const tableColumn = ["Date", "Type", "Reference", "Particulars", "Debit (+)", "Credit (-)", "Balance"];
-    const tableRows = statementData.map(entry => [
-        new Date(entry.date).toLocaleDateString('en-GB'),
-        entry.type === 'BILL' ? 'Pur. Bill' : 'Payment',
-        entry.reference,
-        entry.notes || '-',
-        entry.debit > 0 ? entry.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
-        entry.credit > 0 ? entry.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
-        entry.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })
-    ]);
+    const tableColumn = ["Date", "Type", "Reference", "Particulars", "Credit (Cr)", "Debit (Dr)", "Balance"];
+    const tableRows = statementData.map(entry => {
+        const isOpening = entry.reference === 'Bal B/F';
+        return [
+            new Date(entry.date).toLocaleDateString('en-GB'),
+            isOpening ? 'Opening' : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment'),
+            entry.reference,
+            entry.notes || '-',
+            entry.credit > 0 ? entry.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
+            entry.debit > 0 ? entry.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
+            entry.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+        ];
+    });
 
     autoTable(doc, {
         head: [tableColumn],
