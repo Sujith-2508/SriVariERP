@@ -114,8 +114,8 @@ function MapController({ trackingData, selectedAgent }: { trackingData: AgentTra
                     });
                 }
             } else {
-                // Default view of Coimbatore/Regional area if no agents have locations
-                map.setView([10.6620, 77.0065], 9);
+                // Default view covering South India (TN, Kerala, Karnataka, Andhra)
+                map.setView([13.5, 79.0], 6);
             }
         }
     }, [map, trackingData, selectedAgent]);
@@ -238,8 +238,8 @@ export function LiveMap({ agentData, selectedAgentId, onAgentClick }: LiveMapPro
             </div>
 
             <MapContainer
-                center={[10.6620, 77.0065]}
-                zoom={9}
+                center={[13.5, 79.0]}
+                zoom={6}
                 style={{ height: '100%', width: '100%', zIndex: 1 }}
                 zoomControl={true}
             >
