@@ -600,6 +600,58 @@ function formatTableDate(date: Date): string {
     return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 }
 
+export async function rollOverSupplierYear(supplierId: string, closingDateStr: string, openingDateStr: string): Promise<boolean> {
+    const suppliers = getLocalData<SupplierData>(KEYS.SUPPLIERS);
+    const supplierIndex = suppliers.findIndex(s => s.id === supplierId);
+    if (supplierIndex === -1) return false;
+    const supplier = suppliers[supplierIndex];
+
+    const currentBalance = supplier.balance || 0;
+
+    // 1. Delete all local bills, payments, and allocations for this supplier WITHOUT triggering sheet deletes
+    const bills = getLocalData<PurchaseBillData>(KEYS.BILLS).filter(b => b.supplierId !== supplierId);
+    saveLocalData(KEYS.BILLS, bills);
+
+    const payments = getLocalData<PurchasePaymentData>(KEYS.PAYMENTS).filter(p => p.supplierId !== supplierId);
+    saveLocalData(KEYS.PAYMENTS, payments);
+
+    const allocations = getLocalData<PurchaseAllocationData>(KEYS.ALLOCATIONS).filter(a => bills.some(b => b.id === a.billId));
+    saveLocalData(KEYS.ALLOCATIONS, allocations);
+
+    // 2. Set new Opening Balance and Date
+    await updateSupplier(supplierId, {
+        openingBalance: currentBalance,
+        openingBalanceDate: openingDateStr
+    });
+
+    // 3. Append to Google Sheet
+    await appendToSupplierSheetTab(supplier.name, {
+        date: formatTableDate(new Date(closingDateStr)),
+        particulars: '================ FINANCIAL YEAR CLOSED ================',
+        vchType: '',
+        vchRef: '',
+        vchNo: '',
+        debit: 0,
+        credit: 0,
+        balance: Math.abs(currentBalance),
+        balanceType: currentBalance >= 0 ? 'Cr' : 'Dr'
+    });
+
+    await appendToSupplierSheetTab(supplier.name, {
+        date: formatTableDate(new Date(openingDateStr)),
+        particulars: `Opening Balance (Forwarded)`,
+        vchType: '',
+        vchRef: '',
+        vchNo: '',
+        debit: 0,
+        credit: 0,
+        balance: Math.abs(currentBalance),
+        balanceType: currentBalance >= 0 ? 'Cr' : 'Dr'
+    });
+
+    return true;
+}
+
 export async function createPurchaseBill(bill: {
     supplierId: string;
     billNumber: string;
@@ -680,8 +732,8 @@ export async function createPurchaseBill(bill: {
         const billDate = parseSheetDate(bill.billDate);
         const dateStr = formatTableDate(billDate);
 
-        // Particulars: Include bill number and notes if any
-        const parts = [`Purchase Bill #${bill.billNumber}`];
+        // Particulars: Match Tally-style "Purchase"
+        const parts = ['Purchase'];
         if (bill.notes) parts.push(bill.notes);
 
         const sheetRow: SheetRowData = {
@@ -944,7 +996,7 @@ export async function createPurchasePayment(payment: {
                     : payment.paymentMode === 'UPI' ? 'UPI'
                         : (payment.paymentMode || 'Payment');
 
-        const parts = [`By ${modeLabel}`];
+        const parts = [modeLabel];
         if (payment.referenceNumber) parts.push(`Ref: ${payment.referenceNumber}`);
         if (payment.notes) parts.push(payment.notes);
 

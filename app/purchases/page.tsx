@@ -1152,9 +1152,44 @@ export default function PurchasesPage() {
                                 <h2 className="text-xl font-bold text-slate-800">
                                     {editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
                                 </h2>
-                                <button onClick={() => setIsSupplierModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                                    <X size={24} />
-                                </button>
+                                <div className="flex gap-2 items-center">
+                                    {editingSupplier && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                const confirmed = await showConfirm({
+                                                    title: 'Close Financial Year',
+                                                    message: 'This will close the current financial year for this supplier. It will delete local transaction history (saving space) and append Closing/Opening rows to their Google Sheet ledger. Proceed?',
+                                                    confirmLabel: 'Yes, Roll Over',
+                                                    type: 'danger'
+                                                });
+                                                if (confirmed) {
+                                                    const defaultYear = new Date().getMonth() < 3 ? new Date().getFullYear() : new Date().getFullYear();
+                                                    const closingDateStr = prompt('Enter Closing Date (YYYY-MM-DD):', `${defaultYear}-03-31`);
+                                                    if (!closingDateStr) return;
+                                                    const openingDateStr = prompt('Enter New Opening Date (YYYY-MM-DD):', `${defaultYear}-04-01`);
+                                                    if (!openingDateStr) return;
+                                                    
+                                                    try {
+                                                        const { rollOverSupplierYear } = await import('@/lib/purchaseService');
+                                                        await rollOverSupplierYear(editingSupplier.id, closingDateStr, openingDateStr);
+                                                        showToast('Financial year rolled over successfully!', 'success');
+                                                        setIsSupplierModalOpen(false);
+                                                        loadData();
+                                                    } catch (e) {
+                                                        showToast('Rollover failed', 'error');
+                                                    }
+                                                }
+                                            }}
+                                            className="px-3 py-1.5 text-sm bg-amber-100 text-amber-700 hover:bg-amber-200 rounded-lg font-medium transition-colors"
+                                        >
+                                            Close Financial Year
+                                        </button>
+                                    )}
+                                    <button onClick={() => setIsSupplierModalOpen(false)} className="text-slate-400 hover:text-slate-600 ml-2">
+                                        <X size={24} />
+                                    </button>
+                                </div>
                             </div>
                             <form onSubmit={handleSupplierSubmit} className="p-6 space-y-4">
                                 <div className="grid grid-cols-2 gap-4">

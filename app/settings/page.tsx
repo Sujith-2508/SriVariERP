@@ -94,6 +94,7 @@ export default function SettingsPage() {
             const { data, error } = await supabase
                 .from('company_settings')
                 .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
+                .order('updated_at', { ascending: false })
                 .limit(1);
             if (!error && data && data.length > 0) {
                 const s = data[0];

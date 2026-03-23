@@ -469,6 +469,35 @@ export async function batchWriteTransactionsToDealerSheet(
 }
 
 /**
+ * Appends closing/opening balance rows to the dealer's sheet during a financial year rollover.
+ */
+export async function appendRolloverRowsToDealerSheet(dealerName: string, balance: number, closingDateStr: string, openingDateStr: string): Promise<void> {
+    const name = sanitizeTabName(dealerName);
+    try {
+        const closingRow = [
+            new Date(closingDateStr).toLocaleDateString('en-IN'), // A: Date
+            '================ FINANCIAL YEAR CLOSED ================', // B: Particulars
+            '', '', '', '', '', // C-G
+            Math.abs(balance), // H: Balance
+            balance >= 0 ? 'Cr' : 'Dr' // I: Type
+        ];
+        const openingRow = [
+            new Date(openingDateStr).toLocaleDateString('en-IN'), // A: Date
+            'Opening Balance (Forwarded)', // B: Particulars
+            '', '', '', '', '', // C-G
+            Math.abs(balance), // H: Balance
+            balance >= 0 ? 'Cr' : 'Dr' // I: Type
+        ];
+        
+        await sheetsRequest(`/values/'${name}'!A11:I1000000:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, 'POST', {
+            values: [closingRow, openingRow]
+        });
+    } catch (e) {
+        console.warn(`[SheetsDealers] Failed to append rollover rows for ${name}:`, e);
+    }
+}
+
+/**
  * Checks if a transaction already exists in a dealer's sheet by reference ID
  */
 export async function findTransactionRow(dealerName: string, referenceId: string): Promise<number> {

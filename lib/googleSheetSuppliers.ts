@@ -23,7 +23,7 @@ export interface SyncData {
 import { SupplierData } from '@/types';
 import { normalizeSupplierName } from './purchaseService';
 
-const SPREADSHEET_ID = '1CxjsldaglA9AM0BIudjTjyX5E8mLTijMrLWw4oZ17PA';
+const SPREADSHEET_ID = process.env.NEXT_PUBLIC_GOOGLE_SUPPLIERS_SHEET_ID || '1CxjsldaglA9AM0BIudjTjyX5E8mLTijMrLWw4oZ17PA';
 const SHEET_NAME = 'refined suppliers';
 const SHEETS_API_BASE = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
@@ -484,9 +484,9 @@ export async function createSupplierSheetTab(
         headerRows.push([
             dateStr,
             'Opening Balance',
-            'Balance B/F',
             '',
-            'OPEN BAL',
+            '',
+            '',
             '', // Debit Column (Blank)
             '', // Credit Column (Blank)
             String(balanceVal),
@@ -532,25 +532,25 @@ export async function createSupplierSheetTab(
                             {
                                 repeatCell: {
                                     range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 1 },
-                                    cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } },
-                                    fields: 'userEnteredFormat.textFormat'
+                                    cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 14 } } },
+                                    fields: 'userEnteredFormat(textFormat)'
                                 }
                             },
                             // Bold supplier heading (row 5)
                             {
                                 repeatCell: {
                                     range: { sheetId, startRowIndex: 4, endRowIndex: 5, startColumnIndex: 0, endColumnIndex: 1 },
-                                    cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 11 } } },
-                                    fields: 'userEnteredFormat.textFormat'
+                                    cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } },
+                                    fields: 'userEnteredFormat(textFormat)'
                                 }
                             },
-                            // Dark blue header row (row 10) â€” matches screenshot
+                            // Dark blue header row (row 10) - matches screenshot exactly
                             {
                                 repeatCell: {
-                                    range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 0, endColumnIndex: 10 },
+                                    range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 0, endColumnIndex: 9 },
                                     cell: {
                                         userEnteredFormat: {
-                                            backgroundColor: { red: 0.07, green: 0.14, blue: 0.28 },
+                                            backgroundColor: { red: 0.07, green: 0.23, blue: 0.39 },
                                             textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true },
                                             horizontalAlignment: 'CENTER'
                                         }
@@ -558,17 +558,18 @@ export async function createSupplierSheetTab(
                                     fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                                 }
                             },
-                            // Format Row 11 (Opening Balance) specifically
+                            // Format Row 11 (Opening Balance) specifically with Light Green background exactly matching screenshot
                             {
                                 repeatCell: {
-                                    range: { sheetId, startRowIndex: 10, endRowIndex: 11, startColumnIndex: 0, endColumnIndex: 10 },
+                                    range: { sheetId, startRowIndex: 10, endRowIndex: 11, startColumnIndex: 0, endColumnIndex: 9 },
                                     cell: {
                                         userEnteredFormat: {
-                                            textFormat: { bold: true },
+                                            backgroundColor: { red: 0.87, green: 0.925, blue: 0.83 },
+                                            textFormat: { bold: true, foregroundColor: { red: 0, green: 0, blue: 0 } },
                                             horizontalAlignment: 'LEFT'
                                         }
                                     },
-                                    fields: 'userEnteredFormat(textFormat,horizontalAlignment)'
+                                    fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                                 }
                             },
                             // Right align Debit/Credit/Balance for Row 11
@@ -576,10 +577,33 @@ export async function createSupplierSheetTab(
                                 repeatCell: {
                                     range: { sheetId, startRowIndex: 10, endRowIndex: 11, startColumnIndex: 5, endColumnIndex: 8 },
                                     cell: { userEnteredFormat: { horizontalAlignment: 'RIGHT' } },
-                                    fields: 'userEnteredFormat.horizontalAlignment'
+                                    fields: 'userEnteredFormat(horizontalAlignment)'
                                 }
                             },
-                            // Freeze first 11 rows
+                            // Date Column (A) format: dd Mmm yy
+                            {
+                                repeatCell: {
+                                    range: { sheetId, startRowIndex: 10, endRowIndex: 1000, startColumnIndex: 0, endColumnIndex: 1 },
+                                    cell: {
+                                        userEnteredFormat: {
+                                            numberFormat: { type: 'DATE', pattern: 'dd mmm yy' }
+                                        }
+                                    },
+                                    fields: 'userEnteredFormat(numberFormat)'
+                                }
+                            },
+                            // Column Widths
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 90 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 2 }, properties: { pixelSize: 250 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 2, endIndex: 3 }, properties: { pixelSize: 100 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 3, endIndex: 4 }, properties: { pixelSize: 90 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 4, endIndex: 5 }, properties: { pixelSize: 70 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 5, endIndex: 6 }, properties: { pixelSize: 95 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 6, endIndex: 7 }, properties: { pixelSize: 95 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 7, endIndex: 8 }, properties: { pixelSize: 100 }, fields: 'pixelSize' } },
+                            { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 8, endIndex: 9 }, properties: { pixelSize: 90 }, fields: 'pixelSize' } },
+                            
+                            // Freeze first 10 rows
                             {
                                 updateSheetProperties: {
                                     properties: {
@@ -660,26 +684,36 @@ export async function appendToSupplierSheetTab(
             return false;
         }
 
-        const debitStr = row.debit > 0 ? row.debit.toFixed(2) : '';
-        const creditStr = row.credit > 0 ? row.credit.toFixed(2) : '';
-        const balStr = Math.abs(row.balance).toFixed(2);
+        const isOpeningBal = row.particulars.toLowerCase().includes('opening balance');
+        const isClosingBal = row.particulars.includes('CLOSED');
 
-        // Build the cells with explicit formatting (White background, Black text, Normal weight)
+        const formatAmount = (val: number) => val === 0 ? '0' : val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const debitStr = formatAmount(row.debit);
+        const creditStr = formatAmount(row.credit);
+        const balStr = formatAmount(Math.abs(row.balance));
+
+        const dt = new Date(row.date);
+        const dateStr = !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : row.date;
+
+        // Build the cells with explicit formatting (Light green for Opening balances, White otherwise)
         const cellFormat = {
-            backgroundColor: { red: 1, green: 1, blue: 1 },
-            textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 }, bold: false, fontSize: 10 },
+            backgroundColor: isOpeningBal ? { red: 0.87, green: 0.925, blue: 0.83 } : { red: 1, green: 1, blue: 1 },
+            textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 }, bold: isOpeningBal || isClosingBal, fontSize: 10 },
             horizontalAlignment: 'LEFT' as const
         };
 
+        const debitFormat = isOpeningBal ? cellFormat : { ...cellFormat, textFormat: { ...cellFormat.textFormat, foregroundColor: {red: 0.8, green: 0, blue: 0} } };
+        const creditFormat = isOpeningBal ? cellFormat : { ...cellFormat, textFormat: { ...cellFormat.textFormat, foregroundColor: {red: 0, green: 0.5, blue: 0} } };
+
         const rowData = {
             values: [
-                { userEnteredValue: { stringValue: row.date }, userEnteredFormat: cellFormat },
+                { userEnteredValue: { stringValue: dateStr }, userEnteredFormat: cellFormat },
                 { userEnteredValue: { stringValue: row.particulars }, userEnteredFormat: cellFormat },
                 { userEnteredValue: { stringValue: row.vchType }, userEnteredFormat: cellFormat },
                 { userEnteredValue: { stringValue: row.vchRef }, userEnteredFormat: cellFormat },
                 { userEnteredValue: { stringValue: row.vchNo }, userEnteredFormat: cellFormat },
-                { userEnteredValue: { stringValue: debitStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT' } },
-                { userEnteredValue: { stringValue: creditStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT' } },
+                { userEnteredValue: { stringValue: debitStr }, userEnteredFormat: { ...debitFormat, horizontalAlignment: 'RIGHT' } },
+                { userEnteredValue: { stringValue: creditStr }, userEnteredFormat: { ...creditFormat, horizontalAlignment: 'RIGHT' } },
                 { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: true } } },
                 { userEnteredValue: { stringValue: row.balanceType }, userEnteredFormat: cellFormat }
             ]

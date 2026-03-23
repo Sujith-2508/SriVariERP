@@ -57,6 +57,7 @@ interface DataContextType {
     deleteDealerWithSheet: (id: string, sheetName: string, deleteTab: boolean) => Promise<void>;
     syncDealerLedgerToSheet: (dealerId: string) => Promise<void>;
     bulkSyncAllDealerLedgers: (onProgress?: (done: number, total: number, name: string) => void) => Promise<{ synced: number; errors: number }>;
+    rollOverDealerYear: (dealerId: string, closingDateStr: string, openingDateStr: string) => Promise<boolean>;
     // Agent methods
     addAgent: (agent: Omit<Agent, 'id'>) => Promise<string>;
     updateAgent: (agent: Agent) => Promise<void>;
@@ -785,6 +786,44 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (e) {
             console.error('[DataContext] Dealer update sync to Google Sheet failed:', e);
         }
+    };
+
+    const rollOverDealerYear = async (dealerId: string, closingDateStr: string, openingDateStr: string): Promise<boolean> => {
+        const dealer = dealers.find(d => d.id === dealerId);
+        if (!dealer) return false;
+
+        const currentBalance = dealer.balance || 0;
+
+        // 1. Delete all transactions for this dealer from Supabase locally, EXCEPT DO NOT call deleteSheetRow or full deletion that hits Sheets
+        const { error: delError } = await supabase
+            .from('transactions')
+            .delete()
+            .eq('customer_id', dealerId);
+            
+        if (delError) {
+            console.error('[DataContext] Failed to delete transactions for rollover:', delError);
+            return false;
+        }
+
+        // Update local state
+        setTransactions(prev => prev.filter(t => t.customerId !== dealerId));
+        
+        // 2. Set new Opening Balance and Date. updateDealer will automatically create a new BAL B/F transaction for this!
+        await updateDealer({
+            ...dealer,
+            openingBalance: currentBalance,
+            openingBalanceDate: openingDateStr
+        });
+
+        // 3. Append to Google Sheet (Import appendRolloverRowsToDealerSheet)
+        try {
+            const { appendRolloverRowsToDealerSheet } = await import('@/lib/googleSheetDealers');
+            await appendRolloverRowsToDealerSheet(dealer.businessName, currentBalance, closingDateStr, openingDateStr);
+        } catch (err) {
+            console.warn('[DataContext] Failed to write rollover rows to Sheets:', err);
+        }
+
+        return true;
     };
 
     const deleteDealer = async (id: string) => {
@@ -1822,6 +1861,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             deleteDealerWithSheet,
             syncDealerLedgerToSheet,
             bulkSyncAllDealerLedgers,
+            rollOverDealerYear,
             addAgent,
             updateAgent,
             deleteAgent,
