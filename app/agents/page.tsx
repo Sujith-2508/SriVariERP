@@ -103,6 +103,15 @@ export default function AgentsPage() {
 
         try {
             if (editingAgent) {
+                // Check if agentId is being changed and if it already exists elsewhere
+                if (formData.agentId !== editingAgent.agentId) {
+                    const idExists = agents.some(a => a.agentId === formData.agentId && a.id !== editingAgent.id);
+                    if (idExists) {
+                        showToast(`Agent ID "${formData.agentId}" already exists.`, 'warning');
+                        return;
+                    }
+                }
+
                 await updateAgent({
                     ...editingAgent,
                     name: formData.name,
@@ -115,11 +124,20 @@ export default function AgentsPage() {
                     agentId: formData.agentId,
                     password: formData.password || undefined,
                 });
+                showToast('Agent updated successfully', 'success');
             } else {
                 if (!formData.agentId || !formData.password) {
                     showToast('Agent ID and Password are required for new agents.', 'warning');
                     return;
                 }
+
+                // Pre-submission check for duplicate Agent ID
+                const idExists = agents.some(a => a.agentId === formData.agentId);
+                if (idExists) {
+                    showToast(`Agent ID "${formData.agentId}" already exists in the system.`, 'warning');
+                    return;
+                }
+
                 await addAgent({
                     name: formData.name,
                     phone: formData.phone,
@@ -131,12 +149,14 @@ export default function AgentsPage() {
                     agentId: formData.agentId,
                     password: formData.password,
                 });
+                showToast('Agent added successfully', 'success');
             }
             setShowAddModal(false);
             resetForm();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving agent:', error);
-            showToast('Failed to save agent. Please try again.', 'error');
+            const message = error.message || 'Failed to save agent. Please try again.';
+            showToast(message, 'error');
         }
     };
 

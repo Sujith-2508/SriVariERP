@@ -1332,7 +1332,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (error) {
             console.error('Error adding agent:', error);
-            console.error('Error details:', JSON.stringify(error, null, 2)); // improved logging
+            console.error('Error details:', JSON.stringify(error, null, 2));
+
+            // Check for unique constraint violation (code 23505 in Postgres/Supabase)
+            if (error.code === '23505') {
+                if (error.message?.includes('agent_id')) {
+                    throw new Error('Agent ID already exists. Please use a unique ID.');
+                }
+                if (error.message?.includes('phone')) {
+                    throw new Error('Phone number already exists. Please use a unique number.');
+                }
+            }
+
             throw error;
         }
 
