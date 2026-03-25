@@ -3,13 +3,18 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-console.log('Supabase URL:', supabaseUrl); // Debug logging
+console.log('[Supabase] Initializing with URL:', supabaseUrl?.substring(0, 20) + '...', 'Key present:', !!supabaseAnonKey);
 
 if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing Supabase environment variables. Please check your .env.local file.');
+    console.error('[Supabase] CRITICAL: Missing environment variables!', { url: !!supabaseUrl, key: !!supabaseAnonKey });
+    // In dev, we non-destructively warn instead of throwing immediately to allow UI to show error state
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('Missing Supabase environment variables. Please check your .env.local file.');
+    }
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+console.log('[Supabase] Client created successfully');
 
 // Helper function to check connection
 export async function checkSupabaseConnection(): Promise<boolean> {

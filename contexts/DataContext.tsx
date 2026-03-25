@@ -390,13 +390,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setReceiptCount(payments.length + 1);
 
         } catch (err: any) {
-            console.error('Error fetching data (full details):', {
-                message: err?.message || 'No message',
-                details: err?.details || 'No details',
-                hint: err?.hint || 'No hint',
-                code: err?.code || 'No code',
-                stack: err?.stack || 'No stack'
-            });
+            const errorDetails = {
+                message: err?.message || err || 'Unknown error',
+                name: err?.name,
+                code: err?.code,
+                status: err?.status,
+                details: err?.details,
+                hint: err?.hint,
+            };
+            console.error('[DataContext] FETCH FAILURE:', JSON.stringify(errorDetails, null, 2));
             setError(err?.message || 'Failed to fetch data');
         } finally {
             setIsLoading(false);

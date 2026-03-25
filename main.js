@@ -77,13 +77,17 @@ function createWindow() {
     // CSP Handler for runtime connections
     const { session } = require('electron')
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const supabaseHost = supabaseUrl ? new URL(supabaseUrl).host : '*.supabase.co';
+        
         callback({
             responseHeaders: {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
-                    "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: app://* http://localhost:3000 https://*; " +
-                    "connect-src 'self' app://* http://localhost:3000 ws://localhost:3000 https://*; " +
-                    "img-src 'self' data: blob: app://* https://*;"
+                    `default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: app://* http://localhost:3000 https://*; ` +
+                    `connect-src 'self' app://* http://localhost:3000 ws://localhost:3000 https://* https://${supabaseHost} https://*.googleapis.com; ` +
+                    `img-src 'self' data: blob: app://* https://*; ` +
+                    `frame-src 'self' https://*;`
                 ]
             }
         })
@@ -472,6 +476,64 @@ ipcMain.handle('drive:is-connected', () => {
 // IPC: Get a fresh OAuth access token (used by renderer for Drive uploads)
 ipcMain.handle('drive:get-access-token', async () => {
     return await getDriveOAuthAccessToken();
+});
+
+// NEW: IPC for Service Account token (used by googleSheetWriter.ts to avoid CORS)
+ipcMain.handle('google:get-service-token', async (event, { credentials }) => {
+    try {
+        const now = Math.floor(Date.now() / 1000);
+        
+        // Use Node's crypto for signing
+        const crypto = require('crypto');
+        
+        const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+        const claims = Buffer.from(JSON.stringify({
+            iss: credentials.client_email,
+            scope: 'https://www.googleapis.com/auth/spreadsheets',
+            aud: 'https://oauth2.googleapis.com/token',
+            exp: now + 3600,
+            iat: now,
+        })).toString('base64url');
+        
+        const signInput = `${header}.${claims}`;
+        const signer = crypto.createSign('RSA-SHA256');
+        signer.update(signInput);
+        signer.end();
+        const signature = signer.sign(credentials.private_key, 'base64url');
+        
+        const jwt = `${signInput}.${signature}`;
+        
+        const https = require('https');
+        return new Promise((resolve, reject) => {
+            const data = new URLSearchParams({
+                grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                assertion: jwt
+            }).toString();
+            
+            const req = https.request({
+                hostname: 'oauth2.googleapis.com',
+                path: '/token',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Content-Length': Buffer.byteLength(data)
+                }
+            }, (res) => {
+                let body = '';
+                res.on('data', chunk => body += chunk);
+                res.on('end', () => {
+                    try { resolve(JSON.parse(body)); }
+                    catch (e) { reject(new Error('Bad response from Google: ' + body)); }
+                });
+            });
+            req.on('error', reject);
+            req.write(data);
+            req.end();
+        });
+    } catch (err) {
+        console.error('[Main] Google token fetch failed:', err);
+        throw err;
+    }
 });
 
 // IPC: Open OAuth window — user just signs in, no code copying needed

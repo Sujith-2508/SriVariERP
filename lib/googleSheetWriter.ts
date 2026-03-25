@@ -184,46 +184,57 @@ async function getAccessToken(): Promise<string> {
     const credentials = JSON.parse(serviceAccountKey);
     const now = Math.floor(Date.now() / 1000);
 
-    // Create JWT header
-    const header = base64url(JSON.stringify({
-        alg: 'RS256',
-        typ: 'JWT',
-    }));
+    let tokenData;
 
-    // Create JWT claim set
-    const claims = base64url(JSON.stringify({
-        iss: credentials.client_email,
-        scope: 'https://www.googleapis.com/auth/spreadsheets',
-        aud: 'https://oauth2.googleapis.com/token',
-        exp: now + 3600,
-        iat: now,
-    }));
+    // Use Electron bridge if available (avoids CORS issues for Service Account Token Fetch)
+    if (typeof window !== 'undefined' && (window as any).electron?.drive?.getServiceToken) {
+        console.log('[SheetsWriter] Using Electron bridge for token fetch...');
+        tokenData = await (window as any).electron.drive.getServiceToken(credentials);
+    } else {
+        // Fallback to direct fetch (only works if CORS is disabled or via proxy)
+        console.log('[SheetsWriter] Using direct fetch for token (may fail in browser due to CORS)...');
+        // Create JWT header
+        const header = base64url(JSON.stringify({
+            alg: 'RS256',
+            typ: 'JWT',
+        }));
 
-    const signInput = `${header}.${claims}`;
+        // Create JWT claim set
+        const claims = base64url(JSON.stringify({
+            iss: credentials.client_email,
+            scope: 'https://www.googleapis.com/auth/spreadsheets',
+            aud: 'https://oauth2.googleapis.com/token',
+            exp: now + 3600,
+            iat: now,
+        }));
 
-    // Sign with private key
-    const privateKey = await importPrivateKey(credentials.private_key);
-    const signature = await crypto.subtle.sign(
-        'RSASSA-PKCS1-v1_5',
-        privateKey,
-        new TextEncoder().encode(signInput)
-    );
+        const signInput = `${header}.${claims}`;
 
-    const jwt = `${signInput}.${base64urlFromBuffer(signature)}`;
+        // Sign with private key
+        const privateKey = await importPrivateKey(credentials.private_key);
+        const signature = await crypto.subtle.sign(
+            'RSASSA-PKCS1-v1_5',
+            privateKey,
+            new TextEncoder().encode(signInput)
+        );
 
-    // Exchange JWT for access token
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-    });
+        const jwt = `${signInput}.${base64urlFromBuffer(signature)}`;
 
-    if (!tokenResponse.ok) {
-        const err = await tokenResponse.text();
-        throw new Error(`Failed to get access token: ${err}`);
+        // Exchange JWT for access token
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+        });
+
+        if (!tokenResponse.ok) {
+            const err = await tokenResponse.text();
+            throw new Error(`Failed to get access token: ${err}`);
+        }
+
+        tokenData = await tokenResponse.json();
     }
 
-    const tokenData = await tokenResponse.json();
     cachedToken = {
         token: tokenData.access_token,
         expires: Date.now() + (tokenData.expires_in - 60) * 1000, // Refresh 60s before expiry

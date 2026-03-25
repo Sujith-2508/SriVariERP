@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electron', {
     drive: {
         isConnected: () => ipcRenderer.invoke('drive:is-connected'),
         getAccessToken: () => ipcRenderer.invoke('drive:get-access-token'),
+        getServiceToken: (credentials) => ipcRenderer.invoke('google:get-service-token', { credentials }),
         connect: (clientId) => ipcRenderer.invoke('drive:connect', { clientId }),
         saveTokens: (tokens) => ipcRenderer.invoke('drive:save-tokens', tokens)
     }
