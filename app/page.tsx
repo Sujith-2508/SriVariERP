@@ -14,7 +14,7 @@ import { CompanyExpense } from '@/types';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
-    const { dealers, products, transactions, agents, isLoading } = useData();
+    const { dealers, products, transactions, agents, isLoading, companySettings } = useData();
     const { showToast } = useToast();
     const router = useRouter();
     const [suppliers, setSuppliers] = useState<SupplierData[]>([]);
@@ -85,32 +85,7 @@ export default function Home() {
             const { generateWholeCompanyStatementPDFBase64 } = await import('@/lib/pdfGenerator');
             const { supabase } = await import('@/lib/supabase');
 
-            // Load company settings
-            let company = {
-                companyName: 'Sri Vari Enterprises',
-                addressLine1: 'Block No.9 T.S. No 609',
-                addressLine2: 'Palaniyappan Street',
-                city: 'Pollachi',
-                gstNumber: '33DIGPM0162N1Z6',
-                phone: '',
-                email: ''
-            };
-            const { data: compData, error } = await supabase
-                .from('company_settings')
-                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
-                .limit(1);
-            if (compData && compData[0]) {
-                const c = compData[0];
-                company = {
-                    companyName: c.company_name,
-                    addressLine1: c.address_line1,
-                    addressLine2: c.address_line2,
-                    city: c.city,
-                    gstNumber: c.gst_number,
-                    phone: c.phone,
-                    email: c.email
-                };
-            }
+            const company = companySettings;
 
             // Determine date range
             let start: Date | undefined;

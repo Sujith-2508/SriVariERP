@@ -18,7 +18,7 @@ import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 // ... existing imports
 
 export default function DealerLedger() {
-    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers, rollOverDealerYear } = useData();
+    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers, rollOverDealerYear, companySettings } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [isSyncing, setIsSyncing] = useState(false);
@@ -53,52 +53,6 @@ export default function DealerLedger() {
         toDate: getISTDateString(),
     });
 
-    // Company Settings
-    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
-    const [settingsLoading, setSettingsLoading] = useState(true);
-
-    // Helper to get company settings (uses loaded settings, NOT blank fallback)
-    const getCompanySettings = (): CompanySettings => companySettings || {
-        id: '', companyName: 'Sri Vari Enterprises',
-        addressLine1: 'Block No.9 T.S. No 609', addressLine2: 'Palaniyappan Street', city: 'Pollachi', state: 'Tamil Nadu',
-        pinCode: '', gstNumber: '33DIGPM0162N1Z6', panNumber: '', phone: '', email: '',
-        bankName: '', bankBranch: '', accountNumber: '', ifscCode: '', accountHolderName: ''
-    };
-
-    // Load Company Settings
-    React.useEffect(() => {
-        const loadCompanySettings = async () => {
-            const { data, error } = await supabase
-                .from('company_settings')
-                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
-                .single();
-
-            if (!error && data) {
-                setCompanySettings({
-                    id: data.id,
-                    companyName: data.company_name,
-                    addressLine1: data.address_line1,
-                    addressLine2: data.address_line2,
-                    city: data.city,
-                    state: data.state,
-                    pinCode: data.pin_code,
-                    gstNumber: data.gst_number,
-                    panNumber: data.pan_number,
-                    phone: data.phone,
-                    email: data.email,
-                    bankName: data.bank_name,
-                    bankBranch: data.bank_branch,
-                    accountNumber: data.account_number,
-                    ifscCode: data.ifsc_code,
-                    accountHolderName: data.account_holder_name,
-                    accountType: data.account_type
-                });
-            }
-            setSettingsLoading(false);
-        };
-
-        loadCompanySettings();
-    }, []);
 
     const handleDownloadInvoicePDF = async () => {
         if (!selectedInvoice || !selectedDealer) return;
@@ -524,7 +478,7 @@ export default function DealerLedger() {
         try {
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
-                selectedDealer, invoices, payments, getCompanySettings(), summary
+                selectedDealer, invoices, payments, companySettings, summary
             );
             const byteChars = atob(base64Pdf);
             const byteArr = new Uint8Array(byteChars.length);
@@ -565,7 +519,7 @@ export default function DealerLedger() {
 
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
-                selectedDealer, invoices, payments, getCompanySettings(), summary
+                selectedDealer, invoices, payments, companySettings, summary
             );
             const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
             const rangeText = getWhatsAppRangeText();
@@ -692,7 +646,7 @@ export default function DealerLedger() {
             const sortedDealers = [...dealers].sort((a, b) =>
                 a.businessName.localeCompare(b.businessName)
             );
-            const company = getCompanySettings();
+            const company = companySettings;
             const label = getPdfLabel();
 
             // Create a master merged PDF document

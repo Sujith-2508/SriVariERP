@@ -12,7 +12,7 @@ import { generateReceiptPDFBase64 } from '@/lib/pdfGenerator';
 import { uploadReceiptPDF } from '@/lib/googleDriveService';
 
 export default function Collections() {
-    const { dealers, transactions, agents, recordPayment, createInvoice, isLoading } = useData();
+    const { dealers, transactions, agents, recordPayment, createInvoice, isLoading, companySettings } = useData();
     const { showToast } = useToast();
     const [searchTerm, setSearchTerm] = useState('');
     const [activeDealer, setActiveDealer] = useState<Dealer | null>(null);
@@ -20,7 +20,6 @@ export default function Collections() {
     const [method, setMethod] = useState('Cash');
     const [selectedAgent, setSelectedAgent] = useState(agents[0]?.name || 'Admin');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [companySettings, setCompanySettings] = useState<any>(null);
 
     // Cheque Return State
     const [showChequeReturnModal, setShowChequeReturnModal] = useState(false);
@@ -30,29 +29,6 @@ export default function Collections() {
     const [chequeReturnProcessing, setChequeReturnProcessing] = useState(false);
     const [chequeReturnSuccess, setChequeReturnSuccess] = useState(false);
 
-    // Load Company Settings
-    useEffect(() => {
-        const loadSettings = async () => {
-            const { data, error } = await supabase
-                .from('company_settings')
-                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
-                .limit(1);
-            if (data && data[0]) {
-                const settings = data[0];
-                setCompanySettings({
-                    companyName: settings.company_name,
-                    addressLine1: settings.address_line1,
-                    city: settings.city,
-                    pinCode: settings.pin_code,
-                    gstNumber: settings.gst_number,
-                    phone: settings.phone
-                });
-            } else {
-                setCompanySettings(DEFAULT_COMPANY_SETTINGS);
-            }
-        };
-        loadSettings();
-    }, []);
 
     // Success State
     const [successData, setSuccessData] = useState<{

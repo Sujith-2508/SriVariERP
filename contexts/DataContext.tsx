@@ -5,8 +5,9 @@ import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, Paym
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
-import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
+import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet, syncPaymentToSheets } from '@/lib/googleSheetWriter';
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { useToast } from './ToastContext';
 
 interface InvoiceData {
@@ -67,7 +68,7 @@ interface DataContextType {
     addCustomer: (customer: Omit<Dealer, 'id'>) => Promise<string>;
     deleteCustomer: (id: string) => Promise<void>;
     getCustomerTransactions: (customerId: string) => Transaction[];
-    companySettings: CompanySettings | null;
+    companySettings: CompanySettings;
     lastBackgroundSync: Date | null;
 }
 
@@ -205,7 +206,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [error, setError] = useState<string | null>(null);
     const [trackingData, setTrackingData] = useState<AgentTrackingData[]>([]);
     const [loadingTracking, setLoadingTracking] = useState(false);
-    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
+    const [companySettings, setCompanySettings] = useState<CompanySettings>(DEFAULT_COMPANY_SETTINGS);
 
     // Sequential counters
     const [invoiceCount, setInvoiceCount] = useState(1);
@@ -272,11 +273,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
             }
 
-            // Fetch company settings - Explicitly select columns to avoid schema mismatch with account_type
-            const { data: companyData } = await supabase
+            // Fetch company settings - Explicitly select columns to avoid schema mismatch
+            const { data: companyData, error: companyError } = await supabase
                 .from('company_settings')
                 .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
+                .order('updated_at', { ascending: false })
+                .limit(1)
                 .single();
+
+            if (companyError && companyError.code !== 'PGRST116') {
+                console.error('[DataContext] Error fetching company settings:', companyError);
+            }
+
             if (companyData) {
                 setCompanySettings({
                     id: companyData.id,
@@ -297,6 +305,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     accountHolderName: companyData.account_holder_name,
                     accountType: companyData.account_type
                 });
+            } else {
+                setCompanySettings(DEFAULT_COMPANY_SETTINGS);
             }
 
             // Fetch dealers from Supabase

@@ -19,7 +19,7 @@ import SearchableSelect from '@/components/SearchableSelect';
 import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 
 export default function Billing() {
-    const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading } = useData();
+    const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading, companySettings } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const router = useRouter();
@@ -34,7 +34,6 @@ export default function Billing() {
     const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
     const [generatedRef, setGeneratedRef] = useState<string>('');
     const [showPrintPreview, setShowPrintPreview] = useState(false);
-    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
     const [whatsappSending, setWhatsappSending] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [showWhatsAppPreview, setShowWhatsAppPreview] = useState(false);
@@ -231,55 +230,6 @@ export default function Billing() {
         isInvoiceInitialized.current = true;
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [transactions, editInvoiceId, isLoading]);
-
-    // Load Company Settings
-    // Load Company Settings
-    useEffect(() => {
-        const loadCompanySettings = async () => {
-            try {
-                const { data, error } = await supabase
-                    .from('company_settings')
-                    .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
-                    .limit(1);
-
-                if (error) {
-                    console.error('Error loading company settings from DB:', error);
-                    // Fallback to default settings
-                    setCompanySettings(DEFAULT_COMPANY_SETTINGS);
-                } else if (data && data.length > 0) {
-                    const settings = data[0];
-                    setCompanySettings({
-                        id: settings.id,
-                        companyName: settings.company_name,
-                        addressLine1: settings.address_line1,
-                        addressLine2: settings.address_line2,
-                        city: settings.city,
-                        state: settings.state,
-                        pinCode: settings.pin_code,
-                        gstNumber: settings.gst_number,
-                        panNumber: settings.pan_number,
-                        phone: settings.phone,
-                        email: settings.email,
-                        bankName: settings.bank_name,
-                        bankBranch: settings.bank_branch,
-                        accountNumber: settings.account_number,
-                        ifscCode: settings.ifsc_code,
-                        accountHolderName: settings.account_holder_name,
-                        accountType: settings.account_type
-                    });
-                } else {
-                    console.warn('No company settings found in DB, using defaults');
-                    setCompanySettings(DEFAULT_COMPANY_SETTINGS);
-                }
-            } catch (err) {
-                console.error('Exception loading company settings:', err);
-                setCompanySettings(DEFAULT_COMPANY_SETTINGS);
-            }
-        };
-
-        loadCompanySettings();
-    }, []);
-
 
     const generatedInvoiceNumber = `INV${manualInvoiceNo}`;
 

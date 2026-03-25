@@ -6,8 +6,10 @@ import WhatsAppSection from '@/components/WhatsAppSection';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { supabase } from '@/lib/supabase';
 import { validatePassword } from '@/lib/validation';
+import { useData } from '@/contexts/DataContext';
 
 export default function SettingsPage() {
+    const { refreshData } = useData();
     // â”€â”€â”€ Admin credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [currentUsername, setCurrentUsername] = useState('');
     const [newUsername, setNewUsername] = useState('');
@@ -164,6 +166,10 @@ export default function SettingsPage() {
             }
 
             if (error) throw error;
+            
+            // Refresh global context so all pages see the new settings immediately
+            await refreshData();
+            
             setCompanyMessage({ type: 'success', text: 'Company & bank details saved successfully!' });
         } catch (err: any) {
             console.error('Save settings error:', err);

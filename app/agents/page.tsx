@@ -101,6 +101,18 @@ export default function AgentsPage() {
             return;
         }
 
+        // Check for duplicate agentId if adding new agent
+        if (!editingAgent) {
+            const duplicateId = agents.find(a => 
+                a.agentId && formData.agentId && 
+                a.agentId.toLowerCase().trim() === formData.agentId.toLowerCase().trim()
+            );
+            if (duplicateId) {
+                showToast(`Agent ID "${formData.agentId}" already exists.`, 'warning');
+                return;
+            }
+        }
+
         try {
             if (editingAgent) {
                 await updateAgent({

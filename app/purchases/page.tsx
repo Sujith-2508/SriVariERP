@@ -56,7 +56,7 @@ import { supabase } from '@/lib/supabase';
 type TabType = 'bills' | 'payments' | 'suppliers';
 
 export default function PurchasesPage() {
-    const { products } = useData();
+    const { products, companySettings } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState<TabType>('bills');
@@ -111,32 +111,7 @@ export default function PurchasesPage() {
             const { generateSupplierStatementPDFBase64 } = await import('@/lib/pdfGenerator');
             const { supabase } = await import('@/lib/supabase');
 
-            // Load company settings
-            let company = {
-                companyName: 'Sri Vari ERP',
-                addressLine1: '',
-                addressLine2: '',
-                city: '',
-                gstNumber: '',
-                phone: '',
-                email: ''
-            };
-            const { data: compData, error } = await supabase
-                .from('company_settings')
-                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
-                .limit(1);
-            if (compData && compData[0]) {
-                const c = compData[0];
-                company = {
-                    companyName: c.company_name,
-                    addressLine1: c.address_line1,
-                    addressLine2: c.address_line2,
-                    city: c.city,
-                    gstNumber: c.gst_number,
-                    phone: c.phone,
-                    email: c.email
-                };
-            }
+            const company = companySettings;
 
             // Determine date range
             let start: Date | undefined;
@@ -392,25 +367,14 @@ export default function PurchasesPage() {
         // Always Update/Create corresponding Google Sheet tab
         setSheetTabStatus('Updating Google Sheet tab...');
 
-        // Load company settings from Supabase (set in the Settings page)
-        let company: CompanySheetDetails = {};
-        try {
-            const { data: compData } = await supabase
-                .from('company_settings')
-                .select('company_name, address_line1, address_line2, city, gst_number, phone, email')
-                .limit(1);
-            if (compData && compData.length > 0) {
-                const c = compData[0];
-                company = {
-                    companyName: c.company_name,
-                    address: [c.address_line1, c.address_line2].filter(Boolean).join(', '),
-                    city: c.city,
-                    gstNumber: c.gst_number,
-                    phone: c.phone,
-                    email: c.email
-                };
-            }
-        } catch { /* ignore — company info is optional */ }
+        const company: CompanySheetDetails = {
+            companyName: companySettings.companyName,
+            address: [companySettings.addressLine1, companySettings.addressLine2].filter(Boolean).join(', '),
+            city: companySettings.city,
+            gstNumber: companySettings.gstNumber,
+            phone: companySettings.phone,
+            email: companySettings.email
+        };
 
         const supplierDetails: SupplierSheetDetails = {
             supplierName: supplierForm.name,
