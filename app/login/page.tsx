@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, User, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -28,6 +29,7 @@ export default function LoginPage() {
                 .single();
 
             if (queryError || !users) {
+                await logToApplicationSheet('Login Failed', `Username: ${email} - No active user found`);
                 setError('Invalid username or password. Please try again.');
                 setIsLoading(false);
                 return;
@@ -35,10 +37,13 @@ export default function LoginPage() {
 
             // Verify password
             if (users.password !== password) {
+                await logToApplicationSheet('Login Failed', `Username: ${email} - Incorrect password`);
                 setError('Invalid username or password. Please try again.');
                 setIsLoading(false);
                 return;
             }
+
+            await logToApplicationSheet('User Login', `User ${users.username} logged in successfully`);
 
             // Update last login timestamp
             await supabase

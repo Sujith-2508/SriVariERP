@@ -17,6 +17,7 @@ import { calculateDealerStatement } from '@/lib/utils';
 import { getISTDateString } from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
 import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function Billing() {
     const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading, companySettings } = useData();
@@ -918,6 +919,7 @@ export default function Billing() {
             }
 
             setWhatsappSending('success');
+            await logToApplicationSheet('WhatsApp Invoice Sent', `Dealer: ${dealer.businessName}, Invoice: ${invoiceData.referenceId}, Amount: ₹${invoiceData.amount?.toLocaleString() || '0'}`);
             setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
             console.error('[WhatsApp] Send failed:', err);

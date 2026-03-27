@@ -6,7 +6,7 @@ import { useData } from '@/contexts/DataContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
 import { Agent } from '@/types';
-import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt, Activity } from 'lucide-react';
+import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt, Activity, FileText, ExternalLink } from 'lucide-react';
 import { LiveMap } from '@/components/LiveMap';
 import { AgentStatusList } from '@/components/AgentStatusList';
 import { AttendanceCalendar } from '@/components/AttendanceCalendar';
@@ -206,6 +206,14 @@ export default function AgentsPage() {
                         <p className="text-sm text-slate-500">Manage agents, track locations, monitor attendance, and company expenses</p>
                     </div>
                     <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => window.open('https://docs.google.com/spreadsheets/d/1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0', '_blank')}
+                            className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-emerald-100 transition-all border border-emerald-100 shadow-sm"
+                        >
+                            <FileText size={16} />
+                            View Sheets
+                            <ExternalLink size={14} className="opacity-50" />
+                        </button>
                         <button
                             onClick={() => handleRefresh()}
                             className={`p-2.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all flex items-center gap-2 ${isLoading || loadingTracking ? 'animate-pulse cursor-wait' : ''}`}

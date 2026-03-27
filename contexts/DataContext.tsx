@@ -5,7 +5,7 @@ import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, Paym
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
-import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet, syncPaymentToSheets } from '@/lib/googleSheetWriter';
+import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet, syncPaymentToSheets, logToApplicationSheet } from '@/lib/googleSheetWriter';
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { useToast } from './ToastContext';
@@ -442,6 +442,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fetchData();
         loadTrackingData();
 
+        // Log application startup only once per session to keep logs minimal
+        const sessionLogKey = 'erp_session_logged';
+        if (!sessionStorage.getItem(sessionLogKey)) {
+            logToApplicationSheet('Application Started', 'User opened the ERP application session');
+            sessionStorage.setItem(sessionLogKey, 'true');
+        }
+
         // Listen for local storage product updates from purchase service
         const handleStorageUpdate = () => {
             fetchData();
@@ -515,6 +522,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         syncTransactionToDealerSheet(dealer.businessName, transformedTxn, dealer.balance).catch(e =>
                             console.warn('[DataContext] Real-time sheet sync failed:', e)
                         );
+                        logToApplicationSheet('Mobile Transaction Synced', `Real-time sync: ${data.reference_id} from ${dealer.businessName}`, data.amount);
                     }
                 } catch (e) {
                     console.error('[DataContext] Error handling real-time transaction sync:', e);
@@ -558,6 +566,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             updateProductInSheet(prod.rowIndex || 0, prod).catch(e =>
                 console.warn('[DataContext] Stock sync to Google Sheet failed (non-critical):', e)
             );
+            logToApplicationSheet('Stock Updated', `Product ${prod.name} decreased by ${quantity} (Sales/Billing). Final stock: ${prod.stock}`, prod.price);
         }
     };
 
@@ -576,6 +585,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Sync to Google Sheet, then re-read to get authoritative data (with rowIndex)
         try {
             await addProductToSheet(newProduct);
+            logToApplicationSheet('Product Created', `Added ${newProduct.name} (Category: ${newProduct.category})`, newProduct.price);
             const { products: sheetProducts } = await readProductsFromSheet();
             if (sheetProducts.length > 0) {
                 setProducts(sheetProducts);
@@ -603,6 +613,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const productIndex = products.findIndex(p => p.id === updatedProduct.id);
             const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
             await updateProductInSheet(rowIndex, updatedProduct);
+            logToApplicationSheet('Product Updated', `Updated product details for ${updatedProduct.name}`, updatedProduct.price);
             const { products: sheetProducts } = await readProductsFromSheet();
             if (sheetProducts.length > 0) {
                 setProducts(sheetProducts);
@@ -629,6 +640,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (rowIndex > 0 || product?.name) {
                 await deleteProductFromSheet(rowIndex, product?.name);
             }
+            logToApplicationSheet('Product Deleted', `Removed product: ${product?.name || id}`);
             const { products: sheetProducts } = await readProductsFromSheet();
             if (sheetProducts.length > 0) {
                 setProducts(sheetProducts);
@@ -708,6 +720,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         }
 
+        logToApplicationSheet('Dealer Created', `Business: ${newDealer.businessName}, City: ${newDealer.city}`, (newDealer as any).openingBalance || 0);
         return newDealer.id;
     };
 
@@ -795,6 +808,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             await syncDealerToSheet(updatedDealer, companySettings);
             console.log(`[DataContext] Successfully updated dealer ${updatedDealer.businessName} in Google Sheets`);
+            logToApplicationSheet('Dealer Updated', `Updated core info for ${updatedDealer.businessName}`, updatedDealer.balance);
         } catch (e) {
             console.error('[DataContext] Dealer update sync to Google Sheet failed:', e);
         }
@@ -866,6 +880,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             removeDealerFromSheet(id, dealerToDelete.businessName).catch(e =>
                 console.warn('[DataContext] Dealer removal sync to Google Sheet failed:', e)
             );
+            logToApplicationSheet('Dealer Deleted', `Business: ${dealerToDelete.businessName}, ID: ${id}`);
         }
     };
 
@@ -919,6 +934,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncDealerLedgerToSheet(dealerId).catch(e =>
             console.warn('[DataContext] Failed to re-sync dealer ledger after transaction deletion:', e)
         );
+        logToApplicationSheet('Transaction Deleted', `Ref: ${txn.referenceId}, Type: ${txn.type}, Dealer: ${dealer.businessName}`, txn.amount);
     };
 
     const getDealerTransactions = (dealerId: string, customTxns?: Transaction[]): Transaction[] => {
@@ -1117,6 +1133,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             syncTransactionToDealerSheet(dealer.businessName, newTxn, runningBal).catch(e =>
                 console.warn('[DataContext] Failed to sync invoice to dealer sheet:', e)
             );
+            logToApplicationSheet('Invoice Created', `Invoice ${invoiceNumber} for ${dealer.businessName}`, totalAmount);
         }
 
         return { id: txnData.id, refId: invoiceNumber };
@@ -1238,6 +1255,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return t;
         }));
 
+        logToApplicationSheet('Invoice Updated', `Updated invoice ${existingTxn.referenceId} for ${dealer?.businessName || 'Unknown Dealer'}`, totalAmount);
         return { id: invoiceId, refId: invoiceData?.manualInvoiceNo ? `INV${invoiceData.manualInvoiceNo.trim()}` : (existingTxn.referenceId || 'UPDATED') };
     };
 
@@ -1319,6 +1337,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             syncTransactionToDealerSheet(dealer.businessName, newTxn, runningBal).catch(e =>
                 console.warn('[DataContext] Failed to sync payment to dealer sheet:', e)
             );
+            logToApplicationSheet('Payment Received', `Receipt ${receiptNumber} via ${method} from ${dealer.businessName}`, amount);
         }
 
         return receiptNumber;
@@ -1357,6 +1376,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ...prev
         ]);
 
+        logToApplicationSheet('Agent Created', `Agent: ${newAgent.name}, ID: ${newAgent.agentId || newAgent.id}`);
         return newAgent.id;
     };
 
@@ -1388,6 +1408,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         setAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
+        logToApplicationSheet('Agent Updated', `Updated details for agent ${updatedAgent.name}`);
     };
 
     const deleteAgent = async (id: string) => {
@@ -1439,6 +1460,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Also remove from tracking data so they disappear from map immediately
         setTrackingData(prev => prev.filter(t => t.agent.id !== id));
+        logToApplicationSheet('Agent Deleted', `Removed agent ${agentToDelete.name} (Soft Deleted)`);
     };
 
     // Backward compatible aliases
@@ -1797,6 +1819,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                             .from('dealers')
                             .update({ synced_to_sheet: true })
                             .eq('id', dId);
+
+                        const dName = transformedDealers.find(d => d.id === dId)?.businessName || dId;
+                        logToApplicationSheet('Mobile Transactions Batched', `Background sync: Completed ledger re-sync for ${dName}`);
 
                         console.log(`[DataContext] Successfully auto-synced dealer: ${dId}`);
                     } catch (err) {

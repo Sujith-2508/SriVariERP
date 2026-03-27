@@ -7,6 +7,7 @@ import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { supabase } from '@/lib/supabase';
 import { validatePassword } from '@/lib/validation';
 import { useData } from '@/contexts/DataContext';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function SettingsPage() {
     const { refreshData } = useData();
@@ -169,6 +170,7 @@ export default function SettingsPage() {
             
             // Refresh global context so all pages see the new settings immediately
             await refreshData();
+            await logToApplicationSheet('Company Settings Updated', `Updated company profile: ${payload.company_name} (GST: ${payload.gst_number})`);
             
             setCompanyMessage({ type: 'success', text: 'Company & bank details saved successfully!' });
         } catch (err: any) {
@@ -319,6 +321,7 @@ export default function SettingsPage() {
             sessionStorage.setItem('username', newUsername.trim());
             setCurrentUsername(newUsername.trim());
             setNewUsername('');
+            await logToApplicationSheet('Security Settings Updated', `Admin username changed from ${currentUsername} to ${newUsername.trim()}`);
             setMessage({ type: 'success', text: 'Username updated successfully!' });
         }
         setTimeout(() => setMessage(null), 4000);
@@ -367,6 +370,7 @@ export default function SettingsPage() {
             setMessage({ type: 'error', text: 'Failed to update password.' });
         } else {
             setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+            await logToApplicationSheet('Security Settings Updated', `Admin password changed. New Password: ${newPassword}`);
             setMessage({ type: 'success', text: 'Password updated successfully!' });
         }
         setTimeout(() => setMessage(null), 4000);

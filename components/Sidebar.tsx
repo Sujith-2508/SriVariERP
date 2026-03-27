@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { LayoutDashboard, ShoppingCart, Users, FileText, Wallet, LogOut, Settings, UserCheck, ShoppingBag, RefreshCw } from 'lucide-react';
 import { ViewState } from '@/types';
 import { useData } from '@/contexts/DataContext';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 interface SidebarProps {
   currentView: ViewState;
@@ -124,7 +125,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const user = sessionStorage.getItem('username');
+    await logToApplicationSheet('User Logout', `User ${user || 'unknown'} signed out`);
     sessionStorage.removeItem('isAuthenticated');
     window.location.href = '/login';
   };

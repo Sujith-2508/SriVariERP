@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, Check, X, Loader2, QrCode, LogOut, RefreshCw } from 'lucide-react';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function WhatsAppSection() {
     const [qr, setQr] = useState<string | null>(null);
@@ -23,15 +24,18 @@ export default function WhatsAppSection() {
         window.electron.whatsapp.onReady(() => {
             setStatus('READY');
             setQr(null);
+            logToApplicationSheet('WhatsApp Connected', 'System is READY to send messages');
         });
 
         window.electron.whatsapp.onAuthenticated(() => {
             setStatus('AUTHENTICATED');
+            logToApplicationSheet('WhatsApp Authenticated', 'QR scan successful, initializing session...');
         });
 
         window.electron.whatsapp.onAuthFailure((msg) => {
             setError(msg);
             setStatus('DISCONNECTED');
+            logToApplicationSheet('WhatsApp Auth Failure', `Authentication failed: ${msg}`);
         });
 
         window.electron.whatsapp.onStatus((newStatus) => {
@@ -46,6 +50,7 @@ export default function WhatsAppSection() {
             await window.electron.whatsapp.logout();
             setStatus('DISCONNECTED');
             setQr(null);
+            await logToApplicationSheet('WhatsApp Disconnected', 'User manually disconnected WhatsApp account');
         } catch (err) {
             console.error('Logout failed', err);
         }
@@ -178,7 +183,10 @@ export default function WhatsAppSection() {
                                 </button>
                             ) : (
                                 <button
-                                    onClick={() => (window as any).electron.whatsapp.reconnect()}
+                                    onClick={() => {
+                                        window.electron.whatsapp.reconnect();
+                                        logToApplicationSheet('WhatsApp Reconnect Requested', 'User triggered Re-sync Connection');
+                                    }}
                                     className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-all border border-slate-800 shadow-sm"
                                 >
                                     <RefreshCw size={16} />

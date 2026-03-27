@@ -48,7 +48,8 @@ import {
     DollarSign,
     RefreshCw,
     Download,
-    Clock
+    Clock,
+    ExternalLink
 } from 'lucide-react';
 import SearchableSelect from '@/components/SearchableSelect';
 import { supabase } from '@/lib/supabase';
@@ -832,6 +833,14 @@ export default function PurchasesPage() {
                     <p className="text-sm text-slate-500">Track suppliers, bills, and payments</p>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        onClick={() => window.open('https://docs.google.com/spreadsheets/d/1CxjsldaglA9AM0BIudjTjyX5E8mLTijMrLWw4oZ17PA', '_blank')}
+                        className="bg-emerald-50 text-emerald-700 px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-emerald-100 transition-all border border-emerald-100 shadow-sm mr-1"
+                    >
+                        <FileText size={16} />
+                        View Sheets
+                        <ExternalLink size={14} className="opacity-50" />
+                    </button>
                     <button
                         onClick={async () => {
                             if (activeTab === 'suppliers') {

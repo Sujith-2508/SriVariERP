@@ -50,6 +50,7 @@ function saveLocalData<T>(key: string, data: T[]) {
 // ============================================
 
 import { fetchRefinedSuppliers, fetchHistoricalVouchers, HistoricalVoucher, SyncData, appendToSupplierSheetTab, SheetRowData, deleteSheetRowByRef } from './googleSheetSuppliers';
+import { logToApplicationSheet } from './googleSheetWriter';
 import { syncAllStatements, syncLocalToDrive } from './folderSyncService';
 
 export async function forceSyncPurchases(): Promise<boolean> {
@@ -417,6 +418,7 @@ export async function createSupplier(supplier: Omit<SupplierData, 'id' | 'create
     };
 
     saveLocalData(KEYS.SUPPLIERS, [newSupplier, ...suppliers]);
+    logToApplicationSheet('Supplier Created', `New supplier: ${newSupplier.name}, City: ${newSupplier.city || 'Unknown'}`);
 
     // NEW: Create 'BAL B/F' bill for FIFO allocation
     if (newSupplier.openingBalance && newSupplier.openingBalance > 0) {
@@ -457,6 +459,7 @@ export async function updateSupplier(supplierId: string, updates: Partial<Suppli
 
     suppliers[index] = updatedSupplier;
     saveLocalData(KEYS.SUPPLIERS, suppliers);
+    logToApplicationSheet('Supplier Updated', `Updated core info for supplier: ${updatedSupplier.name}`);
 
     // NEW: Update or Create 'BAL B/F' bill for FIFO allocation
     if (updates.openingBalance !== undefined || updates.openingBalanceDate !== undefined) {
@@ -554,6 +557,7 @@ export async function deleteSupplier(supplierId: string): Promise<boolean> {
         return bill && bill.supplierId !== supplierId;
     });
     saveLocalData(KEYS.ALLOCATIONS, allocations);
+    logToApplicationSheet('Supplier Deleted', `Removed supplier: ${supplier.name}`);
 
     return true;
 }
@@ -750,6 +754,7 @@ export async function createPurchaseBill(bill: {
         appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
             console.warn('[PurchaseService] Sheet append failed for bill:', err)
         );
+        logToApplicationSheet('Purchase Bill Created', `Bill ${newBill.billNumber} from ${supplier.name}`, newBill.amount);
     }
 
     return newBill;
@@ -823,6 +828,7 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
         deleteSheetRowByRef(supplier.name, bill.billNumber).catch(err =>
             console.warn('[PurchaseService] Sheet row deletion failed for bill:', err)
         );
+        logToApplicationSheet('Purchase Bill Deleted', `Removed Bill ${bill.billNumber} from ${supplier.name}`);
     }
 
     return true;
@@ -906,7 +912,8 @@ export async function updatePurchaseBill(
     const supplier = latestSuppliers.find(s => s.id === supplierId);
     if (supplier) {
         syncLocalToDrive('PURCHASE', bills[index], supplier.name);
-
+        logToApplicationSheet('Purchase Bill Updated', `Updated Bill ${bills[index].billNumber} from ${supplier.name}`, bills[index].amount);
+        
         // If amount changed, append an adjustment row to Google Sheet
         if (updates.amount !== undefined && Math.abs(updates.amount - oldAmount) > 0.01) {
             const diff = updates.amount - oldAmount;
@@ -1014,6 +1021,7 @@ export async function createPurchasePayment(payment: {
         appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
             console.warn('[PurchaseService] Sheet append failed for payment:', err)
         );
+        logToApplicationSheet('Purchase Payment Made', `Payment ${newPayment.paymentNumber} to ${supplier.name} via ${newPayment.paymentMode}`, newPayment.amount);
     }
 
     return newPayment;
@@ -1154,6 +1162,7 @@ export async function deletePurchasePayment(paymentId: string): Promise<boolean>
         deleteSheetRowByRef(sObj.name, payment.paymentNumber).catch(err =>
             console.warn('[PurchaseService] Sheet row deletion failed for payment:', err)
         );
+        logToApplicationSheet('Purchase Payment Deleted', `Removed Payment ${payment.paymentNumber} to ${sObj.name}`);
     }
 
     return true;

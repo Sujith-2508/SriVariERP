@@ -18,8 +18,10 @@
 import { Product } from '@/types';
 
 const SPREADSHEET_ID = '1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0';
+const LOG_SPREADSHEET_ID = '1O5Rjp2iA4dvq7rQog2-al5wDdn3xpjAm3KAFgX3AQ9U';
 let SHEET_NAME = 'CurrentProducts';
 const SHEETS_API_BASE = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
+const LOG_API_BASE = `https://sheets.googleapis.com/v4/spreadsheets/${LOG_SPREADSHEET_ID}`;
 // Column Layout: A:Product ID, B:Name, C:HSN Code, D:Unit, E:Cost Price, F:Selling Price, G:GST%, H:Stock, I:Category
 const HEADER_ROW = ['Product ID', 'Product Name', 'HSN Code', 'Unit', 'Cost Price', 'Selling Price', 'GST%', 'Stock', 'Category'];
 
@@ -129,7 +131,7 @@ let cachedToken: { token: string; expires: number } | null = null;
 
 // Base64url encode
 function base64url(str: string): string {
-    const b64 = btoa(str);
+    const b64 = btoa(unescape(encodeURIComponent(str)));
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
@@ -245,9 +247,10 @@ async function getAccessToken(): Promise<string> {
 }
 
 // Make authenticated request to Sheets API
-async function sheetsRequest(path: string, method: string = 'GET', body?: any): Promise<any> {
+async function sheetsRequest(path: string, method: string = 'GET', body?: any, isLog: boolean = false): Promise<any> {
     const token = await getAccessToken();
-    const url = `${SHEETS_API_BASE}${path}`;
+    const apiBase = isLog ? LOG_API_BASE : SHEETS_API_BASE;
+    const url = `${apiBase}${path}`;
 
     const options: RequestInit = {
         method,
@@ -530,15 +533,16 @@ export async function testSheetConnection(): Promise<{ success: boolean; message
 /**
  * Append multiple rows to a specific sheet
  */
-export async function appendRowsToSheet(sheetName: string, rows: any[][]): Promise<boolean> {
+export async function appendRowsToSheet(sheetName: string, rows: any[][], isLog: boolean = false): Promise<boolean> {
     try {
         // Ensure tab exists first
-        await ensureTabExistsWithName(sheetName);
+        await ensureTabExistsWithName(sheetName, undefined, isLog);
 
         await sheetsRequest(
             `/values/${sheetName}!A:Z:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
             'POST',
-            { values: rows }
+            { values: rows },
+            isLog
         );
         return true;
     } catch (error: any) {
@@ -642,11 +646,12 @@ export async function clearRowInSheet(sheetName: string, rowIndex: number, colum
 /**
  * Ensure a specific tab exists by name
  */
-export async function ensureTabExistsWithName(name: string): Promise<void> {
+export async function ensureTabExistsWithName(name: string, headerRow?: string[], isLog: boolean = false): Promise<void> {
     try {
         const token = await getAccessToken();
+        const apiBase = isLog ? LOG_API_BASE : SHEETS_API_BASE;
         const response = await fetch(
-            `${SHEETS_API_BASE}?fields=sheets.properties.title`,
+            `${apiBase}?fields=sheets.properties.title`,
             { headers: { 'Authorization': `Bearer ${token}` } }
         );
 
@@ -666,11 +671,59 @@ export async function ensureTabExistsWithName(name: string): Promise<void> {
                                 properties: { title: name }
                             }
                         }]
-                    }
+                    },
+                    isLog
                 );
+
+                if (headerRow) {
+                    const lastColLetter = String.fromCharCode(64 + headerRow.length);
+                    await sheetsRequest(
+                        `/values/${name}!A1:${lastColLetter}1?valueInputOption=USER_ENTERED`,
+                        'PUT',
+                        { values: [headerRow] },
+                        isLog
+                    );
+                }
             }
         }
     } catch (e) {
         console.error(`[SheetsWriter] Failed to ensure tab ${name} exists:`, e);
+    }
+}
+
+/**
+ * Log an action to the "Application Log" sheet
+ */
+export async function logToApplicationSheet(action: string, details: string, amount: number = 0): Promise<boolean> {
+    try {
+        const LOG_SHEET_NAME = 'Application Log';
+        const LOG_HEADERS = ['Date', 'Time', 'Platform', 'Action', 'Details', 'Amount'];
+        
+        await ensureTabExistsWithName(LOG_SHEET_NAME, LOG_HEADERS, true);
+
+        const now = new Date();
+        const date = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').reverse().join('-');
+        const time = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true });
+
+        // Platform detection
+        let platform = 'WEB';
+        if (typeof window !== 'undefined') {
+            if ((window as any).electron) platform = 'DESKTOP';
+            else if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) platform = 'MOBILE';
+        }
+
+        const row = [
+            date,
+            time,
+            platform,
+            action,
+            details,
+            amount === 0 ? '' : String(amount)
+        ];
+
+        return await appendRowsToSheet(LOG_SHEET_NAME, [row], true);
+    } catch (error: any) {
+        console.error('[SheetsWriter] Failed to log to application sheet:', error.message);
+        return false;
     }
 }

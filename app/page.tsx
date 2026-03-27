@@ -4,7 +4,7 @@ import React, { useMemo, useEffect, useState } from 'react';
 import { useToast } from '@/contexts/ToastContext';
 import { useData } from '@/contexts/DataContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent, Wallet, Receipt, Download, RefreshCw, X, FileText, Search } from 'lucide-react';
+import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent, Wallet, Receipt, Download, RefreshCw, X, FileText, Search, ExternalLink } from 'lucide-react';
 import { calculateInvoiceProfit, formatCurrency } from '@/lib/utils';
 import { TransactionType, SupplierData, PurchaseBillData, AgentSalaryData, PurchasePaymentData } from '@/types';
 import { getAllSuppliers, getPurchaseBills, getPurchasePayments } from '@/lib/purchaseService';
@@ -481,6 +481,14 @@ export default function Home() {
 
                 </div>
                 <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => window.open('https://docs.google.com/spreadsheets/d/1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0', '_blank')}
+                        className="bg-emerald-50 text-emerald-700 px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-emerald-100 transition-all border border-emerald-100 shadow-sm"
+                    >
+                        <FileText size={16} />
+                        View Sheets
+                        <ExternalLink size={14} className="opacity-50" />
+                    </button>
                     <button
                         onClick={() => setDateRangeModal(prev => ({ ...prev, open: true }))}
                         className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 transition-all shadow-md shadow-emerald-100"

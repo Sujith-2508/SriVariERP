@@ -5,7 +5,7 @@ import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
-import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye } from 'lucide-react';
+import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye, ExternalLink } from 'lucide-react';
 import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency, getISTDateString } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
@@ -14,6 +14,7 @@ import PrintableInvoice from '@/components/PrintableInvoice';
 import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { deleteAllTabsExcept } from '@/lib/googleSheetDealers';
 import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 // ... existing imports
 
@@ -550,6 +551,7 @@ export default function DealerLedger() {
             }
 
             setWhatsappSending('success');
+            await logToApplicationSheet('WhatsApp Statement Sent', `Dealer: ${selectedDealer.businessName}, Range: ${rangeText}, Balance: Rs. ${summary.totalOutstanding.toLocaleString()}`);
             setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
             console.error('WhatsApp send failed', err);
@@ -1209,6 +1211,14 @@ export default function DealerLedger() {
                     </div>
                     <div className="flex gap-3 items-center">
                         <button
+                            onClick={() => window.open('https://docs.google.com/spreadsheets/d/1nQBRIzwiht43R9nXYzUj-M2EXp8qmWCXh9asC-GNJL0', '_blank')}
+                            className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 hover:bg-emerald-100 transition-all border border-emerald-100 shadow-sm"
+                        >
+                            <FileText size={16} />
+                            View Sheets
+                            <ExternalLink size={14} className="opacity-50" />
+                        </button>
+                        <button
                             onClick={handleBulkSync}
                             disabled={isSyncing}
                             className="bg-emerald-600/90 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
@@ -1232,9 +1242,6 @@ export default function DealerLedger() {
                             <User size={16} />
                             Add Dealer
                         </button>
-                        <div className="bg-slate-100 px-4 py-2 rounded-lg text-sm text-slate-600 flex items-center">
-                            Total: <strong className="ml-1">{dealers.length}</strong>
-                        </div>
                     </div>
                 </div>
 
