@@ -226,6 +226,7 @@ export default function Billing() {
         if (isLoading) return;
 
         const invoiceCount = transactions.filter(t => t.type === 'INVOICE').length;
+        // padStart(3, '0') ensures 001, 002 format
         setManualInvoiceNo(String(invoiceCount + 1).padStart(3, '0'));
         isInvoiceInitialized.current = true;
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -824,110 +825,106 @@ export default function Billing() {
         }
     };
 
+    const [isHandlingSendRef, setIsHandlingSendRef] = useState(false);
     const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
-        if (!companySettings || !selectedDealer) return;
+        if (!companySettings || !dealer) {
+            console.warn('[WhatsApp] Missing settings or dealer', { companySettings: !!companySettings, dealer: !!dealer });
+            return;
+        }
+        
+        // Multi-layered guard against double-send
+        if (whatsappSending === 'sending' || isHandlingSendRef) {
+            console.log('[WhatsApp] Send already in progress, skipping duplicate call');
+            return;
+        }
 
+        console.log('[WhatsApp] Initiating send for invoice:', invoiceData.referenceId);
+        setIsHandlingSendRef(true);
         setWhatsappSending('sending');
         setWhatsappError(null);
 
         try {
-            if (window.electron?.whatsapp?.getStatus) {
+            const isElectron = !!(window.electron?.whatsapp?.sendPDF);
+            console.log('[WhatsApp] Environment detected:', isElectron ? 'ELECTRON' : 'WEB/BROWSER');
+
+            if (isElectron && window.electron?.whatsapp?.getStatus) {
                 const status = await window.electron.whatsapp.getStatus();
+                console.log('[WhatsApp] Electron WhatsApp status:', status);
                 if (status !== 'READY') {
-                    throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+                    throw new Error('WhatsApp is not connected in the desktop app. Please go to Settings to link your account.');
                 }
             }
 
             // 1. Generate Invoice PDF
-            const invoiceBase64 = await generateInvoicePDFBase64(invoiceData, selectedDealer, invoiceItems, companySettings);
+            console.log('[WhatsApp] Generating Invoice PDF...');
+            const invoiceBase64 = await generateInvoicePDFBase64(invoiceData, dealer, invoiceItems, companySettings);
 
             // 2. Generate Statement PDF
-            // Ensure the newly created invoice is included in the statement calculation
-            const filteredTxns = transactions.filter(t => t.customerId === selectedDealer.id);
-            // Check if context already has this invoice to avoid duplication
-            const alreadyIncluded = filteredTxns.some(t =>
-                (t.referenceId === invoiceData.referenceId && t.referenceId !== 'TMP') ||
+            console.log('[WhatsApp] Generating Statement PDF...');
+            const filteredTxns = transactions.filter(t => t.customerId === dealer.id);
+            const alreadyIncluded = filteredTxns.some(t => 
+                (t.referenceId === invoiceData.referenceId && t.referenceId !== 'TMP') || 
                 (t.id === invoiceData.id && t.id !== '')
             );
-
             const dealerTransactions = alreadyIncluded ? filteredTxns : [...filteredTxns, invoiceData];
             const { invoices: stmtInvoices, payments: stmtPayments } = calculateDealerStatement(dealerTransactions);
-
-            // Calculate summary for statement
             const totalInvoiced = stmtInvoices.reduce((sum, inv) => sum + inv.amount, 0);
             const totalPaid = stmtPayments.reduce((sum, p) => sum + p.amount, 0);
             const totalOutstanding = totalInvoiced - totalPaid;
-            const summary = { totalInvoiced, totalPaid, totalOutstanding };
-
+            
             const statementBase64 = await generateStatementPDFBase64(
-                selectedDealer,
+                dealer,
                 stmtInvoices,
                 stmtPayments,
                 companySettings,
-                summary
+                { totalInvoiced, totalPaid, totalOutstanding }
             );
 
-            // 3. Send Invoice
-            if (window.electron?.whatsapp?.sendPDF) {
+            // 3. Send via selected method
+            if (isElectron && window.electron?.whatsapp?.sendPDF) {
+                console.log('[WhatsApp] Sending via Electron sendPDF...');
+                // Send Invoice
                 await window.electron.whatsapp.sendPDF(
-                    selectedDealer.phone,
+                    dealer.phone,
                     invoiceBase64,
                     `Invoice_${invoiceData.referenceId}.pdf`,
-                    `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
+                    `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
                 );
-            } else {
-                // WEB FALLBACK: Upload to Drive and share Link
-                try {
-                    setWhatsappSending('sending');
-                    const link = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
-                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${link}`;
-                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                    window.open(whatsappUrl, '_blank');
-                    // Small delay to simulate sending
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                } catch (err: any) {
-                    console.error('Web WhatsApp share failed:', err);
-                    // Fallback to text only if drive fails
-                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}.`;
-                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                    window.open(whatsappUrl, '_blank');
-                }
-            }
-
-            // Small delay between documents
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // 4. Send Statement
-            if (window.electron?.whatsapp?.sendPDF) {
+                
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Send Statement
                 await window.electron.whatsapp.sendPDF(
                     dealer.phone,
                     statementBase64,
                     `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`,
                     `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`
                 );
+                console.log('[WhatsApp] Electron send complete.');
             } else {
-                // WEB FALLBACK: Send Statement Link
-                try {
-                    const stmtLink = await uploadToWhatsAppFolder(statementBase64, `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`);
-                    const msg = `Hello ${dealer.businessName}, please find your account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}. \n\nView Statement: ${stmtLink}`;
-                    const waUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                    window.open(waUrl, '_blank');
-                } catch (e) {
-                    console.warn('Web statement share failed:', e);
-                }
-                setWhatsappSending('success');
+                console.log('[WhatsApp] Sending via Web Fallback (Drive + WA Link)...');
+                // Invoice Web Path
+                const invoiceLink = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
+                const invoiceMsg = `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${invoiceLink}`;
+                window.open(`https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(invoiceMsg)}`, '_blank');
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Statement Web Path
+                const stmtLink = await uploadToWhatsAppFolder(statementBase64, `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`);
+                const stmtMsg = `Hello ${dealer.businessName}, please find your account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}. \n\nView Statement: ${stmtLink}`;
+                window.open(`https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(stmtMsg)}`, '_blank');
+                console.log('[WhatsApp] Web Fallback triggers complete.');
             }
 
             setWhatsappSending('success');
             setTimeout(() => setWhatsappSending('idle'), 5000);
-
-            // 5. Success
-            setWhatsappSending('success');
-            setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
-            console.error('WhatsApp send failed', err);
+            console.error('[WhatsApp] Send failed:', err);
             setWhatsappSending('error');
             setWhatsappError(err.message || 'Failed to send WhatsApp message');
+        } finally {
+            setIsHandlingSendRef(false);
         }
     };
 
@@ -1153,6 +1150,8 @@ export default function Billing() {
         setDealerSearch('');
         setDriveUploadStatus('idle');
         setDriveError(null);
+        // Reset initialization ref so the next render recalculates the invoice number correctly
+        isInvoiceInitialized.current = false;
     };
 
     const handleNewInvoice = async () => {
@@ -2107,34 +2106,49 @@ export default function Billing() {
             {
                 showSuccess && selectedDealer && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-300 print:hidden">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
-                            <div className="bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center">
-                                <div className="w-20 h-20 bg-white rounded-full mx-auto flex items-center justify-center mb-4 animate-in zoom-in duration-500">
-                                    <CheckCircle className="text-emerald-600" size={48} />
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300 relative">
+                            {/* Close Button Trigger */}
+                            <button
+                                onClick={() => {
+                                    resetForm();
+                                    router.push('/billing');
+                                }}
+                                className="absolute top-4 right-4 text-white/60 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all z-10"
+                                title="Close"
+                            >
+                                <X size={20} />
+                            </button>
+
+                            <div className="bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center relative overflow-hidden">
+                                {/* Decorative background element */}
+                                <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
+                                
+                                <div className="w-20 h-20 bg-white shadow-xl rounded-full mx-auto flex items-center justify-center mb-4 animate-in zoom-in duration-500 delay-150">
+                                    <CheckCircle className="text-emerald-600" size={44} />
                                 </div>
-                                <h2 className="text-2xl font-bold text-white mb-2">Invoice Generated!</h2>
-                                <p className="text-emerald-50">Invoice {generatedRef} created successfully</p>
+                                <h2 className="text-2xl font-black text-white mb-1 tracking-tight">Invoice Generated!</h2>
+                                <p className="text-emerald-50 text-sm font-medium opacity-90">Invoice {generatedRef} created successfully</p>
                             </div>
 
                             <div className="p-6 space-y-4">
-                                <div className="bg-slate-50 p-4 rounded-lg">
-                                    <p className="text-sm text-slate-500 mb-1">Dealer</p>
-                                    <p className="font-bold text-slate-800">{selectedDealer.businessName}</p>
+                                <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-100/50">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Dealer Business Name</p>
+                                    <p className="font-bold text-slate-800 text-lg leading-tight">{selectedDealer.businessName}</p>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="bg-slate-50 p-4 rounded-lg">
-                                        <p className="text-sm text-slate-500 mb-1">Amount</p>
-                                        <p className="font-bold text-slate-800">₹{invoiceTotal.toFixed(2)}</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-100/50">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 text-center">Total Amount</p>
+                                        <p className="font-black text-emerald-600 text-center text-lg">₹{invoiceTotal.toFixed(2)}</p>
                                     </div>
-                                    <div className="bg-slate-50 p-4 rounded-lg">
-                                        <p className="text-sm text-slate-500 mb-1">Items</p>
-                                        <p className="font-bold text-slate-800">{invoiceItems.length}</p>
+                                    <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-100/50">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 text-center">No. of Items</p>
+                                        <p className="font-black text-slate-800 text-center text-lg">{invoiceItems.length}</p>
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col gap-3 pt-4">
-                                    <div className="flex gap-3">
+                                <div className="flex flex-col gap-3 pt-3">
+                                    <div className="grid grid-cols-3 gap-3">
                                         <button
                                             onClick={() => {
                                                 if (invoiceTotal <= 0.01) {
@@ -2143,43 +2157,37 @@ export default function Billing() {
                                                 }
                                                 handlePrint();
                                             }}
-                                            className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
+                                            className="py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-all shadow-lg shadow-slate-200 flex flex-col items-center gap-1 hover:-translate-y-1 active:scale-95 group"
                                         >
-                                            <Printer size={20} />
-                                            Print Invoice
+                                            <Printer size={18} className="opacity-80 group-hover:opacity-100 transition-opacity" />
+                                            <span className="text-[10px] uppercase tracking-tighter">Print</span>
                                         </button>
                                         <button
                                             onClick={() => {
                                                 resetForm();
                                                 router.push('/billing');
                                             }}
-                                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
+                                            className="py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex flex-col items-center gap-1 hover:-translate-y-1 active:scale-95 group"
                                         >
-                                            <Plus size={20} />
-                                            New Invoice
+                                            <Plus size={18} className="opacity-80 group-hover:opacity-100 transition-opacity" />
+                                            <span className="text-[10px] uppercase tracking-tighter">New Bill</span>
                                         </button>
                                         <button
                                             onClick={() => {
                                                 const idToEdit = createdInvoiceId || editInvoiceId;
                                                 if (idToEdit) {
-                                                    // Set URL param to allow refresh persistence
                                                     router.push(`/billing?edit=${idToEdit}`);
                                                 }
-                                                // If just closing modal, ensure we have the ID set in state
-                                                // But usually handling URL param change in useEffect is better. 
-                                                // Since we are already on the page with data, just hiding success might be checking url?
-                                                // Actually, editInvoiceId comes from searchParams. 
-                                                // So pushing router is the correct way to trigger 'edit mode'.
                                                 setShowSuccess(false);
                                             }}
-                                            className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                            className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 flex flex-col items-center gap-1 hover:-translate-y-1 active:scale-95 group"
                                         >
-                                            <Edit size={20} />
-                                            Edit
+                                            <Edit size={18} className="opacity-80 group-hover:opacity-100 transition-opacity" />
+                                            <span className="text-[10px] uppercase tracking-tighter">Edit Bill</span>
                                         </button>
                                     </div>
 
-                                    {/* WhatsApp Action - Trigger Preview */}
+                                    {/* WhatsApp Action */}
                                     <button
                                         onClick={() => {
                                             if (invoiceTotal <= 0.01) {
@@ -2221,11 +2229,11 @@ export default function Billing() {
                                             setShowWhatsAppPreview(true);
                                         }}
                                         disabled={whatsappSending === 'sending'}
-                                        className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all border-2 ${whatsappSending === 'success'
-                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
+                                        className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all ${whatsappSending === 'success'
+                                            ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200 scale-100'
                                             : whatsappSending === 'error'
-                                                ? 'bg-red-50 border-red-500 text-red-600'
-                                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                                ? 'bg-red-50 text-red-600 border border-red-100'
+                                                : 'bg-white border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-500 hover:text-white shadow-xl shadow-emerald-50 active:scale-95'
                                             }`}
                                     >
                                         {whatsappSending === 'sending' ? (
@@ -2233,26 +2241,32 @@ export default function Billing() {
                                         ) : whatsappSending === 'success' ? (
                                             <Check size={20} />
                                         ) : (
-                                            <MessageSquare size={20} className="text-emerald-500" />
+                                            <MessageSquare size={20} />
                                         )}
-                                        {whatsappSending === 'sending' ? 'Sending WhatsApp...' :
-                                            whatsappSending === 'success' ? 'Sent to WhatsApp!' :
-                                                whatsappSending === 'error' ? 'Retry WhatsApp Send' : 'Send via WhatsApp'}
+                                        <span className="text-sm">
+                                            {whatsappSending === 'sending' ? 'Sending WhatsApp...' :
+                                             whatsappSending === 'success' ? 'Invoice Sent to WhatsApp!' :
+                                             whatsappSending === 'error' ? 'Retry Sending WhatsApp' : 'Send via WhatsApp'}
+                                        </span>
                                     </button>
+
                                     {whatsappError && (
-                                        <p className="text-[10px] text-red-500 text-center">{whatsappError}</p>
+                                        <p className="text-[10px] text-red-500 text-center font-bold tracking-tight bg-red-50 py-1 rounded-md">{whatsappError}</p>
                                     )}
-                                    {/* Google Drive Upload Status */}
+
+                                    {/* Google Drive Status */}
                                     {driveUploadStatus !== 'idle' && (
-                                        <div className={`mt-2 py-2 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-2 ${driveUploadStatus === 'uploading' ? 'bg-blue-50 text-blue-600 border border-blue-200' :
-                                            driveUploadStatus === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' :
-                                                'bg-red-50 text-red-600 border border-red-200'
+                                        <div className={`mt-1 py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 ${driveUploadStatus === 'uploading' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
+                                            driveUploadStatus === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                                                'bg-red-50 text-red-600 border border-red-100'
                                             }`}>
-                                            {driveUploadStatus === 'uploading' && <Loader2 size={14} className="animate-spin" />}
-                                            {driveUploadStatus === 'success' && <Check size={14} />}
-                                            {driveUploadStatus === 'uploading' ? 'Saving to Google Drive...' :
-                                                driveUploadStatus === 'success' ? '✓ Invoice saved to Google Drive' :
-                                                    `Drive upload failed: ${driveError}`}
+                                            {driveUploadStatus === 'uploading' && <Loader2 size={12} className="animate-spin" />}
+                                            {driveUploadStatus === 'success' && <Check size={12} />}
+                                            <span className="text-[11px]">
+                                                {driveUploadStatus === 'uploading' ? 'Backing up to Google Drive...' :
+                                                 driveUploadStatus === 'success' ? 'Invoice backed up to Google Drive' :
+                                                 'Drive backup failed'}
+                                            </span>
                                         </div>
                                     )}
                                 </div>
@@ -2381,12 +2395,18 @@ export default function Billing() {
                             </button>
                             <button
                                 onClick={async () => {
-                                    setShowWhatsAppPreview(false);
+                                    if (whatsappSending === 'sending') return;
                                     await handleSendWhatsApp(previewData.dealer, previewData.invoiceData);
+                                    setShowWhatsAppPreview(false);
                                 }}
-                                className="px-8 py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-lg shadow-emerald-200"
+                                disabled={whatsappSending === 'sending'}
+                                className={`px-8 py-2.5 bg-emerald-600 text-white font-bold rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-emerald-200 ${whatsappSending === 'sending' ? 'opacity-70 cursor-not-allowed' : 'hover:bg-emerald-700'}`}
                             >
-                                <MessageSquare size={20} />
+                                {whatsappSending === 'sending' ? (
+                                    <Loader2 size={20} className="animate-spin" />
+                                ) : (
+                                    <MessageSquare size={20} />
+                                )}
                                 {whatsappSending === 'sending' ? 'Sending...' : 'Confirm & Send WhatsApp'}
                             </button>
                         </div>

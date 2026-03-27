@@ -443,8 +443,14 @@ async function getDriveOAuthAccessToken() {
     const serviceKey = process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY
         ? JSON.parse(process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY)
         : {};
-    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID || serviceKey.oauth_client_id || '';
-    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET || serviceKey.oauth_client_secret || '';
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || 
+                     process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_WEB || 
+                     process.env.GOOGLE_OAUTH_CLIENT_ID || 
+                     serviceKey.oauth_client_id || '';
+    const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || 
+                         process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_WEB || 
+                         process.env.GOOGLE_OAUTH_CLIENT_SECRET || 
+                         serviceKey.oauth_client_secret || '';
 
     const result = await postOAuthRequest({
         client_id: clientId,
