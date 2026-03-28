@@ -3,36 +3,79 @@ const path = require('path')
 const fs = require('fs')
 const https = require('https')
 
+// ─── Logging System (Critical for Production Debugging) ──────────────────────
+const logDir = path.join(app.getPath('userData'), 'logs');
+if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+const logFile = path.join(logDir, 'debug.log');
+
+function logToFile(...args) {
+    const timestamp = new Date().toISOString();
+    const message = args.map(arg => 
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+    ).join(' ');
+    const line = `[${timestamp}] ${message}\n`;
+    fs.appendFileSync(logFile, line);
+    console.log(message);
+}
+
+// Global Exception Handler
+process.on('uncaughtException', (err) => {
+    logToFile('CRITICAL ERROR (Uncaught Exception):', err.message);
+    logToFile(err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logToFile('CRITICAL ERROR (Unhandled Rejection):', reason);
+});
+
+logToFile('--- Application Starting ---');
+logToFile('Platform:', process.platform);
+logToFile('Version:', app.getVersion());
+logToFile('Is Packaged:', app.isPackaged);
+logToFile('UserData Path:', app.getPath('userData'));
+
 // ─── Load .env.local at runtime (required for production exe) ────────────────
 function loadEnvFile() {
-    const resourcesPath = process.resourcesPath || path.join(__dirname);
-    const envPaths = [
-        path.join(resourcesPath, 'app.asar.unpacked', '.env.local'), // packaged (asar unpacked)
-        path.join(resourcesPath, '.env.local'),                     // packaged (direct resource)
-        path.join(__dirname, '.env.local'),                          // dev mode
-    ];
+    try {
+        const resourcesPath = process.resourcesPath || path.join(__dirname);
+        const envPaths = [
+            path.join(resourcesPath, 'app.asar.unpacked', '.env.local'), // packaged (asar unpacked)
+            path.join(resourcesPath, '.env.local'),                     // packaged (direct resource)
+            path.join(__dirname, '.env.local'),                          // dev mode
+        ];
 
-    for (const envPath of envPaths) {
-        if (fs.existsSync(envPath)) {
-            const content = fs.readFileSync(envPath, 'utf8');
-            content.split('\n').filter(line => line.trim() && !line.startsWith('#')).forEach(line => {
-                const parts = line.split('=');
-                if (parts.length >= 2) {
-                    const key = parts[0].trim();
-                    let value = parts.slice(1).join('=').trim();
-                    
-                    // Strip surrounding quotes
-                    if ((value.startsWith("'") && value.endsWith("'")) || 
-                        (value.startsWith('"') && value.endsWith('"'))) {
-                        value = value.substring(1, value.length - 1);
+        let found = false;
+        for (const envPath of envPaths) {
+            if (fs.existsSync(envPath)) {
+                logToFile('[env] Trying path:', envPath);
+                const content = fs.readFileSync(envPath, 'utf8');
+                content.split('\n').filter(line => line.trim() && !line.startsWith('#')).forEach(line => {
+                    const parts = line.split('=');
+                    if (parts.length >= 2) {
+                        const key = parts[0].trim();
+                        let value = parts.slice(1).join('=').trim();
+                        
+                        // Strip surrounding quotes
+                        if ((value.startsWith("'") && value.endsWith("'")) || 
+                            (value.startsWith('"') && value.endsWith('"'))) {
+                            value = value.substring(1, value.length - 1);
+                        }
+                        
+                        if (!process.env[key]) {
+                            process.env[key] = value;
+                        }
                     }
-                    
-                    if (!process.env[key]) process.env[key] = value;
-                }
-            });
-            console.log('[env] Loaded:', envPath);
-            break;
+                });
+                logToFile('[env] Success: Loaded environment from', envPath);
+                found = true;
+                break;
+            }
         }
+        if (!found) {
+            logToFile('[env] WARNING: No .env.local file found in any expected location.');
+        }
+    } catch (err) {
+        logToFile('[env] ERROR: Failed to load environment file:', err.message);
     }
 }
 loadEnvFile();
@@ -68,6 +111,8 @@ function createWindow() {
         icon: path.join(__dirname, 'public', process.platform === 'win32' ? 'icon.ico' : 'icon.png')
     })
 
+    logToFile('[Main] Initializing BrowserWindow...');
+
     mainWindow.setMenuBarVisibility(false)
 
     mainWindow.once('ready-to-show', () => {
@@ -77,8 +122,15 @@ function createWindow() {
     // CSP Handler for runtime connections
     const { session } = require('electron')
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-        const supabaseHost = supabaseUrl ? new URL(supabaseUrl).host : '*.supabase.co';
+        let supabaseHost = '*.supabase.co';
+        try {
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+            if (supabaseUrl && supabaseUrl.startsWith('http')) {
+                supabaseHost = new URL(supabaseUrl).host;
+            }
+        } catch (e) {
+            logToFile('[CSP] Error parsing NEXT_PUBLIC_SUPABASE_URL:', e.message);
+        }
         
         callback({
             responseHeaders: {
@@ -94,8 +146,10 @@ function createWindow() {
     })
 
     if (isDev) {
+        logToFile('[Main] Loading dev URL: http://localhost:3000');
         mainWindow.loadURL('http://localhost:3000')
     } else {
+        logToFile('[Main] Loading production URL: app://localhost/');
         mainWindow.loadURL('app://localhost/')
     }
 
@@ -124,31 +178,37 @@ function createWindow() {
 }
 
 function initWhatsApp() {
-    if (whatsappClient && (whatsappStatus === 'CONNECTING' || whatsappStatus === 'QR_READY' || whatsappStatus === 'AUTHENTICATED' || whatsappStatus === 'READY')) {
-        console.log('WhatsApp Client already initialized or connecting. Status:', whatsappStatus);
-        return;
-    }
+    try {
+        if (whatsappClient && (whatsappStatus === 'CONNECTING' || whatsappStatus === 'QR_READY' || whatsappStatus === 'AUTHENTICATED' || whatsappStatus === 'READY')) {
+            logToFile('[WhatsApp] Client already initialized or connecting. Status:', whatsappStatus);
+            return;
+        }
 
-    console.log('Initializing WhatsApp Client...');
-    whatsappStatus = 'CONNECTING';
+        logToFile('[WhatsApp] Initializing WhatsApp Client...');
+        whatsappStatus = 'CONNECTING';
 
-    // Windows FIX: Building on Mac for Windows doesn't bundle the correct Chromium.
-    // We'll try to find Chrome or Edge on the user's Windows machine as a backup.
-    let executablePath = undefined;
-    if (process.platform === 'win32') {
-        const potentialPaths = [
-            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
-        ];
-        for (const p of potentialPaths) {
-            if (fs.existsSync(p)) {
-                executablePath = p;
-                break;
+        // Windows FIX: Building on Mac for Windows doesn't bundle the correct Chromium.
+        // We'll try to find Chrome or Edge on the user's Windows machine as a backup.
+        let executablePath = undefined;
+        if (process.platform === 'win32') {
+            const potentialPaths = [
+                'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+                'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+                'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+                'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+                // Chrome in user local apps
+                path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+                path.join(process.env.PROGRAMFILES || '', 'Google\\Chrome\\Application\\chrome.exe'),
+                path.join(process.env['PROGRAMFILES(X86)'] || '', 'Google\\Chrome\\Application\\chrome.exe')
+            ];
+            for (const p of potentialPaths) {
+                if (fs.existsSync(p)) {
+                    logToFile('[WhatsApp] Found system browser for Puppeteer:', p);
+                    executablePath = p;
+                    break;
+                }
             }
         }
-    }
 
     whatsappClient = new Client({
         authStrategy: new LocalAuth({
@@ -248,17 +308,20 @@ function initWhatsApp() {
         if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
     });
 
-    console.log('Starting WhatsApp Client initialization...');
-    whatsappClient.initialize().then(() => {
-        console.log('WhatsApp Client initialization promise resolved');
-    }).catch(err => {
-        console.error('WhatsApp Initialization Error:', err);
-        whatsappStatus = 'DISCONNECTED';
-        if (mainWindow) {
-            mainWindow.webContents.send('whatsapp:status', whatsappStatus);
-            mainWindow.webContents.send('whatsapp:auth_failure', 'Initialization failed: ' + (err.message || 'Unknown error'));
-        }
-    });
+        logToFile('[WhatsApp] Starting WhatsApp Client initialization...');
+        whatsappClient.initialize().then(() => {
+            logToFile('[WhatsApp] Client initialization promise resolved');
+        }).catch(err => {
+            logToFile('[WhatsApp] Initialization Error:', err.message);
+            whatsappStatus = 'DISCONNECTED';
+            if (mainWindow) {
+                mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+                mainWindow.webContents.send('whatsapp:auth_failure', 'Initialization failed: ' + (err.message || 'Unknown error'));
+            }
+        });
+    } catch (e) {
+        logToFile('[WhatsApp] CRITICAL failure in initWhatsApp:', e.message);
+    }
 }
 
 // IPC Handlers
@@ -637,6 +700,8 @@ app.whenReady().then(() => {
         // Normalize Pathname for Windows
         pathname = pathname.replace(/^\//, ''); // remove leading slash
         if (pathname === '' || pathname === '/') pathname = 'index.html'
+
+        logToFile('[app://] Loading:', pathname);
 
         // Handle Next.js route pathnames (SPA logic)
         if (!path.extname(pathname) && !pathname.endsWith('/')) {
