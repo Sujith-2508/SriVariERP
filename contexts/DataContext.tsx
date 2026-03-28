@@ -58,7 +58,6 @@ interface DataContextType {
     deleteDealerWithSheet: (id: string, sheetName: string, deleteTab: boolean) => Promise<void>;
     syncDealerLedgerToSheet: (dealerId: string) => Promise<void>;
     bulkSyncAllDealerLedgers: (onProgress?: (done: number, total: number, name: string) => void) => Promise<{ synced: number; errors: number }>;
-    rollOverDealerYear: (dealerId: string, closingDateStr: string, openingDateStr: string) => Promise<boolean>;
     // Agent methods
     addAgent: (agent: Omit<Agent, 'id'>) => Promise<string>;
     updateAgent: (agent: Agent) => Promise<void>;
@@ -1854,6 +1853,53 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [performBackgroundSync]);
 
     useEffect(() => {
+        // Automatic Financial Year Rollover check
+        const runAutoRollover = async () => {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            
+            // Current Fiscal Year Start: April 1st
+            let fyStartYear = currentYear;
+            if (now.getMonth() < 3) { // If currently Jan/Feb/Mar, start was April of PREVIOUS year
+                fyStartYear -= 1;
+            }
+            const fyStartDate = new Date(fyStartYear, 3, 1); // April 1st
+            
+            // Check for dealers that are trailing behind the current fiscal year
+            const dealersNeedRollover = dealers.filter(d => {
+                if (!d.openingBalanceDate) return false; // New/Legacy dealer with no date set yet
+                const obDate = new Date(d.openingBalanceDate);
+                return obDate < fyStartDate;
+            });
+
+            if (dealersNeedRollover.length > 0) {
+                console.log(`[DataContext] Auto-Rollover: ${dealersNeedRollover.length} dealers are due for FY rollover. Starting background process...`);
+                
+                const closingDate = new Date(fyStartDate);
+                closingDate.setDate(closingDate.getDate() - 1); // March 31st
+                const closingDateStr = closingDate.toISOString().split('T')[0];
+                const openingDateStr = fyStartDate.toISOString().split('T')[0];
+
+                for (const dealer of dealersNeedRollover) {
+                    try {
+                        await rollOverDealerYear(dealer.id, closingDateStr, openingDateStr);
+                        logToApplicationSheet('Auto Rollover', `FY closed automatically for ${dealer.businessName}`, 0);
+                    } catch (err) {
+                        console.error(`[DataContext] Auto rollover failed for ${dealer.businessName}:`, err);
+                    }
+                }
+                
+                // Final refresh to update UI state
+                await fetchData();
+            }
+        };
+
+        if (!isLoading && dealers.length > 0) {
+            runAutoRollover();
+        }
+    }, [isLoading, dealers.length]);
+
+    useEffect(() => {
         // Weekly periodic sync (every 5 minutes)
         const intervalId = setInterval(async () => {
             console.log('[DataContext] Background Interval: Triggering periodic sync check...');
@@ -1898,7 +1944,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             deleteDealerWithSheet,
             syncDealerLedgerToSheet,
             bulkSyncAllDealerLedgers,
-            rollOverDealerYear,
             addAgent,
             updateAgent,
             deleteAgent,

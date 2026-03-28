@@ -19,7 +19,7 @@ import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 // ... existing imports
 
 export default function DealerLedger() {
-    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers, rollOverDealerYear, companySettings } = useData();
+    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers, companySettings } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [isSyncing, setIsSyncing] = useState(false);
@@ -34,6 +34,7 @@ export default function DealerLedger() {
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [exportingPdf, setExportingPdf] = useState(false);
     const [bulkExporting, setBulkExporting] = useState(false);
+
 
     // Date range modal state
     const [dateRangeModal, setDateRangeModal] = useState<{
@@ -1558,37 +1559,6 @@ export default function DealerLedger() {
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
                             <h2 className="text-xl font-bold text-slate-800">Edit Dealer</h2>
                             <div className="flex gap-2 items-center">
-                                {editingDealer && (
-                                    <button
-                                        type="button"
-                                        onClick={async () => {
-                                            const confirmed = await showConfirm({
-                                                title: 'Close Financial Year',
-                                                message: 'This will close the current financial year for this dealer. It will delete local transaction history (saving space) and append Closing/Opening rows to their Google Sheet ledger. Proceed?',
-                                                confirmLabel: 'Yes, Roll Over',
-                                                type: 'danger'
-                                            });
-                                            if (confirmed) {
-                                                const defaultYear = new Date().getMonth() < 3 ? new Date().getFullYear() : new Date().getFullYear();
-                                                const closingDateStr = prompt('Enter Closing Date (YYYY-MM-DD):', `${defaultYear}-03-31`);
-                                                if (!closingDateStr) return;
-                                                const openingDateStr = prompt('Enter New Opening Date (YYYY-MM-DD):', `${defaultYear}-04-01`);
-                                                if (!openingDateStr) return;
-                                                
-                                                try {
-                                                    await rollOverDealerYear(editingDealer.id, closingDateStr, openingDateStr);
-                                                    showToast('Financial year rolled over successfully!', 'success');
-                                                    setIsEditModalOpen(false);
-                                                } catch (e) {
-                                                    showToast('Rollover failed', 'error');
-                                                }
-                                            }
-                                        }}
-                                        className="px-3 py-1.5 text-sm bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-lg font-medium transition-colors"
-                                    >
-                                        Close Financial Year
-                                    </button>
-                                )}
                                 <button
                                     onClick={() => {
                                         setIsEditModalOpen(false);

@@ -476,14 +476,14 @@ export async function appendRolloverRowsToDealerSheet(dealerName: string, balanc
     try {
         const closingRow = [
             new Date(closingDateStr).toLocaleDateString('en-IN'), // A: Date
-            '================ FINANCIAL YEAR CLOSED ================', // B: Particulars
+            "'CLOSING BALANCE (CARRIED FORWARD)", // B: Particulars
             '', '', '', '', '', // C-G
             Math.abs(balance), // H: Balance
             balance >= 0 ? 'Cr' : 'Dr' // I: Type
         ];
         const openingRow = [
             new Date(openingDateStr).toLocaleDateString('en-IN'), // A: Date
-            'Opening Balance (Forwarded)', // B: Particulars
+            "'OPENING BALANCE (BROUGHT FORWARD)", // B: Particulars
             '', '', '', '', '', // C-G
             Math.abs(balance), // H: Balance
             balance >= 0 ? 'Cr' : 'Dr' // I: Type
