@@ -207,14 +207,6 @@ export default function AgentsPage() {
                     </div>
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={() => window.open('https://docs.google.com/spreadsheets/d/1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0', '_blank')}
-                            className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-emerald-100 transition-all border border-emerald-100 shadow-sm"
-                        >
-                            <FileText size={16} />
-                            View Sheets
-                            <ExternalLink size={14} className="opacity-50" />
-                        </button>
-                        <button
                             onClick={() => handleRefresh()}
                             className={`p-2.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all flex items-center gap-2 ${isLoading || loadingTracking ? 'animate-pulse cursor-wait' : ''}`}
                             title="Refresh Data"

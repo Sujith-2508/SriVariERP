@@ -1017,3 +1017,363 @@ export const generateWholeCompanyStatementPDFBase64 = async (
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
 };
+
+/**
+ * Generates an Agent Salary Report PDF.
+ * Supports all agents or a specific agent, for a month or full year.
+ */
+export const generateSalaryReportPDF = (
+    agents: { id: string; name: string; phone: string; division?: string }[],
+    salaries: {
+        agentId: string;
+        month: number;
+        year: number;
+        baseSalary: number;
+        travelExpense: number;
+        stayExpense: number;
+        foodExpense: number;
+        otherExpense: number;
+        totalExpense: number;
+        netSalary: number;
+        paymentStatus: string;
+    }[],
+    company: CompanySettings,
+    options: {
+        agentId?: string; // undefined = all agents
+        month?: number;   // undefined = all months (year report)
+        year: number;
+        customLabel?: string;
+    }
+): void => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+
+    const filteredAgent = options.agentId ? agents.find(a => a.id === options.agentId) : null;
+
+    // Filter salaries
+    let filtered = salaries;
+    if (options.customLabel) {
+        // If custom label is provided, assume salaries are already filtered for the range
+        // but still filter by agent if needed
+        if (options.agentId) filtered = filtered.filter(s => s.agentId === options.agentId);
+    } else {
+        if (options.agentId) filtered = filtered.filter(s => s.agentId === options.agentId);
+        if (options.month) filtered = filtered.filter(s => s.month === options.month);
+        filtered = filtered.filter(s => s.year === options.year);
+    }
+
+    const periodLabel = options.customLabel || (options.month
+        ? `${monthNames[options.month - 1]} ${options.year}`
+        : `Year ${options.year}`);
+
+    // --- Header ---
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${company.addressLine1 || ''} | GST: ${company.gstNumber || 'N/A'}`, 12, 23);
+
+    doc.line(100, 10, 100, 32);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('SALARY REPORT', 150, 20, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(periodLabel, 150, 27, { align: 'center' });
+    if (filteredAgent) doc.text(`Agent: ${filteredAgent.name}`, 150, 32, { align: 'center' });
+
+    doc.line(10, 33, 200, 33);
+
+    // --- Table ---
+    const tableRows = filtered.map(s => {
+        const agent = agents.find(a => a.id === s.agentId);
+        return [
+            agent?.name || 'Unknown',
+            options.month ? '-' : monthNames[s.month - 1],
+            `Rs. ${s.baseSalary.toLocaleString('en-IN')}`,
+            `Rs. ${s.travelExpense.toLocaleString('en-IN')}`,
+            `Rs. ${s.stayExpense.toLocaleString('en-IN')}`,
+            `Rs. ${s.foodExpense.toLocaleString('en-IN')}`,
+            `Rs. ${s.otherExpense.toLocaleString('en-IN')}`,
+            `Rs. ${s.netSalary.toLocaleString('en-IN')}`,
+            s.paymentStatus,
+        ];
+    });
+
+    const headers = ['Agent', 'Month', 'Base Salary', 'Travel', 'Stay', 'Food', 'Other', 'Net Salary', 'Status'];
+
+    autoTable(doc, {
+        head: [headers],
+        body: tableRows,
+        startY: 36,
+        theme: 'grid',
+        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 },
+        styles: { fontSize: 7, cellPadding: 2 },
+        columnStyles: {
+            0: { halign: 'left' },
+            1: { halign: 'left' },
+            2: { halign: 'right' },
+            3: { halign: 'right' },
+            4: { halign: 'right' },
+            5: { halign: 'right' },
+            6: { halign: 'right' },
+            7: { halign: 'right' },
+            8: { halign: 'center' },
+        },
+        margin: { left: 10, right: 10 },
+        foot: [[
+            `Total (${filtered.length})`,
+            '',
+            `Rs. ${filtered.reduce((s, r) => s + r.baseSalary, 0).toLocaleString('en-IN')}`,
+            `Rs. ${filtered.reduce((s, r) => s + r.travelExpense, 0).toLocaleString('en-IN')}`,
+            `Rs. ${filtered.reduce((s, r) => s + r.stayExpense, 0).toLocaleString('en-IN')}`,
+            `Rs. ${filtered.reduce((s, r) => s + r.foodExpense, 0).toLocaleString('en-IN')}`,
+            `Rs. ${filtered.reduce((s, r) => s + r.otherExpense, 0).toLocaleString('en-IN')}`,
+            `Rs. ${filtered.reduce((s, r) => s + r.netSalary, 0).toLocaleString('en-IN')}`,
+            '',
+        ]],
+        footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold', fontSize: 7 },
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 8;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'italic');
+    doc.text('This is a computer-generated salary report.', 105, Math.min(finalY, 280), { align: 'center' });
+
+    doc.save(`Salary_Report_${periodLabel.replace(/ /g, '_')}.pdf`);
+};
+
+/**
+ * Generates a Company Expenses Report PDF.
+ */
+export const generateExpenseReportPDF = (
+    expenses: {
+        id: string;
+        expenseType: string;
+        customName?: string;
+        amount: number;
+        date: Date;
+        notes?: string;
+    }[],
+    company: CompanySettings,
+    periodLabel: string
+): void => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    const getExpenseLabel = (type: string) => {
+        switch (type) {
+            case 'GODOWN_RENT': return 'Godown Rent';
+            case 'ELECTRICITY_BILL': return 'Electricity Bill';
+            case 'OFFICE_RENT': return 'Office Rent';
+            case 'OTHER': return 'Other';
+            default: return type;
+        }
+    };
+
+    // --- Header ---
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${company.addressLine1 || ''} | GST: ${company.gstNumber || 'N/A'}`, 12, 23);
+
+    doc.line(100, 10, 100, 32);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('EXPENSE STATEMENT', 150, 20, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(periodLabel, 150, 27, { align: 'center' });
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 150, 32, { align: 'center' });
+
+    doc.line(10, 33, 200, 33);
+
+    // --- Category Summary Boxes ---
+    const byType: Record<string, number> = {};
+    expenses.forEach(e => {
+        const label = getExpenseLabel(e.expenseType);
+        byType[label] = (byType[label] || 0) + e.amount;
+    });
+    const totalAmount = expenses.reduce((s, e) => s + e.amount, 0);
+
+    let boxX = 12;
+    const boxY = 36;
+    const categories = Object.entries(byType);
+    const boxW = categories.length > 0 ? Math.min(44, (188 / categories.length)) : 44;
+
+    categories.forEach(([label, amount]) => {
+        doc.setFillColor(240, 253, 244);
+        doc.setDrawColor(16, 185, 129);
+        doc.rect(boxX, boxY, boxW - 2, 16, 'FD');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(16, 100, 60);
+        doc.text(label, boxX + (boxW - 2) / 2, boxY + 6, { align: 'center', maxWidth: boxW - 4 });
+        doc.setFontSize(8);
+        doc.text(`Rs. ${amount.toLocaleString('en-IN')}`, boxX + (boxW - 2) / 2, boxY + 12, { align: 'center' });
+        boxX += boxW;
+    });
+    doc.setTextColor(0);
+
+    // --- Table ---
+    const tableRows = expenses.map(e => [
+        new Date(e.date).toLocaleDateString('en-GB'),
+        getExpenseLabel(e.expenseType),
+        e.customName || '-',
+        e.notes || '-',
+        `Rs. ${e.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+    ]);
+
+    autoTable(doc, {
+        head: [['Date', 'Type', 'Description', 'Notes', 'Amount']],
+        body: tableRows,
+        startY: boxY + 20,
+        theme: 'grid',
+        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        styles: { fontSize: 8, cellPadding: 2 },
+        columnStyles: {
+            4: { halign: 'right' },
+        },
+        margin: { left: 10, right: 10 },
+        foot: [['', '', '', 'TOTAL', `Rs. ${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`]],
+        footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold', fontSize: 9 },
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 8;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'italic');
+    doc.text('This is a computer-generated company expense statement.', 105, Math.min(finalY, 280), { align: 'center' });
+
+    doc.save(`Expenses_${periodLabel.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+};
+
+/**
+ * Generates a Profit Analysis PDF Report.
+ */
+export const generateProfitAnalysisPDF = (
+    company: CompanySettings,
+    data: {
+        periodLabel: string;
+        revenue: number;
+        cogs: number;
+        discounts: number;
+        grossProfit: number;
+        netProfit: number;
+        margin: number;
+        agentSalariesTotal: number;
+        companyExpensesTotal: number;
+        invoiceCount: number;
+        dealerBreakdown: { name: string; revenue: number; cogs: number; grossProfit: number; count: number }[];
+    }
+): void => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    const fmt = (n: number) => `Rs. ${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+    // Header
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${company.addressLine1 || ''} | GST: ${company.gstNumber || 'N/A'}`, 12, 23);
+
+    doc.line(100, 10, 100, 32);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PROFIT ANALYSIS', 150, 18, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(data.periodLabel, 150, 25, { align: 'center' });
+    doc.text(`Based on ${data.invoiceCount} invoices`, 150, 31, { align: 'center' });
+
+    doc.line(10, 33, 200, 33);
+
+    // Summary breakdown
+    const summaryRows = [
+        ['Total Sales Revenue', fmt(data.revenue), ''],
+        ['(-) Cost of Goods Sold (COGS)', fmt(data.cogs), `${data.revenue > 0 ? ((data.cogs / data.revenue) * 100).toFixed(1) : 0}%`],
+        ['(-) Dealer Discounts', fmt(data.discounts), ''],
+        ['= Gross Profit', fmt(data.grossProfit), `${data.revenue > 0 ? ((data.grossProfit / data.revenue) * 100).toFixed(1) : 0}%`],
+        ['(-) Agent Salaries', fmt(data.agentSalariesTotal), ''],
+        ['(-) Company Expenses', fmt(data.companyExpensesTotal), ''],
+        ['= NET PROFIT', fmt(data.netProfit), `${data.margin.toFixed(1)}%`],
+    ];
+
+    autoTable(doc, {
+        head: [['Item', 'Amount', 'Ratio']],
+        body: summaryRows,
+        startY: 36,
+        theme: 'grid',
+        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: {
+            0: { cellWidth: 110 },
+            1: { cellWidth: 50, halign: 'right' },
+            2: { cellWidth: 30, halign: 'center' },
+        },
+        didParseCell: (data) => {
+            // Highlight net profit row
+            if (data.row.index === summaryRows.length - 1 && data.section === 'body') {
+                data.cell.styles.fillColor = [data.cell.raw?.toString().includes('NET') ? 230 : 255, 253, 244];
+                data.cell.styles.fontStyle = 'bold';
+                data.cell.styles.fontSize = 10;
+            }
+        },
+        margin: { left: 10, right: 10 },
+    });
+
+    // Dealer breakdown
+    if (data.dealerBreakdown.length > 0) {
+        const dealerRows = data.dealerBreakdown
+            .sort((a, b) => b.revenue - a.revenue)
+            .map(d => [
+                d.name,
+                d.count.toString(),
+                fmt(d.revenue),
+                fmt(d.cogs),
+                fmt(d.grossProfit),
+                `${d.revenue > 0 ? ((d.grossProfit / d.revenue) * 100).toFixed(1) : 0}%`,
+            ]);
+
+        autoTable(doc, {
+            head: [['Dealer', 'Inv.', 'Revenue', 'COGS', 'Gross Profit', 'Margin']],
+            body: dealerRows,
+            startY: (doc as any).lastAutoTable.finalY + 8,
+            theme: 'striped',
+            headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+            styles: { fontSize: 8, cellPadding: 2 },
+            columnStyles: {
+                0: { cellWidth: 50 },
+                1: { cellWidth: 12, halign: 'center' },
+                2: { cellWidth: 34, halign: 'right' },
+                3: { cellWidth: 34, halign: 'right' },
+                4: { cellWidth: 34, halign: 'right' },
+                5: { cellWidth: 26, halign: 'center' },
+            },
+            margin: { left: 10, right: 10 },
+        });
+    }
+
+    const finalY = (doc as any).lastAutoTable.finalY + 8;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'italic');
+    doc.text('This is a computer-generated profit analysis report.', 105, Math.min(finalY, 280), { align: 'center' });
+
+    doc.save(`Profit_Analysis_${data.periodLabel.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+};

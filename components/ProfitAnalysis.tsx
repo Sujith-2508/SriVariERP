@@ -6,18 +6,29 @@ import { calculateInvoiceProfit, formatCurrency } from '@/lib/utils';
 import { TransactionType, AgentSalaryData, CompanyExpense } from '@/types';
 import { getSalaryByRange } from '@/lib/salaryService';
 import { getExpensesByRange } from '@/lib/expenseService';
-import { TrendingUp, TrendingDown, Calendar, ArrowLeft, ArrowRight, DollarSign, Percent, Package, Users } from 'lucide-react';
+import { generateProfitAnalysisPDF } from '@/lib/pdfGenerator';
+import { TrendingUp, TrendingDown, Calendar, ArrowLeft, ArrowRight, DollarSign, Percent, Package, Users, Download, X, FileText, Clock, Search, RefreshCw } from 'lucide-react';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export function ProfitAnalysis() {
-    const { transactions, products, dealers } = useData();
+    const { transactions, products, dealers, companySettings } = useData();
     const [period, setPeriod] = useState<Period>('monthly');
     const [date, setDate] = useState(new Date());
 
     // State for period-specific expenses/salaries
     const [agentSalaries, setAgentSalaries] = useState<AgentSalaryData[]>([]);
     const [companyExpenses, setCompanyExpenses] = useState<CompanyExpense[]>([]);
+
+    const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+    const [dateRangeModal, setDateRangeModal] = useState({
+        open: false,
+        range: 'monthly' as 'all' | 'fy-pick' | 'month-pick' | 'custom',
+        selectedFY: new Date().getFullYear().toString(),
+        selectedMonth: new Date().toISOString().slice(0, 7),
+        startDate: new Date().toISOString().slice(0, 10),
+        endDate: new Date().toISOString().slice(0, 10)
+    });
 
     // --- DATA CALCULATION ---
 
@@ -152,6 +163,95 @@ export function ProfitAnalysis() {
         setDate(newDate);
     };
 
+    // Export handler
+    const handleExportPDF = async () => {
+        setIsGeneratingPdf(true);
+        try {
+            let start = new Date();
+            let end = new Date();
+            let periodLbl = '';
+
+            if (dateRangeModal.range === 'all') {
+                const dates = transactions.map(t => new Date(t.date).getTime());
+                start = dates.length > 0 ? new Date(Math.min(...dates)) : new Date();
+                end = new Date();
+                periodLbl = 'Complete Historical Statement';
+            } else if (dateRangeModal.range === 'fy-pick') {
+                const year = parseInt(dateRangeModal.selectedFY);
+                start = new Date(year, 3, 1); // April 1st
+                end = new Date(year + 1, 2, 31, 23, 59, 59, 999); // March 31st
+                periodLbl = `FY ${year}-${String(year + 1).slice(-2)}`;
+            } else if (dateRangeModal.range === 'month-pick') {
+                const [y, m] = dateRangeModal.selectedMonth.split('-').map(Number);
+                start = new Date(y, m - 1, 1);
+                end = new Date(y, m, 0, 23, 59, 59, 999);
+                periodLbl = start.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+            } else {
+                start = new Date(dateRangeModal.startDate);
+                end = new Date(dateRangeModal.endDate);
+                end.setHours(23, 59, 59, 999);
+                periodLbl = `${start.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - ${end.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+            }
+
+            // Calculations for the selected range
+            const rangeInvoices = transactions.filter(t => {
+                if (t.type !== TransactionType.INVOICE) return false;
+                const tDate = new Date(t.date);
+                return tDate.getTime() >= start.getTime() && tDate.getTime() <= end.getTime();
+            });
+
+            const [rangeSalaries, rangeExpenses] = await Promise.all([
+                getSalaryByRange(start, end),
+                getExpensesByRange(start, end)
+            ]);
+
+            let rRevenue = 0, rCogs = 0, rDiscounts = 0, rGp = 0, rNp = 0;
+            const dealerStats: any = {};
+
+            rangeInvoices.forEach(inv => {
+                const calc = calculateInvoiceProfit(inv, products);
+                rRevenue += calc.revenue;
+                rCogs += calc.cogs;
+                rDiscounts += calc.dealerDiscount;
+                rGp += calc.grossProfit;
+                rNp += calc.netProfit;
+
+                const dealer = dealers.find((d: any) => d.id === inv.customerId);
+                const dName = dealer?.businessName || 'Unknown Dealer';
+                if (!dealerStats[inv.customerId]) {
+                    dealerStats[inv.customerId] = { name: dName, revenue: 0, cogs: 0, grossProfit: 0, count: 0 };
+                }
+                dealerStats[inv.customerId].revenue += calc.revenue;
+                dealerStats[inv.customerId].cogs += calc.cogs;
+                dealerStats[inv.customerId].grossProfit += calc.grossProfit;
+                dealerStats[inv.customerId].count += 1;
+            });
+
+            const totalSalaries = rangeSalaries.reduce((acc, s) => acc + s.baseSalary + (s.totalExpense || 0), 0);
+            const totalCompExpenses = rangeExpenses.reduce((acc, e) => acc + e.amount, 0);
+            const rangeNetProfit = rNp - (totalSalaries + totalCompExpenses);
+            const rangeMargin = rRevenue > 0 ? (rangeNetProfit / rRevenue) * 100 : 0;
+
+            generateProfitAnalysisPDF(companySettings, {
+                periodLabel: periodLbl,
+                revenue: rRevenue,
+                cogs: rCogs,
+                discounts: rDiscounts,
+                grossProfit: rGp,
+                netProfit: rangeNetProfit,
+                margin: rangeMargin,
+                agentSalariesTotal: totalSalaries,
+                companyExpensesTotal: totalCompExpenses,
+                invoiceCount: rangeInvoices.length,
+                dealerBreakdown: Object.values(dealerStats) as any[],
+            });
+
+            setDateRangeModal(prev => ({ ...prev, open: false }));
+        } finally {
+            setIsGeneratingPdf(false);
+        }
+    };
+
     return (
         <div className="h-full overflow-y-auto p-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -160,18 +260,29 @@ export function ProfitAnalysis() {
                     <p className="text-sm text-slate-500">Detailed breakdown of revenue, costs, and margins</p>
                 </div>
 
-                {/* Period Selectors */}
-                <div className="flex bg-slate-100 p-1 rounded-lg">
-                    {(['daily', 'weekly', 'monthly', 'yearly'] as Period[]).map((p) => (
-                        <button
-                            key={p}
-                            onClick={() => setPeriod(p)}
-                            className={`px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all ${period === p ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                }`}
-                        >
-                            {p}
-                        </button>
-                    ))}
+                <div className="flex items-center gap-3">
+                    {/* Export PDF */}
+                    <button
+                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: true }))}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 transition-all shadow-md shadow-emerald-100"
+                    >
+                        <Download size={15} />
+                        Export Statements
+                    </button>
+
+                    {/* Period Selectors */}
+                    <div className="flex bg-slate-100 p-1 rounded-lg">
+                        {(['daily', 'weekly', 'monthly', 'yearly'] as Period[]).map((p) => (
+                            <button
+                                key={p}
+                                onClick={() => setPeriod(p)}
+                                className={`px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all ${period === p ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                            >
+                                {p}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -404,6 +515,147 @@ export function ProfitAnalysis() {
                     </table>
                 </div>
             </div>
+
+            {/* ─── Profit analysis Export Modal ───────────────────────── */}
+            {dateRangeModal.open && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200"
+                        onClick={e => e.stopPropagation()}>
+                        
+                        {/* Header */}
+                        <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center">
+                                    <Download size={18} className="text-white" />
+                                </div>
+                                <div>
+                                    <p className="font-bold text-white text-base">Profit Analysis Export</p>
+                                    <p className="text-slate-400 text-xs">Select range for profitability report</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                className="text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X size={22} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-5">
+                            {/* 4 Option Cards */}
+                            <div className="grid grid-cols-2 gap-3">
+                                {[
+                                    { id: 'all', icon: <FileText size={22} />, label: 'Complete', sub: 'Entire history' },
+                                    { id: 'fy-pick', icon: <Calendar size={22} />, label: 'Financial Year', sub: 'Apr–Mar range' },
+                                    { id: 'month-pick', icon: <Clock size={22} />, label: 'By Month', sub: 'Specific month' },
+                                    { id: 'custom', icon: <Search size={22} />, label: 'Custom Range', sub: 'Pick from–to dates' },
+                                ].map((opt) => (
+                                    <button
+                                        key={opt.id}
+                                        onClick={() => setDateRangeModal(prev => ({ ...prev, range: opt.id as any }))}
+                                        className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all text-center ${
+                                            dateRangeModal.range === opt.id
+                                                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                                                : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50/50'
+                                        }`}
+                                    >
+                                        <span className={dateRangeModal.range === opt.id ? 'text-emerald-600' : 'text-slate-400'}>{opt.icon}</span>
+                                        <span className="font-semibold text-sm leading-tight">{opt.label}</span>
+                                        <span className="text-xs text-slate-400">{opt.sub}</span>
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Dynamic Sub-fields */}
+                            <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                {dateRangeModal.range === 'fy-pick' && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Select Financial Year</label>
+                                        <select
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium text-sm"
+                                            value={dateRangeModal.selectedFY}
+                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedFY: e.target.value }))}
+                                        >
+                                            {(() => {
+                                                const currentYear = new Date().getFullYear();
+                                                const startYear = 2022;
+                                                const yearsList = Array.from({ length: (currentYear + 15) - startYear + 1 }, (_, i) => startYear + i).reverse();
+                                                return yearsList.map(y => (
+                                                    <option key={y} value={y.toString()}>FY {y}-{String(y + 1).slice(-2)}</option>
+                                                ));
+                                            })()}
+                                        </select>
+                                    </div>
+                                )}
+
+                                {dateRangeModal.range === 'month-pick' && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Select Month</label>
+                                        <input
+                                            type="month"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                            value={dateRangeModal.selectedMonth}
+                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedMonth: e.target.value }))}
+                                        />
+                                    </div>
+                                )}
+
+                                {dateRangeModal.range === 'custom' && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Start Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                                value={dateRangeModal.startDate}
+                                                onChange={(e) => setDateRangeModal(prev => ({ ...prev, startDate: e.target.value }))}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">End Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                                value={dateRangeModal.endDate}
+                                                onChange={(e) => setDateRangeModal(prev => ({ ...prev, endDate: e.target.value }))}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {dateRangeModal.range === 'all' && (
+                                    <div className="text-center py-2">
+                                        <p className="text-sm font-medium text-slate-600">Generating complete historical statement</p>
+                                        <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-bold">Includes all records from the beginning</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                    className="flex-1 py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleExportPDF}
+                                    disabled={isGeneratingPdf}
+                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-[0.98] disabled:opacity-50"
+                                >
+                                    {isGeneratingPdf ? (
+                                        <><RefreshCw size={18} className="animate-spin" /> Working...</>
+                                    ) : (
+                                        <><Download size={18} /> Export PDF</>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { validatePassword } from '@/lib/validation';
 import { useData } from '@/contexts/DataContext';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
+import { useToast } from '@/contexts/ToastContext';
 
 export default function SettingsPage() {
     const { refreshData } = useData();
@@ -21,6 +22,8 @@ export default function SettingsPage() {
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [passwordsMatch, setPasswordsMatch] = useState(true);
+    const { showToast } = useToast();
     const [driveConnected, setDriveConnected] = useState(false);
     const [driveConnecting, setDriveConnecting] = useState(false);
     const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -122,6 +125,15 @@ export default function SettingsPage() {
         };
         loadCompany();
     }, []);
+
+    // Real-time password matching
+    useEffect(() => {
+        if (confirmPassword && newPassword) {
+            setPasswordsMatch(newPassword === confirmPassword);
+        } else {
+            setPasswordsMatch(true);
+        }
+    }, [newPassword, confirmPassword]);
 
     const handleSaveCompanySettings = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -316,15 +328,14 @@ export default function SettingsPage() {
             .eq('id', userId);
 
         if (error) {
-            setMessage({ type: 'error', text: 'Failed to update username: ' + error.message });
+            showToast('Failed to update username: ' + error.message, 'error');
         } else {
             sessionStorage.setItem('username', newUsername.trim());
             setCurrentUsername(newUsername.trim());
             setNewUsername('');
             await logToApplicationSheet('Security Settings Updated', `Admin username changed from ${currentUsername} to ${newUsername.trim()}`);
-            setMessage({ type: 'success', text: 'Username updated successfully!' });
+            showToast('Username updated successfully!', 'success');
         }
-        setTimeout(() => setMessage(null), 4000);
     };
 
     const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -346,18 +357,18 @@ export default function SettingsPage() {
         }
 
         if (currentPassword !== user.password) {
-            setMessage({ type: 'error', text: 'Current password is incorrect' });
+            showToast('Current password is incorrect', 'error', '#current-password');
             return;
         }
 
         const validation = validatePassword(newPassword);
         if (!validation.valid) {
-            setMessage({ type: 'error', text: validation.message });
+            showToast(validation.message, 'error', '#new-password');
             return;
         }
 
         if (newPassword !== confirmPassword) {
-            setMessage({ type: 'error', text: 'New passwords do not match' });
+            showToast('New passwords do not match', 'error', '#confirm-password');
             return;
         }
 
@@ -367,13 +378,12 @@ export default function SettingsPage() {
             .eq('id', userId);
 
         if (updateError) {
-            setMessage({ type: 'error', text: 'Failed to update password.' });
+            showToast('Failed to update password.', 'error');
         } else {
             setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
-            await logToApplicationSheet('Security Settings Updated', `Admin password changed. New Password: ${newPassword}`);
-            setMessage({ type: 'success', text: 'Password updated successfully!' });
+            await logToApplicationSheet('Security Settings Updated', `Admin password changed.`);
+            showToast('Password updated successfully!', 'success');
         }
-        setTimeout(() => setMessage(null), 4000);
     };
 
     // Recovery info update removed
@@ -745,9 +755,18 @@ export default function SettingsPage() {
                                         {show ? <EyeOff size={18} /> : <Eye size={18} />}
                                     </button>
                                 </div>
+                                {label === 'Confirm New Password' && !passwordsMatch && (
+                                    <p className="text-[10px] text-red-500 font-bold mt-1 animate-pulse">âš  Passwords do not match</p>
+                                )}
                             </div>
                         ))}
-                        <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors">Update Password</button>
+                        <button 
+                            type="submit" 
+                            disabled={!passwordsMatch || !newPassword || !currentPassword}
+                            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-600/20 active:scale-95"
+                        >
+                            Update Password
+                        </button>
                     </form>
                 </div>
 

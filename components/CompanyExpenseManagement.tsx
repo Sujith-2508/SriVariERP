@@ -4,20 +4,37 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CompanyExpense } from '@/types';
 import {
     getExpensesByMonth,
+    getExpensesByYear,
+    getExpensesByRange,
+    getAllExpenses,
     createCompanyExpense,
     updateCompanyExpense,
     deleteCompanyExpense
 } from '@/lib/expenseService';
-import { Calendar, Receipt, Plus, Edit2, Trash2, X, Check } from 'lucide-react';
+import { generateExpenseReportPDF } from '@/lib/pdfGenerator';
+import { Calendar, Receipt, Plus, Edit2, Trash2, X, Check, Download, CalendarDays, CalendarRange, LayoutGrid } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
+import { useData } from '@/contexts/DataContext';
 import { getISTDateString } from '@/lib/utils';
+
+type ExpenseExportOption = 'complete' | 'financial_year' | 'by_month' | 'custom_range';
 
 export default function CompanyExpenseManagement() {
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
+    const { companySettings } = useData();
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+    const [showExportModal, setShowExportModal] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
+    const [exportOption, setExportOption] = useState<ExpenseExportOption>('by_month');
+    const [exportMonth, setExportMonth] = useState(new Date().getMonth() + 1);
+    const [exportYear, setExportYear] = useState(new Date().getFullYear());
+    const [exportFromMonth, setExportFromMonth] = useState(1);
+    const [exportFromYear, setExportFromYear] = useState(new Date().getFullYear());
+    const [exportToMonth, setExportToMonth] = useState(new Date().getMonth() + 1);
+    const [exportToYear, setExportToYear] = useState(new Date().getFullYear());
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [expenses, setExpenses] = useState<CompanyExpense[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -131,6 +148,44 @@ export default function CompanyExpenseManagement() {
         }
     };
 
+    // ── Modal Export Handler ──────────────────────────────────────────
+    const handleExport = async () => {
+        setIsExporting(true);
+        try {
+            let data: CompanyExpense[] = [];
+            let label = '';
+            const monthNames2 = monthNames;
+
+            if (exportOption === 'complete') {
+                data = await getAllExpenses();
+                label = 'All Time';
+            } else if (exportOption === 'financial_year') {
+                const start = new Date(exportYear, 3, 1);
+                const end = new Date(exportYear + 1, 2, 31, 23, 59, 59);
+                data = await getExpensesByRange(start, end);
+                label = `FY ${exportYear}-${String(exportYear + 1).slice(-2)}`;
+            } else if (exportOption === 'by_month') {
+                data = await getExpensesByMonth(exportMonth, exportYear);
+                label = `${monthNames2[exportMonth - 1]} ${exportYear}`;
+            } else if (exportOption === 'custom_range') {
+                data = await getExpensesByRange(
+                    new Date(exportFromYear, exportFromMonth - 1, 1),
+                    new Date(exportToYear, exportToMonth, 0)
+                );
+                label = `${monthNames2[exportFromMonth - 1]} ${exportFromYear} – ${monthNames2[exportToMonth - 1]} ${exportToYear}`;
+            }
+
+            if (data.length === 0) {
+                showToast('No expenses found for the selected period', 'warning');
+                return;
+            }
+            generateExpenseReportPDF(data as any[], companySettings, label);
+            setShowExportModal(false);
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     const totalMonthlyAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
 
     return (
@@ -141,16 +196,24 @@ export default function CompanyExpenseManagement() {
                     <h2 className="text-xl font-bold text-slate-800">Company Expenses</h2>
                     <p className="text-sm text-slate-500">Track general operational costs</p>
                 </div>
-                <button
-                    onClick={() => {
-                        resetForm();
-                        setIsModalOpen(true);
-                    }}
-                    className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg"
-                >
-                    <Plus size={16} />
-                    Add Expense
-                </button>
+                <div className="flex items-center gap-2">
+                    {/* Export PDF Button */}
+                    <button
+                        onClick={() => { setExportMonth(selectedMonth); setExportYear(selectedYear); setShowExportModal(true); }}
+                        disabled={isExporting}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm"
+                    >
+                        <Download size={15} />
+                        {isExporting ? 'Exporting...' : 'Export PDF'}
+                    </button>
+                    <button
+                        onClick={() => { resetForm(); setIsModalOpen(true); }}
+                        className="bg-emerald-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg"
+                    >
+                        <Plus size={16} />
+                        Add Expense
+                    </button>
+                </div>
             </div>
 
             {/* Filters & Summary */}
@@ -171,7 +234,7 @@ export default function CompanyExpenseManagement() {
                         value={selectedYear}
                         onChange={(e) => setSelectedYear(parseInt(e.target.value))}
                     >
-                        {[2024, 2025, 2026, 2027].map(year => (
+                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(year => (
                             <option key={year} value={year}>{year}</option>
                         ))}
                     </select>
@@ -373,6 +436,174 @@ export default function CompanyExpenseManagement() {
                     </div>
                 </div>
             )}
+
+            {/* Export PDF Modal */}
+            <ExportExpenseModal
+                open={showExportModal}
+                onClose={() => setShowExportModal(false)}
+                onExport={handleExport}
+                isExporting={isExporting}
+                exportOption={exportOption}
+                setExportOption={setExportOption}
+                exportMonth={exportMonth}
+                setExportMonth={setExportMonth}
+                exportYear={exportYear}
+                setExportYear={setExportYear}
+                exportFromMonth={exportFromMonth}
+                setExportFromMonth={setExportFromMonth}
+                exportFromYear={exportFromYear}
+                setExportFromYear={setExportFromYear}
+                exportToMonth={exportToMonth}
+                setExportToMonth={setExportToMonth}
+                exportToYear={exportToYear}
+                setExportToYear={setExportToYear}
+                monthNames={monthNames}
+            />
+        </div>
+    );
+}
+
+// ============================================================
+// ExportExpenseModal — Card-based PDF export modal
+// ============================================================
+function ExportExpenseModal({
+    open, onClose, onExport, isExporting,
+    exportOption, setExportOption,
+    exportMonth, setExportMonth,
+    exportYear, setExportYear,
+    exportFromMonth, setExportFromMonth,
+    exportFromYear, setExportFromYear,
+    exportToMonth, setExportToMonth,
+    exportToYear, setExportToYear,
+    monthNames,
+}: any) {
+    if (!open) return null;
+
+    const currentYear = new Date().getFullYear();
+    const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i).reverse();
+    const months = monthNames;
+
+    const cards: { id: ExpenseExportOption; icon: React.ReactNode; label: string; sub: string }[] = [
+        { id: 'complete', icon: <LayoutGrid size={22} />, label: 'Complete Statement', sub: 'All time records' },
+        { id: 'financial_year', icon: <CalendarDays size={22} />, label: 'Financial Year', sub: 'Full year expenses' },
+        { id: 'by_month', icon: <Calendar size={22} />, label: 'By Month', sub: 'Specific month' },
+        { id: 'custom_range', icon: <CalendarRange size={22} />, label: 'Custom Range', sub: 'Select from–to months' },
+    ];
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center">
+                            <Download size={18} className="text-white" />
+                        </div>
+                        <div>
+                            <p className="font-bold text-white text-base">Export Expense Statement</p>
+                            <p className="text-slate-400 text-xs">For Company Expenses PDF</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+                        <X size={22} />
+                    </button>
+                </div>
+
+                <div className="p-6 space-y-5">
+                    {/* 4 Option Cards */}
+                    <div className="grid grid-cols-2 gap-3">
+                        {cards.map(c => (
+                            <button
+                                key={c.id}
+                                onClick={() => setExportOption(c.id)}
+                                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all text-center ${
+                                    exportOption === c.id
+                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                                        : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50/50'
+                                }`}
+                            >
+                                <span className={exportOption === c.id ? 'text-emerald-600' : 'text-slate-400'}>{c.icon}</span>
+                                <span className="font-semibold text-sm leading-tight">{c.label}</span>
+                                <span className="text-xs text-slate-400">{c.sub}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Dynamic Sub-fields */}
+                    {exportOption === 'financial_year' && (
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Financial Year</label>
+                            <select className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                                value={exportYear} onChange={e => setExportYear(Number(e.target.value))}>
+                                {years.map(y => (
+                                    <option key={y} value={y}>
+                                        FY {y}-{String(y + 1).slice(-2)}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                    {exportOption === 'by_month' && (
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Month</label>
+                                <select className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                                    value={exportMonth} onChange={e => setExportMonth(Number(e.target.value))}>
+                                    {months.map((m: string, i: number) => <option key={i} value={i + 1}>{m}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Year</label>
+                                <select className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                                    value={exportYear} onChange={e => setExportYear(Number(e.target.value))}>
+                                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    )}
+                    {exportOption === 'custom_range' && (
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">From</label>
+                                <select className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm mb-1"
+                                    value={exportFromMonth} onChange={e => setExportFromMonth(Number(e.target.value))}>
+                                    {months.map((m: string, i: number) => <option key={i} value={i + 1}>{m}</option>)}
+                                </select>
+                                <select className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                    value={exportFromYear} onChange={e => setExportFromYear(Number(e.target.value))}>
+                                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">To</label>
+                                <select className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm mb-1"
+                                    value={exportToMonth} onChange={e => setExportToMonth(Number(e.target.value))}>
+                                    {months.map((m: string, i: number) => <option key={i} value={i + 1}>{m}</option>)}
+                                </select>
+                                <select className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                    value={exportToYear} onChange={e => setExportToYear(Number(e.target.value))}>
+                                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex gap-3 pt-1">
+                        <button onClick={onClose} className="flex-1 py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                            Cancel
+                        </button>
+                        <button
+                            onClick={onExport}
+                            disabled={isExporting}
+                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            <Download size={16} />
+                            {isExporting ? 'Exporting...' : 'Export Expenses'}
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

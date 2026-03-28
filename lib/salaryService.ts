@@ -248,3 +248,17 @@ export function generateSalarySlipData(
         monthName: monthNames[salary.month - 1]
     };
 }
+
+export async function getAllSalariesByYear(year: number): Promise<AgentSalaryData[]> {
+    const { data, error } = await supabase
+        .from('agent_salaries')
+        .select('*')
+        .eq('year', year)
+        .order('month', { ascending: true });
+
+    if (error) {
+        console.error('Error fetching salaries by year:', error);
+        return [];
+    }
+    return data ? data.map(mapAgentSalary) : [];
+}
