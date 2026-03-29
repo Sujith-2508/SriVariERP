@@ -721,15 +721,17 @@ export default function DealerLedger() {
     // --- MAIN CONTENT SELECTION ---
     let mainContent = null;
 
-    // Invoice Detail View - shows payment history for specific invoice
+    // Transaction Detail View (Invoice or Receipt)
     if (selectedInvoice && selectedDealer) {
+        const isReceipt = selectedInvoice.type === 'PAYMENT';
+        const isOpeningBalance = selectedInvoice.referenceId === 'BAL B/F';
+
         const paymentHistory = getInvoicePaymentHistory(selectedInvoice.id);
         const { invoices } = getDealerStatement(selectedDealer.id);
         const invoiceData = invoices.find(inv => inv.id === selectedInvoice.id);
 
-        const overdue = invoiceData?.isOverdue && invoiceData.balance > 0;
+        const overdue = !isReceipt && !isOpeningBalance && invoiceData?.isOverdue && invoiceData.balance > 0;
         const daysOverdue = invoiceData?.dueDate ? getDaysOverdue(new Date(invoiceData.dueDate)) : 0;
-
 
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
@@ -744,7 +746,10 @@ export default function DealerLedger() {
                         </button>
                         <div>
                             <div className="flex items-center gap-3">
-                                <h1 className="text-xl font-bold text-slate-800">Invoice {selectedInvoice.referenceId}</h1>
+                                <h1 className="text-xl font-bold text-slate-800">
+                                    {isReceipt ? `Receipt ${selectedInvoice.referenceId}` : 
+                                     isOpeningBalance ? 'Opening Balance' : `Invoice ${selectedInvoice.referenceId}`}
+                                </h1>
                                 {overdue && (
                                     <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold flex items-center gap-1 animate-pulse">
                                         <AlertTriangle size={12} />
@@ -774,67 +779,88 @@ export default function DealerLedger() {
                         </div>
                     )}
 
-                    {/* Invoice Details Card */}
+                    {/* Transaction Details Card */}
                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
                         <div className="bg-slate-800 text-white p-4">
                             <div className="flex items-center gap-2">
-                                <FileText size={18} />
-                                <h3 className="font-bold">Invoice Details</h3>
+                                {isReceipt ? <Receipt size={18} /> : <FileText size={18} />}
+                                <h3 className="font-bold">{isReceipt ? 'Receipt Details' : 'Invoice Details'}</h3>
                             </div>
                         </div>
                         <div className="p-6">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Invoice Date</p>
+                                    <p className="text-xs text-slate-500 font-medium mb-1">{isReceipt ? 'Receipt Date' : 'Invoice Date'}</p>
                                     <p className="font-bold text-slate-800">
                                         {new Date(selectedInvoice.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                                     </p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Invoice Amount</p>
+                                    <p className="text-xs text-slate-500 font-medium mb-1">{isReceipt ? 'Amount Received' : 'Invoice Amount'}</p>
                                     <p className="font-bold text-slate-800 text-lg">₹{selectedInvoice.amount.toLocaleString()}</p>
                                 </div>
-                                <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Credit Days</p>
-                                    <p className="font-bold text-slate-800">{selectedInvoice.creditDays || 30} days</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Due Date</p>
-                                    <p className={`font-bold ${overdue ? 'text-red-600' : 'text-slate-800'}`}>
-                                        {selectedInvoice.dueDate
-                                            ? new Date(selectedInvoice.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                                            : 'N/A'
-                                        }
-                                    </p>
-                                </div>
+                                {!isReceipt && !isOpeningBalance && (
+                                    <>
+                                        <div>
+                                            <p className="text-xs text-slate-500 font-medium mb-1">Credit Days</p>
+                                            <p className="font-bold text-slate-800">{selectedInvoice.creditDays || 30} days</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-slate-500 font-medium mb-1">Due Date</p>
+                                            <p className={`font-bold ${overdue ? 'text-red-600' : 'text-slate-800'}`}>
+                                                {selectedInvoice.dueDate
+                                                    ? new Date(selectedInvoice.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                                                    : 'N/A'
+                                                }
+                                            </p>
+                                        </div>
+                                    </>
+                                )}
+                                {isReceipt && (
+                                    <>
+                                        <div>
+                                            <p className="text-xs text-slate-500 font-medium mb-1">Payment Mode</p>
+                                            <p className="font-bold text-slate-800">{selectedInvoice.notes || 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-slate-500 font-medium mb-1">Collected By</p>
+                                            <p className="font-bold text-slate-800 flex items-center gap-1">
+                                                <User size={14} className="text-slate-400" />
+                                                {selectedInvoice.agentName || 'Admin'}
+                                            </p>
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
-                            {/* Payment Status Bar */}
-                            <div className="mt-6 pt-6 border-t border-slate-100">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="text-sm text-slate-600">Payment Progress</span>
-                                    <span className="text-sm font-bold text-slate-800">
-                                        ₹{invoiceData?.paid.toLocaleString()} / ₹{selectedInvoice.amount.toLocaleString()}
-                                    </span>
+                            {/* Payment Status Bar - Only for Invoices/OB */}
+                            {!isReceipt && (
+                                <div className="mt-6 pt-6 border-t border-slate-100">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-sm text-slate-600">Payment Progress</span>
+                                        <span className="text-sm font-bold text-slate-800">
+                                            ₹{invoiceData?.paid.toLocaleString()} / ₹{selectedInvoice.amount.toLocaleString()}
+                                        </span>
+                                    </div>
+                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full rounded-full transition-all ${invoiceData?.balance === 0 ? 'bg-emerald-500' : overdue ? 'bg-red-500' : 'bg-blue-500'}`}
+                                            style={{ width: `${((invoiceData?.paid || 0) / selectedInvoice.amount) * 100}%` }}
+                                        />
+                                    </div>
+                                    <div className="flex justify-between mt-2">
+                                        <span className="text-xs text-emerald-600 font-medium">Paid: ₹{invoiceData?.paid.toLocaleString()}</span>
+                                        <span className={`text-xs font-medium ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {invoiceData?.balance === 0 ? 'Fully Paid ✓' : `Balance: ₹${invoiceData?.balance.toLocaleString()}`}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                                    <div
-                                        className={`h-full rounded-full transition-all ${invoiceData?.balance === 0 ? 'bg-emerald-500' : overdue ? 'bg-red-500' : 'bg-blue-500'}`}
-                                        style={{ width: `${((invoiceData?.paid || 0) / selectedInvoice.amount) * 100}%` }}
-                                    />
-                                </div>
-                                <div className="flex justify-between mt-2">
-                                    <span className="text-xs text-emerald-600 font-medium">Paid: ₹{invoiceData?.paid.toLocaleString()}</span>
-                                    <span className={`text-xs font-medium ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                        {invoiceData?.balance === 0 ? 'Fully Paid ✓' : `Balance: ₹${invoiceData?.balance.toLocaleString()}`}
-                                    </span>
-                                </div>
-                            </div>
+                            )}
                         </div>
                     </div>
 
                     {/* Profit Analysis Card */}
-                    {(() => {
+                    {!isReceipt && !isOpeningBalance && (() => {
                         const profit = calculateInvoiceProfit(selectedInvoice, products);
                         return (
                             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
@@ -881,87 +907,122 @@ export default function DealerLedger() {
                         );
                     })()}
 
-                    {/* Payment History Table */}
+                    {/* Applied Allocations Table */}
                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
                         <div className="bg-emerald-600 text-white p-4">
                             <div className="flex items-center gap-2">
-                                <Receipt size={18} />
-                                <h3 className="font-bold">Payment History</h3>
+                                {isReceipt ? <FileText size={18} /> : <Receipt size={18} />}
+                                <h3 className="font-bold">{isReceipt ? 'Invoices Paid' : 'Payment History'}</h3>
                             </div>
-                            <p className="text-emerald-100 text-sm mt-1">Receipts applied to this invoice (FIFO)</p>
+                            <p className="text-emerald-100 text-sm mt-1">
+                                {isReceipt ? 'Invoices to which this receipt was applied (FIFO)' : 'Receipts applied to this invoice (FIFO)'}
+                            </p>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50 border-b border-slate-200">
                                     <tr>
-                                        <th className="text-left p-4 font-semibold text-slate-600">Receipt No</th>
-                                        <th className="text-left p-4 font-semibold text-slate-600">Date</th>
+                                        <th className="text-left p-4 font-semibold text-slate-600">{isReceipt ? 'Invoice No' : 'Receipt No'}</th>
+                                        <th className="text-left p-4 font-semibold text-slate-600">Date Applied</th>
                                         <th className="text-right p-4 font-semibold text-slate-600">Amount Applied</th>
-                                        <th className="text-left p-4 font-semibold text-slate-600">Collected By</th>
+                                        <th className="text-left p-4 font-semibold text-slate-600">{isReceipt ? 'Status' : 'Collected By'}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {paymentHistory.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={4} className="p-8 text-center text-slate-400">
-                                                <Receipt size={32} className="mx-auto mb-2 opacity-30" />
-                                                No payments recorded for this invoice yet
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        paymentHistory.map((payment, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-50">
-                                                <td className="p-4">
-                                                    <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
-                                                        {payment.receiptRef}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4 text-slate-700">
-                                                    {new Date(payment.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                </td>
-                                                <td className="p-4 text-right font-bold text-emerald-600">
-                                                    ₹{payment.amount.toLocaleString()}
-                                                </td>
-                                                <td className="p-4 text-slate-600 flex items-center gap-2">
-                                                    <User size={14} className="text-slate-400" />
-                                                    {payment.agentName || 'Admin'}
+                                    {isReceipt ? (
+                                        (selectedInvoice.paymentAllocations || []).length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} className="p-8 text-center text-slate-400">
+                                                    <FileText size={32} className="mx-auto mb-2 opacity-30" />
+                                                    No invoices were paid by this receipt
                                                 </td>
                                             </tr>
-                                        ))
+                                        ) : (
+                                            (selectedInvoice.paymentAllocations || []).map((alloc, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50">
+                                                    <td className="p-4">
+                                                        <span className="font-mono font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                                            {alloc.invoiceRef}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-4 text-slate-700">
+                                                        {new Date(alloc.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                    </td>
+                                                    <td className="p-4 text-right font-bold text-emerald-600">
+                                                        ₹{alloc.amount.toLocaleString()}
+                                                    </td>
+                                                    <td className="p-4 text-emerald-600 flex items-center gap-1 font-bold">
+                                                        <Check size={14} /> Applied
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )
+                                    ) : (
+                                        paymentHistory.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} className="p-8 text-center text-slate-400">
+                                                    <Receipt size={32} className="mx-auto mb-2 opacity-30" />
+                                                    No payments recorded for this invoice yet
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            paymentHistory.map((payment, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50">
+                                                    <td className="p-4">
+                                                        <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
+                                                            {payment.receiptRef}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-4 text-slate-700">
+                                                        {new Date(payment.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                    </td>
+                                                    <td className="p-4 text-right font-bold text-emerald-600">
+                                                        ₹{payment.amount.toLocaleString()}
+                                                    </td>
+                                                    <td className="p-4 text-slate-600 flex items-center gap-2">
+                                                        <User size={14} className="text-slate-400" />
+                                                        {payment.agentName || 'Admin'}
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )
                                     )}
                                 </tbody>
-                                {paymentHistory.length > 0 && (
-                                    <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-                                        <tr>
-                                            <td colSpan={2} className="p-4 font-bold text-slate-700">Total Paid</td>
-                                            <td className="p-4 text-right font-bold text-emerald-600 text-lg">
-                                                ₹{paymentHistory.reduce((acc, p) => acc + p.amount, 0).toLocaleString()}
-                                            </td>
-                                            <td></td>
-                                        </tr>
-                                    </tfoot>
-                                )}
+                                <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+                                    <tr>
+                                        <td colSpan={2} className="p-4 font-bold text-slate-700">Total Applied</td>
+                                        <td className="p-4 text-right font-bold text-emerald-600 text-lg">
+                                            ₹{(isReceipt 
+                                                ? (selectedInvoice.paymentAllocations || []).reduce((acc, p) => acc + p.amount, 0)
+                                                : paymentHistory.reduce((acc, p) => acc + p.amount, 0)
+                                            ).toLocaleString()}
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                </tfoot>
                             </table>
                         </div>
                     </div>
 
-                    {/* Balance Summary */}
-                    <div className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <p className="text-sm text-slate-500">Remaining Balance</p>
-                                <p className={`text-3xl font-bold ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                    ₹{invoiceData?.balance.toLocaleString()}
-                                </p>
-                            </div>
-                            {invoiceData?.balance === 0 && (
-                                <div className="flex items-center gap-2 bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full">
-                                    <span className="text-lg">✓</span>
-                                    <span className="font-bold">Fully Paid</span>
+                    {/* Balance Summary - Only for Invoices/OB */}
+                    {!isReceipt && (
+                        <div className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <p className="text-sm text-slate-500">Remaining Balance</p>
+                                    <p className={`text-3xl font-bold ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        ₹{invoiceData?.balance?.toLocaleString()}
+                                    </p>
                                 </div>
-                            )}
+                                {invoiceData?.balance === 0 && (
+                                    <div className="flex items-center gap-2 bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full">
+                                        <span className="text-lg">✓</span>
+                                        <span className="font-bold">Fully Paid</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             </div >
         );
