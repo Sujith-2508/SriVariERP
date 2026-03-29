@@ -33,6 +33,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
     setHighlightedIndex(-1);
   }, [currentView]);
 
+  const handleRefresh = React.useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      if (refreshData) {
+        await refreshData();
+      }
+    } catch (error) {
+      console.error('Failed to refresh data:', error);
+    } finally {
+      // Minimum loading time for visual feedback
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  }, [refreshData]);
+
+  const handleLogout = React.useCallback(async () => {
+    const user = sessionStorage.getItem('username');
+    await logToApplicationSheet('User Logout', `User ${user || 'unknown'} signed out`);
+    sessionStorage.removeItem('isAuthenticated');
+    window.location.href = '/login';
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if user is typing in an input or textarea
@@ -57,19 +78,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
         return;
       }
 
+      const TOTAL_NAV_ITEMS = menuItems.length + 2;
+
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
 
         // Start from current page if no highlight yet
-        const startIndex = highlightedIndex >= 0
-          ? highlightedIndex
-          : menuItems.findIndex(item => item.id === currentView);
+        let startIndex = highlightedIndex;
+        if (startIndex < 0) {
+          const viewIndex = menuItems.findIndex(item => item.id === currentView);
+          startIndex = viewIndex >= 0 ? viewIndex : 0;
+        }
 
         let nextIndex = startIndex;
         if (e.key === 'ArrowDown') {
-          nextIndex = (startIndex + 1) % menuItems.length;
+          nextIndex = (startIndex + 1) % TOTAL_NAV_ITEMS;
         } else if (e.key === 'ArrowUp') {
-          nextIndex = (startIndex - 1 + menuItems.length) % menuItems.length;
+          nextIndex = (startIndex - 1 + TOTAL_NAV_ITEMS) % TOTAL_NAV_ITEMS;
         }
 
         setHighlightedIndex(nextIndex);
@@ -78,25 +103,34 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
 
       if (e.key === 'Enter' && highlightedIndex >= 0) {
         e.preventDefault();
-        const selectedItem = menuItems[highlightedIndex];
-        if (selectedItem) {
-          router.push(selectedItem.href);
-          setHighlightedIndex(-1);
+        
+        if (highlightedIndex < menuItems.length) {
+          const selectedItem = menuItems[highlightedIndex];
+          if (selectedItem) {
+            router.push(selectedItem.href);
+            setHighlightedIndex(-1);
 
-          // Auto-focus the key input on the target page after navigation
-          setTimeout(() => {
-            const focusTargetMap: Record<string, string> = {
-              'BILLING': '#invoice-no-field',
-              'INVENTORY': '#inventory-search',
-              'PURCHASES': '#purchases-search',
-              'DEALERS': '#dealers-search',
-            };
-            const selector = focusTargetMap[selectedItem.id];
-            if (selector) {
-              const el = document.querySelector(selector) as HTMLElement;
-              if (el) { el.focus(); el.click?.(); }
-            }
-          }, 400);
+            // Auto-focus the key input on the target page after navigation
+            setTimeout(() => {
+              const focusTargetMap: Record<string, string> = {
+                'BILLING': '#invoice-no-field',
+                'INVENTORY': '#inventory-search',
+                'PURCHASES': '#purchases-search',
+                'DEALERS': '#dealers-search',
+              };
+              const selector = focusTargetMap[selectedItem.id];
+              if (selector) {
+                const el = document.querySelector(selector) as HTMLElement;
+                if (el) { el.focus(); el.click?.(); }
+              }
+            }, 400);
+          }
+        } else if (highlightedIndex === menuItems.length) {
+          handleRefresh();
+          setHighlightedIndex(-1);
+        } else if (highlightedIndex === menuItems.length + 1) {
+          handleLogout();
+          setHighlightedIndex(-1);
         }
         return;
       }
@@ -109,28 +143,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentView, router, menuItems, highlightedIndex]);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      if (refreshData) {
-        await refreshData();
-      }
-    } catch (error) {
-      console.error('Failed to refresh data:', error);
-    } finally {
-      // Minimum loading time for visual feedback
-      setTimeout(() => setIsRefreshing(false), 500);
-    }
-  };
-
-  const handleLogout = async () => {
-    const user = sessionStorage.getItem('username');
-    await logToApplicationSheet('User Logout', `User ${user || 'unknown'} signed out`);
-    sessionStorage.removeItem('isAuthenticated');
-    window.location.href = '/login';
-  };
+  }, [currentView, router, menuItems, highlightedIndex, handleRefresh, handleLogout]);
 
   return (
     <div className="w-64 bg-slate-900 text-white h-full flex-col hidden md:flex shadow-xl">
@@ -186,18 +199,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView }) => {
           <button
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-800 hover:text-emerald-400 rounded-lg transition-colors disabled:opacity-50"
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors disabled:opacity-50 ${
+                highlightedIndex === menuItems.length
+                ? 'bg-slate-700 text-white ring-2 ring-emerald-400'
+                : 'text-slate-400 hover:bg-slate-800 hover:text-emerald-400'
+            }`}
           >
             <RefreshCw size={20} className={isRefreshing ? "animate-spin" : ""} />
             <span className="font-medium">{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
+            {highlightedIndex === menuItems.length && (
+              <span className="ml-auto text-[10px] text-emerald-400 font-bold">↵ Enter</span>
+            )}
           </button>
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors"
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                highlightedIndex === menuItems.length + 1
+                ? 'bg-slate-700 text-white ring-2 ring-emerald-400'
+                : 'text-red-400 hover:bg-red-500/10 hover:text-red-300'
+            }`}
           >
             <LogOut size={20} />
             <span className="font-medium">Sign Out</span>
+            {highlightedIndex === menuItems.length + 1 && (
+              <span className="ml-auto text-[10px] text-emerald-400 font-bold">↵ Enter</span>
+            )}
           </button>
         </div>
       </nav>
