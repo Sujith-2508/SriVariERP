@@ -29,7 +29,8 @@ export default function LoginPage() {
                 .single();
 
             if (queryError || !users) {
-                await logToApplicationSheet('Login Failed', `Username: ${email} - No active user found`);
+                // Fire-and-forget: don't block UI on audit log
+                logToApplicationSheet('Login Failed', `Username: ${email} - No active user found`).catch(() => {});
                 setError('Invalid username or password. Please try again.');
                 setIsLoading(false);
                 return;
@@ -37,25 +38,22 @@ export default function LoginPage() {
 
             // Verify password
             if (users.password !== password) {
-                await logToApplicationSheet('Login Failed', `Username: ${email} - Incorrect password`);
+                // Fire-and-forget: don't block UI on audit log
+                logToApplicationSheet('Login Failed', `Username: ${email} - Incorrect password`).catch(() => {});
                 setError('Invalid username or password. Please try again.');
                 setIsLoading(false);
                 return;
             }
 
-            await logToApplicationSheet('User Login', `User ${users.username} logged in successfully`);
-
-            // Update last login timestamp
-            await supabase
-                .from('users')
-                .update({ last_login: new Date().toISOString() })
-                .eq('id', users.id);
-
-            // Store auth state in sessionStorage
+            // Store auth state FIRST so redirect is instant
             sessionStorage.setItem('isAuthenticated', 'true');
             sessionStorage.setItem('userId', users.id);
             sessionStorage.setItem('username', users.username);
             sessionStorage.setItem('fullName', users.full_name || users.username);
+
+            // Fire-and-forget background tasks (don't block navigation)
+            logToApplicationSheet('User Login', `User ${users.username} logged in successfully`).catch(() => {});
+            supabase.from('users').update({ last_login: new Date().toISOString() }).eq('id', users.id).then(() => {});
 
             router.push('/');
         } catch (err) {
