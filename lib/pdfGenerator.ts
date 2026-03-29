@@ -722,7 +722,7 @@ export const generateStatementPDFBase64 = async (
             date: new Date(inv.date),
             ref: inv.referenceId,
             type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
-            amount: inv.referenceId === 'BAL B/F' ? 0 : inv.amount,
+            amount: inv.amount,
             paid: inv.paid,
             balance: inv.balance,
             notes: inv.originalTransaction?.notes || '',
@@ -741,6 +741,9 @@ export const generateStatementPDFBase64 = async (
             createdAt: (p as any).createdAt
         }))
     ].sort((a, b) => {
+        if (a.ref === 'BAL B/F') return -1;
+        if (b.ref === 'BAL B/F') return 1;
+
         const dateA = new Date(a.date).getTime();
         const dateB = new Date(b.date).getTime();
         if (dateA !== dateB) return dateA - dateB;

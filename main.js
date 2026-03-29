@@ -86,7 +86,6 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const qrcode = require('qrcode');
 
 const isDev = !app.isPackaged;
 const outDir = path.join(__dirname, 'out');
@@ -120,8 +119,8 @@ function createWindow() {
     })
 
     // CSP Handler for runtime connections
-    const { session } = require('electron')
-    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const { session: cspSession } = require('electron')
+    cspSession.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         let supabaseHost = '*.supabase.co';
         try {
             const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -187,6 +186,37 @@ function initWhatsApp() {
         logToFile('[WhatsApp] Initializing WhatsApp Client...');
         whatsappStatus = 'CONNECTING';
 
+        // ── CRITICAL FIX: Clear Chromium SingletonLock before each init ───────
+        // This prevents the 'Browser already running' error after a crash or
+        // ungraceful shutdown. The lock file is stale and safe to delete.
+        try {
+            const sessionDir = path.join(app.getPath('userData'), 'whatsapp-session');
+            const lockFiles = [
+                path.join(sessionDir, 'Default', 'SingletonLock'),
+                path.join(sessionDir, 'SingletonLock'),
+            ];
+            for (const lockFile of lockFiles) {
+                if (fs.existsSync(lockFile)) {
+                    fs.unlinkSync(lockFile);
+                    logToFile('[WhatsApp] Cleared stale Chromium lock file:', lockFile);
+                }
+            }
+            // Also look inside any profile dir
+            if (fs.existsSync(sessionDir)) {
+                const entries = fs.readdirSync(sessionDir);
+                for (const entry of entries) {
+                    const entryPath = path.join(sessionDir, entry);
+                    const lock = path.join(entryPath, 'SingletonLock');
+                    if (fs.existsSync(lock)) {
+                        fs.unlinkSync(lock);
+                        logToFile('[WhatsApp] Cleared stale lock in subdir:', lock);
+                    }
+                }
+            }
+        } catch (lockErr) {
+            logToFile('[WhatsApp] Warning: Could not clear lock files:', lockErr.message);
+        }
+
         // Windows FIX: Building on Mac for Windows doesn't bundle the correct Chromium.
         // We'll try to find Chrome or Edge on the user's Windows machine as a backup.
         let executablePath = undefined;
@@ -237,7 +267,8 @@ function initWhatsApp() {
                 '--disable-ipc-flooding-protection',
                 '--disable-renderer-backgrounding',
                 '--proxy-server="direct://"',
-                '--proxy-bypass-list=*'
+                '--proxy-bypass-list=*',
+                '--js-flags="--max-old-space-size=512"' // Lower memory overhead
             ]
         },
         authTimeoutMs: 120000 // Increased to 2 minutes for slower machines
@@ -249,14 +280,14 @@ function initWhatsApp() {
         console.log('WhatsApp QR Received');
         whatsappStatus = 'QR_READY';
         if (authToReadyTimeout) clearTimeout(authToReadyTimeout);
-        try {
-            const qrDataUrl = await qrcode.toDataURL(qr);
-            if (mainWindow) {
-                mainWindow.webContents.send('whatsapp:qr', qrDataUrl);
-                mainWindow.webContents.send('whatsapp:status', whatsappStatus);
-            }
-        } catch (err) {
-            console.error('Failed to generate QR Data URL', err);
+        
+        // PERFORMANCE OPTIMIZATION: Send the raw QR string directly to the renderer.
+        // Previously, we converted it to a DataURL (Base64) here, which was a 
+        // CPU-intensive, blocking operation in the main thread. Now, the 
+        // renderer creates the image which is much faster and reduces IPC overhead.
+        if (mainWindow) {
+            mainWindow.webContents.send('whatsapp:qr', qr);
+            mainWindow.webContents.send('whatsapp:status', whatsappStatus);
         }
     });
 
@@ -328,6 +359,14 @@ function initWhatsApp() {
 ipcMain.handle('whatsapp:send-pdf', async (event, { phoneNumber, pdfBase64, filename, caption }) => {
     if (whatsappStatus !== 'READY') {
         throw new Error('WhatsApp is not ready. Status: ' + whatsappStatus);
+    }
+
+    // Guard against 'Cannot read properties of null (reading evaluate)'
+    // This happens when the Puppeteer browser context has been destroyed
+    if (!whatsappClient || !whatsappClient.pupPage) {
+        whatsappStatus = 'DISCONNECTED';
+        if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+        throw new Error('WhatsApp browser context lost. Please click Re-sync Connection to reconnect.');
     }
 
     try {
@@ -692,6 +731,14 @@ ipcMain.handle('drive:save-tokens', async (event, tokens) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
+    // ── Set a custom User-Agent to satisfy OSM tile usage policy ─────────────
+    // Without this, Electron's default UA gets blocked with 403 Access Blocked
+    const { session } = require('electron');
+    session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+        details.requestHeaders['User-Agent'] = 'SriVariERP/1.0 (contact: srivarienterprises@gmail.com)';
+        callback({ requestHeaders: details.requestHeaders });
+    });
+
     // ── Register app:// protocol handler ─────────────────────────────────────
     protocol.handle('app', (request) => {
         const url = new URL(request.url)

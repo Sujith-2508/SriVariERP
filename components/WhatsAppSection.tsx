@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, Check, X, Loader2, QrCode, LogOut, RefreshCw } from 'lucide-react';
+import QRCode from 'qrcode';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function WhatsAppSection() {
@@ -16,9 +17,24 @@ export default function WhatsAppSection() {
         window.electron.whatsapp.getStatus().then(setStatus);
 
         // Listen for events
-        window.electron.whatsapp.onQR((qrDataUrl) => {
-            setQr(qrDataUrl);
-            setStatus('QR_READY');
+        window.electron.whatsapp.onQR(async (qrString) => {
+            try {
+                // PERFORMANCE OPTIMIZATION: Generate the QR image client-side.
+                // This is much faster than sending a large Base64 image over IPC.
+                const qrDataUrl = await QRCode.toDataURL(qrString, {
+                    width: 256,
+                    margin: 2,
+                    color: {
+                        dark: '#0f172a', // slate-900
+                        light: '#ffffff'
+                    }
+                });
+                setQr(qrDataUrl);
+                setStatus('QR_READY');
+            } catch (err) {
+                console.error('QR Generation Error:', err);
+                setError('Failed to display QR code');
+            }
         });
 
         window.electron.whatsapp.onReady(() => {

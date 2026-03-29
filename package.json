@@ -12,22 +12,25 @@
     "export": "next build",
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "build:electron": "ELECTRON_BUILD=1 next build && electron-builder",
-    "build:win": "ELECTRON_BUILD=1 next build && electron-builder --win",
-    "build:mac": "ELECTRON_BUILD=1 next build && electron-builder --mac",
-    "build:all": "ELECTRON_BUILD=1 next build && electron-builder --win --mac"
+    "build:electron": "cross-env ELECTRON_BUILD=1 next build && electron-builder",
+    "build:win": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win",
+    "build:mac": "cross-env ELECTRON_BUILD=1 next build && electron-builder --mac",
+    "build:all": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win --mac"
   },
   "build": {
     "appId": "com.srivari.erp",
     "productName": "Sri Vari ERP",
+    "compression": "maximum",
+    "icon": "public/icon.png",
+    "afterPack": "scripts/afterPack.js",
     "win": {
       "icon": "public/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "arm64"
+            "x64"
           ]
         },
         {
@@ -96,10 +99,12 @@
   "devDependencies": {
     "@types/google.maps": "^3.58.1",
     "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
+    "cross-env": "^10.1.0",
     "electron": "^33.2.0",
     "electron-builder": "^26.8.1",
     "postcss": "^8.4.49",

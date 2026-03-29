@@ -953,7 +953,10 @@ export default function DealerLedger() {
                 date: inv.date,
                 reference: inv.referenceId,
                 type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
-                debit: inv.referenceId === 'BAL B/F' ? 0 : inv.amount,
+                // BUG FIX: BAL B/F debit must be inv.amount (e.g. ₹50,000) NOT 0.
+                // Previously set to 0, which meant the opening balance never
+                // contributed to the running balance, making all totals wrong.
+                debit: inv.amount,
                 credit: 0,
                 balance: 0,
                 originalTransaction: inv.originalTransaction
@@ -969,15 +972,15 @@ export default function DealerLedger() {
             }))
         ]
         .sort((a, b) => {
-            const dateA = a.date.getTime();
-            const dateB = b.date.getTime();
-            if (dateA !== dateB) return dateA - dateB;
-            
-            // BAL B/F always first if dates match
+            // BUG FIX: BAL B/F must ALWAYS be first, regardless of its date.
+            // Previously it only moved to the top when dates were equal — if the
+            // opening balance date was 01 Apr but invoices were 29-31 Mar, it
+            // would sort to the bottom, making the entire ledger incorrect.
             if (a.reference === 'BAL B/F') return -1;
             if (b.reference === 'BAL B/F') return 1;
-            
-            return 0;
+
+            // All other entries: chronological order
+            return a.date.getTime() - b.date.getTime();
         })
         .map((entry, idx) => {
             if (idx === 0) {
