@@ -27,6 +27,11 @@ export default function SettingsPage() {
     const [driveConnected, setDriveConnected] = useState(false);
     const [driveConnecting, setDriveConnecting] = useState(false);
     const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [isElectron, setIsElectron] = useState(false);
+
+    useEffect(() => {
+        setIsElectron(!!(window as any).electron);
+    }, []);
 
     // --- User Profile ---
     const [userId, setUserId] = useState<string | null>(null);
@@ -199,7 +204,7 @@ export default function SettingsPage() {
         if (!electron?.drive?.disconnect) {
             localStorage.removeItem('drive_token');
             setDriveConnected(false);
-            setDriveMessage({ type: 'success', text: 'Disconnected from Google Drive (Web Mode).' });
+            setDriveMessage({ type: 'success', text: `Disconnected from Google Drive ${!isElectron ? '(Web Mode)' : ''}.` });
             return;
         }
 

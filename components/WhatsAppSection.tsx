@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, Check, X, Loader2, QrCode, LogOut, RefreshCw } from 'lucide-react';
+import { MessageSquare, Check, X, Loader2, QrCode, LogOut, RefreshCw, AlertCircle } from 'lucide-react';
 import QRCode from 'qrcode';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
@@ -9,8 +9,10 @@ export default function WhatsAppSection() {
     const [qr, setQr] = useState<string | null>(null);
     const [status, setStatus] = useState<string>('DISCONNECTED'); // DISCONNECTED, CONNECTING, QR_READY, AUTHENTICATED, READY
     const [error, setError] = useState<string | null>(null);
+    const [isElectron, setIsElectron] = useState(false);
 
     useEffect(() => {
+        setIsElectron(!!(window as any).electron);
         if (!window.electron?.whatsapp) return;
 
         // Fetch initial status
@@ -73,11 +75,20 @@ export default function WhatsAppSection() {
     };
 
     const getStatusUI = () => {
+        if (!isElectron) {
+            return (
+                <div className="flex items-center gap-2 text-amber-600 font-bold">
+                    <AlertCircle size={18} />
+                    In Web Mode
+                </div>
+            );
+        }
+
         if (!window.electron?.whatsapp) {
             return (
-                <div className="flex items-center gap-2 text-blue-600 font-bold">
-                    <Check size={18} />
-                    Web Mode Active
+                <div className="flex items-center gap-2 text-slate-400 font-medium">
+                    <Loader2 size={18} className="animate-spin" />
+                    Initializing Desktop Service...
                 </div>
             );
         }

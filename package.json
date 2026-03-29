@@ -15,7 +15,9 @@
     "build:electron": "cross-env ELECTRON_BUILD=1 next build && electron-builder",
     "build:win": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win",
     "build:mac": "cross-env ELECTRON_BUILD=1 next build && electron-builder --mac",
-    "build:all": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win --mac"
+    "build:all": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win --mac",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "build": {
     "appId": "com.srivari.erp",
@@ -97,19 +99,25 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/google.maps": "^3.58.1",
     "@types/node": "^22.10.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
     "cross-env": "^10.1.0",
     "electron": "^33.2.0",
     "electron-builder": "^26.8.1",
+    "jsdom": "^27.0.1",
+    "msw": "^2.12.14",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
+    "vitest": "^3.2.4",
     "wait-on": "^8.0.1"
   }
 }

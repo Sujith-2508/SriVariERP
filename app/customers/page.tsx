@@ -8,6 +8,7 @@ import { useConfirm } from '@/contexts/ConfirmationContext';
 import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye, ExternalLink } from 'lucide-react';
 import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency, getISTDateString } from '@/lib/utils';
+import { sortLedgerEntries, calculateRunningBalances, LedgerEntry } from '@/lib/ledgerUtils';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
@@ -978,15 +979,11 @@ export default function DealerLedger() {
         );
 
         // Combine and sort invoices and payments for statement generation
-        let runningBalance = 0;
-        const statementEntries = [
+        const rawLedgerEntries = [
             ...invoices.map(inv => ({
                 date: inv.date,
                 reference: inv.referenceId,
                 type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
-                // BUG FIX: BAL B/F debit must be inv.amount (e.g. ₹50,000) NOT 0.
-                // Previously set to 0, which meant the opening balance never
-                // contributed to the running balance, making all totals wrong.
                 debit: inv.amount,
                 credit: 0,
                 balance: 0,
@@ -1001,31 +998,9 @@ export default function DealerLedger() {
                 balance: 0,
                 originalTransaction: pay.originalTransaction
             }))
-        ]
-        .sort((a, b) => {
-            // BAL B/F (opening balance) is ALWAYS first
-            if (a.reference === 'BAL B/F') return -1;
-            if (b.reference === 'BAL B/F') return 1;
+        ];
 
-            // All other entries: strict chronological order
-            const diff = a.date.getTime() - b.date.getTime();
-            if (diff !== 0) return diff;
-
-            // Same date: invoices before payments (logical ordering)
-            if (a.type === 'Invoice' && b.type === 'Payment') return -1;
-            if (a.type === 'Payment' && b.type === 'Invoice') return 1;
-            return 0;
-        })
-        .map((entry, idx) => {
-            if (idx === 0) {
-                runningBalance = entry.debit - entry.credit;
-                entry.balance = runningBalance;
-            } else {
-                runningBalance += entry.debit - entry.credit;
-                entry.balance = runningBalance;
-            }
-            return entry;
-        });
+        const statementEntries = calculateRunningBalances(sortLedgerEntries(rawLedgerEntries as LedgerEntry[]));
 
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
