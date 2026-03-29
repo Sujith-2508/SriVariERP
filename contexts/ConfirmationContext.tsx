@@ -60,18 +60,17 @@ export function ConfirmationProvider({ children }: { children: ReactNode }) {
                         <div className="p-4 bg-slate-50 flex gap-3 border-t border-slate-100">
                             <button
                                 onClick={handleCancel}
-                                className="flex-1 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-all"
+                                className="flex-1 py-2.5 text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-all"
                             >
                                 {options.cancelLabel || 'Cancel'}
                             </button>
                             <button
                                 onClick={handleConfirm}
-                                className={`flex-1 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg transition-all ${options.type === 'danger'
-                                        ? 'bg-red-500 hover:bg-red-600 shadow-red-100'
-                                        : options.type === 'warning'
-                                            ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-100'
-                                            : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'
-                                    }`}
+                                style={{
+                                    backgroundColor: options.type === 'danger' ? '#ef4444' : options.type === 'warning' ? '#f59e0b' : '#059669',
+                                    color: '#ffffff'
+                                }}
+                                className="flex-1 py-2.5 text-sm font-bold rounded-xl shadow-lg transition-all hover:opacity-90"
                             >
                                 {options.confirmLabel || 'Confirm'}
                             </button>

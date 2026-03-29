@@ -20,12 +20,13 @@ function logToFile(...args) {
 
 // Global Exception Handler
 process.on('uncaughtException', (err) => {
-    logToFile('CRITICAL ERROR (Uncaught Exception):', err.message);
-    logToFile(err.stack);
+    const errorMsg = require('util').inspect(err, { showHidden: false, depth: 3, colors: false });
+    logToFile('CRITICAL ERROR (Uncaught Exception):', errorMsg);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    logToFile('CRITICAL ERROR (Unhandled Rejection):', reason);
+    const errorMsg = require('util').inspect(reason, { showHidden: false, depth: 3, colors: false });
+    logToFile('CRITICAL ERROR (Unhandled Rejection):', errorMsg);
 });
 
 logToFile('--- Application Starting ---');
@@ -173,6 +174,10 @@ function createWindow() {
         }
     })
 
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
+
     initWhatsApp();
 }
 
@@ -277,17 +282,17 @@ function initWhatsApp() {
     let authToReadyTimeout;
 
     whatsappClient.on('qr', async (qr) => {
-        console.log('WhatsApp QR Received');
-        whatsappStatus = 'QR_READY';
-        if (authToReadyTimeout) clearTimeout(authToReadyTimeout);
-        
-        // PERFORMANCE OPTIMIZATION: Send the raw QR string directly to the renderer.
-        // Previously, we converted it to a DataURL (Base64) here, which was a 
-        // CPU-intensive, blocking operation in the main thread. Now, the 
-        // renderer creates the image which is much faster and reduces IPC overhead.
-        if (mainWindow) {
-            mainWindow.webContents.send('whatsapp:qr', qr);
-            mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+        try {
+            console.log('WhatsApp QR Received');
+            whatsappStatus = 'QR_READY';
+            if (authToReadyTimeout) clearTimeout(authToReadyTimeout);
+            
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('whatsapp:qr', qr);
+                mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+            }
+        } catch (qrErr) {
+            logToFile('[WhatsApp] Error in QR handler:', qrErr.message || qrErr);
         }
     });
 
@@ -726,6 +731,20 @@ ipcMain.handle('drive:save-tokens', async (event, tokens) => {
         expires_at: Date.now() + (tokens.expires_in - 60) * 1000
     });
     return true;
+});
+
+// IPC: Disconnect/Logout from Google Drive
+ipcMain.handle('drive:disconnect', async () => {
+    try {
+        if (fs.existsSync(DRIVE_TOKEN_FILE)) {
+            fs.unlinkSync(DRIVE_TOKEN_FILE);
+            return true;
+        }
+    } catch (err) {
+        console.error('[Main] Failed to disconnect Drive:', err);
+        throw err;
+    }
+    return false;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

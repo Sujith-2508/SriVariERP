@@ -188,16 +188,8 @@ export default function WhatsAppSection() {
                             </ul>
                         </div>
 
-                        <div className="flex gap-3">
-                            {status === 'READY' ? (
-                                <button
-                                    onClick={handleLogout}
-                                    className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors text-sm font-bold"
-                                >
-                                    <LogOut size={16} />
-                                    Disconnect Account
-                                </button>
-                            ) : (
+                        <div className="flex flex-wrap gap-3">
+                            {status !== 'READY' && (
                                 <button
                                     onClick={() => {
                                         window.electron.whatsapp.reconnect();
@@ -206,7 +198,17 @@ export default function WhatsAppSection() {
                                     className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-all border border-slate-800 shadow-sm"
                                 >
                                     <RefreshCw size={16} />
-                                    Re-sync Connection
+                                    {status === 'DISCONNECTED' ? 'Start Connection' : 'Re-sync Connection'}
+                                </button>
+                            )}
+
+                            {status !== 'DISCONNECTED' && (
+                                <button
+                                    onClick={handleLogout}
+                                    className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors text-sm font-bold"
+                                >
+                                    <LogOut size={16} />
+                                    Disconnect Account
                                 </button>
                             )}
                         </div>

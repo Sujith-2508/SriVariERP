@@ -508,17 +508,26 @@ export default function DealerLedger() {
         const selectedDealer = dealers.find(d => d.id === selectedDealerId);
         if (!selectedDealer) return;
 
+        // ── Check WhatsApp connection first ─────────────────────────────────
+        if (window.electron?.whatsapp?.getStatus) {
+            const status = await window.electron.whatsapp.getStatus();
+            if (status !== 'READY') {
+                const goToSettings = await showConfirm({
+                    title: 'WhatsApp Not Connected',
+                    message: 'WhatsApp is not connected. Would you like to go to Settings to connect your WhatsApp account?',
+                    confirmLabel: 'Go to Settings',
+                    cancelLabel: 'Cancel',
+                    type: 'warning'
+                });
+                if (goToSettings) router.push('/settings');
+                return;
+            }
+        }
+
         setWhatsappSending('sending');
         setWhatsappError(null);
 
         try {
-            if (window.electron?.whatsapp?.getStatus) {
-                const status = await window.electron.whatsapp.getStatus();
-                if (status !== 'READY') {
-                    throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
-                }
-            }
-
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
                 selectedDealer, invoices, payments, companySettings, summary
@@ -534,25 +543,47 @@ export default function DealerLedger() {
                     `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`
                 );
             } else {
-                // WEB FALLBACK: Upload to Drive and share Link
-                try {
-                    const stmtLink = await uploadToWhatsAppFolder(base64Pdf, `${safeName}_Statement_${getPdfLabel()}.pdf`);
-                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. \n\nView Statement PDF: ${stmtLink}`;
-                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                    window.open(whatsappUrl, '_blank');
-                    // Small delay to simulate sending
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                } catch (err: any) {
-                    console.error('Web WhatsApp share failed:', err);
-                    // Fallback to text only
+                // WEB FALLBACK: check Drive connection first
+                const electronAny = window.electron as any;
+                const driveConnected = electronAny?.drive
+                    ? await electronAny.drive.isConnected()
+                    : true; // Web mode: assume connected (uses OAuth flow)
+
+                if (!driveConnected) {
+                    const goToDrive = await showConfirm({
+                        title: 'Google Drive Not Connected',
+                        message: 'Google Drive is not connected. The statement link cannot be generated. Would you like to go to Settings to connect Google Drive?',
+                        confirmLabel: 'Go to Settings',
+                        cancelLabel: 'Send Text Only',
+                        type: 'warning'
+                    });
+                    if (goToDrive) {
+                        router.push('/settings');
+                        setWhatsappSending('idle');
+                        return;
+                    }
+                    // User chose "Send Text Only" fallback
                     const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. (Full statement available in office)`;
                     const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
+                } else {
+                    try {
+                        const stmtLink = await uploadToWhatsAppFolder(base64Pdf, `${safeName}_Statement_${getPdfLabel()}.pdf`);
+                        const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. \n\nView Statement PDF: ${stmtLink}`;
+                        const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                        window.open(whatsappUrl, '_blank');
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } catch (err: any) {
+                        console.error('Web WhatsApp share failed:', err);
+                        const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`;
+                        const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                        window.open(whatsappUrl, '_blank');
+                    }
                 }
             }
 
             setWhatsappSending('success');
-            await logToApplicationSheet('WhatsApp Statement Sent', `Dealer: ${selectedDealer.businessName}, Range: ${rangeText}, Balance: Rs. ${summary.totalOutstanding.toLocaleString()}`);
+            logToApplicationSheet('WhatsApp Statement Sent', `Dealer: ${selectedDealer.businessName}, Range: ${rangeText}, Balance: Rs. ${summary.totalOutstanding.toLocaleString()}`).catch(() => {});
             setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
             console.error('WhatsApp send failed', err);
@@ -972,15 +1003,18 @@ export default function DealerLedger() {
             }))
         ]
         .sort((a, b) => {
-            // BUG FIX: BAL B/F must ALWAYS be first, regardless of its date.
-            // Previously it only moved to the top when dates were equal — if the
-            // opening balance date was 01 Apr but invoices were 29-31 Mar, it
-            // would sort to the bottom, making the entire ledger incorrect.
+            // BAL B/F (opening balance) is ALWAYS first
             if (a.reference === 'BAL B/F') return -1;
             if (b.reference === 'BAL B/F') return 1;
 
-            // All other entries: chronological order
-            return a.date.getTime() - b.date.getTime();
+            // All other entries: strict chronological order
+            const diff = a.date.getTime() - b.date.getTime();
+            if (diff !== 0) return diff;
+
+            // Same date: invoices before payments (logical ordering)
+            if (a.type === 'Invoice' && b.type === 'Payment') return -1;
+            if (a.type === 'Payment' && b.type === 'Invoice') return 1;
+            return 0;
         })
         .map((entry, idx) => {
             if (idx === 0) {
@@ -1155,9 +1189,11 @@ export default function DealerLedger() {
                                             </td>
                                             <td className="p-4 text-center">
                                                 <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter ${
-                                                    entry.balance >= 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                                                    entry.type === 'Payment'
+                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                        : 'bg-red-100 text-red-700'
                                                 }`}>
-                                                    {entry.balance >= 0 ? 'Dr' : 'Cr'}
+                                                    {entry.type === 'Payment' ? 'Cr' : 'Dr'}
                                                 </span>
                                             </td>
                                             <td className="p-4 text-center">

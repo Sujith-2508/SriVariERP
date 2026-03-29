@@ -49,32 +49,37 @@ export default function Home() {
     // Load expenses and salaries when month/year changes or period changes
     useEffect(() => {
         const loadDashboardData = async () => {
-            let salariesPromise;
-            let expensesPromise;
+            try {
+                let salariesPromise;
+                let expensesPromise;
 
-            if (profitPeriod === 'monthly') {
-                salariesPromise = getSalaryByMonth(selectedMonth, selectedYear);
-                expensesPromise = getExpensesByMonth(selectedMonth, selectedYear);
-            } else {
-                // Yearly: financial year based on selected month/year
-                const referenceDate = new Date(selectedYear, selectedMonth - 1, 1);
-                const fyRange = getFinancialYearRange(referenceDate);
-                salariesPromise = getSalaryByRange(fyRange.startDate, fyRange.endDate);
-                expensesPromise = getExpensesByRange(fyRange.startDate, fyRange.endDate);
+                if (profitPeriod === 'monthly') {
+                    salariesPromise = getSalaryByMonth(selectedMonth, selectedYear);
+                    expensesPromise = getExpensesByMonth(selectedMonth, selectedYear);
+                } else {
+                    // Yearly: financial year based on selected month/year
+                    const referenceDate = new Date(selectedYear, selectedMonth - 1, 1);
+                    const fyRange = getFinancialYearRange(referenceDate);
+                    salariesPromise = getSalaryByRange(fyRange.startDate, fyRange.endDate);
+                    expensesPromise = getExpensesByRange(fyRange.startDate, fyRange.endDate);
+                }
+
+                const [suppliersData, billsData, paymentsData, salariesData, expensesData] = await Promise.all([
+                    getAllSuppliers(),
+                    getPurchaseBills(),
+                    getPurchasePayments(),
+                    salariesPromise,
+                    expensesPromise
+                ]);
+                setSuppliers(suppliersData);
+                setPurchaseBills(billsData);
+                setPurchasePayments(paymentsData);
+                setAgentSalaries(salariesData);
+                setCompanyExpenses(expensesData);
+            } catch (err: any) {
+                console.error('[Dashboard] Critical error loading data:', err);
+                showToast('Failed to load dashboard data. Please refresh.', 'error');
             }
-
-            const [suppliersData, billsData, paymentsData, salariesData, expensesData] = await Promise.all([
-                getAllSuppliers(),
-                getPurchaseBills(),
-                getPurchasePayments(),
-                salariesPromise,
-                expensesPromise
-            ]);
-            setSuppliers(suppliersData);
-            setPurchaseBills(billsData);
-            setPurchasePayments(paymentsData);
-            setAgentSalaries(salariesData);
-            setCompanyExpenses(expensesData);
         };
         loadDashboardData();
     }, [selectedMonth, selectedYear, profitPeriod]);

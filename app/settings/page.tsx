@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive, Building2, Landmark } from 'lucide-react';
+import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive, Building2, Landmark, LogOut } from 'lucide-react';
 import WhatsAppSection from '@/components/WhatsAppSection';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { supabase } from '@/lib/supabase';
@@ -191,6 +191,26 @@ export default function SettingsPage() {
         } finally {
             setCompanySaving(false);
             setTimeout(() => setCompanyMessage(null), 5000);
+        }
+    };
+
+    const handleDisconnectDrive = async () => {
+        const electron = (window as any).electron;
+        if (!electron?.drive?.disconnect) {
+            localStorage.removeItem('drive_token');
+            setDriveConnected(false);
+            setDriveMessage({ type: 'success', text: 'Disconnected from Google Drive (Web Mode).' });
+            return;
+        }
+
+        try {
+            const success = await electron.drive.disconnect();
+            if (success) {
+                setDriveConnected(false);
+                setDriveMessage({ type: 'success', text: 'Disconnected from Google Drive successfully.' });
+            }
+        } catch (err: any) {
+            setDriveMessage({ type: 'error', text: 'Failed to disconnect Drive: ' + err.message });
         }
     };
 
@@ -666,22 +686,34 @@ export default function SettingsPage() {
                             </div>
                         )}
 
-                        <button
-                            onClick={() => handleConnectDrive()}
-                            disabled={driveConnecting}
-                            className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${driveConnected
-                                ? 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 border border-slate-200'
-                                : 'bg-blue-600 text-white hover:bg-blue-700'
-                                }`}
-                        >
-                            {driveConnecting ? (
-                                <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Connecting...</>
-                            ) : driveConnected ? (
-                                <>Reconnect</>
-                            ) : (
-                                <><HardDrive size={16} />Connect Google Drive</>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => handleConnectDrive()}
+                                disabled={driveConnecting}
+                                className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 flex-1 ${driveConnected
+                                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                                    }`}
+                            >
+                                {driveConnecting ? (
+                                    <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Connecting...</>
+                                ) : driveConnected ? (
+                                    <>Reconnect</>
+                                ) : (
+                                    <><HardDrive size={16} />Connect Google Drive</>
+                                )}
+                            </button>
+
+                            {driveConnected && (
+                                <button
+                                    onClick={handleDisconnectDrive}
+                                    className="px-5 py-2.5 rounded-lg font-medium text-sm bg-white text-red-600 border border-red-200 hover:bg-red-50 transition-colors flex items-center justify-center gap-2 flex-1"
+                                >
+                                    <LogOut size={16} />
+                                    Disconnect
+                                </button>
                             )}
-                        </button>
+                        </div>
                     </div>
 
                     {driveMessage && (
