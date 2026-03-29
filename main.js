@@ -20,13 +20,15 @@ function logToFile(...args) {
 
 // Global Exception Handler
 process.on('uncaughtException', (err) => {
-    const errorMsg = require('util').inspect(err, { showHidden: false, depth: 3, colors: false });
-    logToFile('CRITICAL ERROR (Uncaught Exception):', errorMsg);
+    const errorMsg = require('util').inspect(err, { showHidden: true, depth: 5, colors: false });
+    const stack = err && err.stack ? `\nStack: ${err.stack}` : '';
+    logToFile('CRITICAL ERROR (Uncaught Exception):', errorMsg + stack);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    const errorMsg = require('util').inspect(reason, { showHidden: false, depth: 3, colors: false });
-    logToFile('CRITICAL ERROR (Unhandled Rejection):', errorMsg);
+    const errorMsg = require('util').inspect(reason, { showHidden: true, depth: 5, colors: false });
+    const stack = reason && reason.stack ? `\nStack: ${reason.stack}` : '';
+    logToFile('CRITICAL ERROR (Unhandled Rejection):', errorMsg + stack);
 });
 
 logToFile('--- Application Starting ---');
@@ -336,6 +338,10 @@ function initWhatsApp() {
 
     whatsappClient.on('change_state', (state) => {
         console.log('WhatsApp State Changed:', state);
+    });
+
+    whatsappClient.on('error', (err) => {
+        logToFile('[WhatsApp] Library Error:', require('util').inspect(err, { depth: 2, colors: false }));
     });
 
     whatsappClient.on('disconnected', (reason) => {
