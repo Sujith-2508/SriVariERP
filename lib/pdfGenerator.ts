@@ -1311,11 +1311,10 @@ export const generateProfitAnalysisPDF = (
     const summaryRows = [
         ['Total Sales Revenue', fmt(data.revenue), ''],
         ['(-) Cost of Goods Sold (COGS)', fmt(data.cogs), `${data.revenue > 0 ? ((data.cogs / data.revenue) * 100).toFixed(1) : 0}%`],
-        ['(-) Dealer Discounts', fmt(data.discounts), ''],
-        ['= Gross Profit', fmt(data.grossProfit), `${data.revenue > 0 ? ((data.grossProfit / data.revenue) * 100).toFixed(1) : 0}%`],
-        ['(-) Agent Salaries', fmt(data.agentSalariesTotal), ''],
-        ['(-) Company Expenses', fmt(data.companyExpensesTotal), ''],
-        ['= NET PROFIT', fmt(data.netProfit), `${data.margin.toFixed(1)}%`],
+        ['= Gross Profit (Before Expenses)', fmt(data.grossProfit), `${data.revenue > 0 ? ((data.grossProfit / data.revenue) * 100).toFixed(1) : 0}%`],
+        ['(-) Operating Expenses (Salaries & Office)', fmt(data.agentSalariesTotal + data.companyExpensesTotal), ''],
+        ['= COMPANY NET PROFIT', fmt(data.netProfit), `${data.margin.toFixed(1)}%`],
+        ['Dealer Profit Share (Calculated separately)', fmt(data.discounts), ''],
     ];
 
     autoTable(doc, {

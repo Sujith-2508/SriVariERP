@@ -40,17 +40,16 @@ logToFile('UserData Path:', app.getPath('userData'));
 // ─── Load .env.local at runtime (required for production exe) ────────────────
 function loadEnvFile() {
     try {
-        const resourcesPath = process.resourcesPath || path.join(__dirname);
         const envPaths = [
-            path.join(resourcesPath, 'app.asar.unpacked', '.env.local'), // packaged (asar unpacked)
-            path.join(resourcesPath, '.env.local'),                     // packaged (direct resource)
-            path.join(__dirname, '.env.local'),                          // dev mode
+            path.join(__dirname, '.env.local'),                         // internal (inside ASAR or dev folder)
+            path.join(process.resourcesPath, '.env.local'),              // external (next to app.asar in standard install)
+            path.join(app.getAppPath(), '..', '.env.local'),           // relative to app location
         ];
 
         let found = false;
         for (const envPath of envPaths) {
             if (fs.existsSync(envPath)) {
-                logToFile('[env] Trying path:', envPath);
+                logToFile('[env] Found environment file at:', envPath);
                 const content = fs.readFileSync(envPath, 'utf8');
                 content.split('\n').filter(line => line.trim() && !line.startsWith('#')).forEach(line => {
                     const parts = line.split('=');

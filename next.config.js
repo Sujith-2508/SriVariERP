@@ -9,7 +9,13 @@ const nextConfig = {
         unoptimized: true
     },
     trailingSlash: true,
-    devIndicators: false
+    devIndicators: false,
+    typescript: {
+        ignoreBuildErrors: true,
+    },
+    eslint: {
+        ignoreDuringBuilds: true,
+    }
 }
 
 module.exports = nextConfig

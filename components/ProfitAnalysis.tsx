@@ -128,8 +128,7 @@ export function ProfitAnalysis() {
         // and our range spans that month, we get them.
         
         let allocatedExpenses = totalSalaries + totalCompExpenses;
-
-        const netProfit = p - allocatedExpenses;
+        const netProfit = gp - allocatedExpenses; // New formula: Revenue - COGS - Expenses
         const m = rev > 0 ? (netProfit / rev) * 100 : 0;
 
         return {
@@ -229,7 +228,7 @@ export function ProfitAnalysis() {
 
             const totalSalaries = rangeSalaries.reduce((acc, s) => acc + s.baseSalary + (s.totalExpense || 0), 0);
             const totalCompExpenses = rangeExpenses.reduce((acc, e) => acc + e.amount, 0);
-            const rangeNetProfit = rNp - (totalSalaries + totalCompExpenses);
+            const rangeNetProfit = rGp - (totalSalaries + totalCompExpenses); // Consistency for PDF
             const rangeMargin = rRevenue > 0 ? (rangeNetProfit / rRevenue) * 100 : 0;
 
             generateProfitAnalysisPDF(companySettings, {
@@ -362,13 +361,13 @@ export function ProfitAnalysis() {
                                 <span className="text-slate-500 font-medium">(-) Product Cost (COGS)</span>
                                 <span className="text-red-500 font-bold">{formatCurrency(cogs)}</span>
                             </div>
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-500 font-medium">(-) Discounts Given</span>
-                                <span className="text-orange-500 font-bold">{formatCurrency(discounts)}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-sm">
+                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-500 font-medium">(-) Operating Expenses</span>
-                                <span className="text-purple-500 font-bold">{formatCurrency(expensesDetails)}</span>
+                                <span className="text-red-500 font-bold">{formatCurrency(expensesDetails)}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs opacity-60">
+                                <span className="text-slate-400 font-medium italic">(!) Dealer Profit Share (Info only)</span>
+                                <span className="text-slate-400 font-medium">{formatCurrency(discounts)}</span>
                             </div>
                         </div>
 

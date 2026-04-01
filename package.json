@@ -21,10 +21,9 @@
   },
   "build": {
     "appId": "com.srivari.erp",
-    "productName": "Sri Vari ERP",
+    "afterPack": "./scripts/afterPack.js",
     "compression": "maximum",
     "icon": "public/icon.png",
-    "afterPack": "scripts/afterPack.js",
     "win": {
       "icon": "public/icon.ico",
       "requestedExecutionLevel": "asInvoker",
@@ -34,21 +33,19 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Sri Vari ERP"
+      "shortcutName": "Sri Vari ERP",
+      "artifactName": "${productName} v${version} ${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName} Portable ${version} ${arch}.${ext}"
     },
     "mac": {
       "icon": "public/icon.png"
@@ -65,11 +62,6 @@
       "public/icon.png"
     ],
     "asar": true,
-    "asarUnpack": [
-      "node_modules/whatsapp-web.js/**/*",
-      "node_modules/puppeteer/**/*",
-      "node_modules/puppeteer-core/**/*"
-    ],
     "directories": {
       "output": "dist"
     }
@@ -111,7 +103,7 @@
     "concurrently": "^9.1.0",
     "cross-env": "^10.1.0",
     "electron": "^33.2.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^24.13.3",
     "jsdom": "^27.0.1",
     "msw": "^2.12.14",
     "postcss": "^8.4.49",

@@ -233,7 +233,7 @@ export function calculateInvoiceProfit(
         } catch { return false; }
     })();
 
-    if (isChequeReturn) {
+    if (isChequeReturn || invoice.referenceId === 'BAL B/F') {
         return { revenue: 0, cogs: 0, serviceCharges: 0, agentExpenses: 0, grossProfit: 0, dealerDiscount: 0, netProfit: 0, profitPercentage: 0 };
     }
 
@@ -275,7 +275,7 @@ export function getDealerProfitSummary(
     transactions: Transaction[],
     products: Product[]
 ): DealerProfitSummary {
-    const invoices = transactions.filter(t => t.type === TransactionType.INVOICE);
+    const invoices = transactions.filter(t => t.type === TransactionType.INVOICE && t.referenceId !== 'BAL B/F');
 
     let totalRevenue = 0;
     let totalProfit = 0;

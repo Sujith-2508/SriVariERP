@@ -215,7 +215,7 @@ export default function Home() {
 
         const todayStr = new Date().toDateString();
         const todaysSales = transactions
-            .filter(t => t.type === 'INVOICE' && new Date(t.date).toDateString() === todayStr)
+            .filter(t => t.type === 'INVOICE' && t.referenceId !== 'BAL B/F' && new Date(t.date).toDateString() === todayStr)
             .reduce((acc, t) => acc + t.amount, 0);
 
         const now = new Date();
@@ -226,6 +226,7 @@ export default function Home() {
             .filter(t => {
                 const txnDate = new Date(t.date);
                 return t.type === 'INVOICE' &&
+                    t.referenceId !== 'BAL B/F' &&
                     txnDate.getMonth() === currentMonth &&
                     txnDate.getFullYear() === currentYear;
             })
@@ -249,7 +250,10 @@ export default function Home() {
             const daySales = transactions
                 .filter(t => {
                     const txnDate = new Date(t.date);
-                    return t.type === 'INVOICE' && txnDate >= dayStart && txnDate <= dayEnd;
+                    return t.type === 'INVOICE' &&
+                        t.referenceId !== 'BAL B/F' &&
+                        txnDate >= dayStart &&
+                        txnDate <= dayEnd;
                 })
                 .reduce((acc, t) => acc + t.amount, 0);
 
@@ -303,6 +307,7 @@ export default function Home() {
         const invoices = transactions.filter(t => {
             const txnDate = new Date(t.date);
             return t.type === TransactionType.INVOICE &&
+                t.referenceId !== 'BAL B/F' &&
                 txnDate >= startDate &&
                 txnDate <= endDate;
         });
@@ -317,7 +322,7 @@ export default function Home() {
             revenue += p.revenue;
             cogs += p.cogs;
             discounts += p.dealerDiscount;
-            profit += p.netProfit;
+            profit += p.grossProfit; // Use grossProfit (Revenue - COGS) to follow new formula
         });
 
         console.log(`[Dashboard] Period: ${label}`);
@@ -328,6 +333,7 @@ export default function Home() {
         const agentExpenses = agentSalaries.reduce((acc, s) => acc + (s.totalExpense || 0) + s.baseSalary, 0);
         const compExpenses = companyExpenses.reduce((acc, e) => acc + e.amount, 0);
 
+        // Net Profit = (Revenue - COGS) - Total Expenses
         const netProfit = profit - agentExpenses - compExpenses;
         const margin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
         const inventoryValue = products.reduce((sum, p) => sum + ((p.stock || 0) * (p.costPrice || 0)), 0);
@@ -367,6 +373,7 @@ export default function Home() {
 
                 for (const invoice of dealerInvoices) {
                     if (remainingBalance <= 0) break;
+                    if (invoice.referenceId === 'BAL B/F') continue; // Skip opening balance in aging calculation
 
                     const amount = Math.min(remainingBalance, invoice.amount);
                     const invoiceDate = new Date(invoice.date);
@@ -379,10 +386,9 @@ export default function Home() {
 
                     remainingBalance -= amount;
                 }
-
-                if (remainingBalance > 0) {
-                    counts.overdue += remainingBalance;
-                }
+                
+                // Note: leftover remainingBalance after checking all actual invoices is opening balance/unreconciled data, 
+                // which the user asked to exclude from aging breakdown.
             }
         });
 
@@ -726,6 +732,66 @@ export default function Home() {
                             )}
                         </div>
                     </div>
+                </div>
+            </div>
+
+            {/* RECENT INVOICES SECTION */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                        <FileText size={18} className="text-blue-500" />
+                        Recent Generated Invoices
+                    </h3>
+                    <p className="text-xs text-slate-400">Showing last 8 generated invoices</p>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-slate-50 border-y border-slate-100">
+                            <tr>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Date</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Invoice #</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Dealer</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">City</th>
+                                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {transactions
+                                .filter(t => t.type === 'INVOICE' && t.referenceId !== 'BAL B/F')
+                                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                .slice(0, 8)
+                                .map((invoice, idx) => {
+                                    const dealer = dealers.find(d => d.id === invoice.customerId);
+                                    return (
+                                        <tr key={idx} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => router.push(`/billing?invoice=${invoice.id}`)}>
+                                            <td className="px-4 py-3 text-sm text-slate-600">
+                                                {new Date(invoice.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className="text-sm font-bold text-blue-600 group-hover:underline flex items-center gap-1">
+                                                    {invoice.referenceId}
+                                                    <ExternalLink size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className="text-sm font-medium text-slate-700">{dealer?.businessName || 'Unknown Dealer'}</span>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className="text-xs text-slate-500">{dealer?.city || 'N/A'}</span>
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <span className="text-sm font-bold text-slate-800">{formatCurrency(invoice.amount)}</span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            {transactions.filter(t => t.type === 'INVOICE' && t.referenceId !== 'BAL B/F').length === 0 && (
+                                <tr>
+                                    <td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">No invoices found.</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
