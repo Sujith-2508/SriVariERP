@@ -5,10 +5,11 @@ import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, Paym
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
-import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet, syncPaymentToSheets, logToApplicationSheet } from '@/lib/googleSheetWriter';
+import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet, logToApplicationSheet } from '@/lib/googleSheetWriter';
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { useToast } from './ToastContext';
+import { forceSyncPurchases } from '@/lib/purchaseService';
 
 interface InvoiceData {
     vehicleName?: string;
@@ -231,14 +232,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [isLoading]);
 
     // Fetch all data - Products from Google Sheet, others from Supabase
-    const fetchData = useCallback(async () => {
+    const fetchData = useCallback(async (force: boolean = false) => {
         setIsLoading(true);
         setError(null);
 
         try {
             // Fetch products from Google Sheet via API (primary)
             try {
-                const { products: sheetProducts } = await readProductsFromSheet();
+                const { products: sheetProducts } = await readProductsFromSheet(force);
                 if (sheetProducts.length > 0) {
                     setProducts(sheetProducts);
                     setProductCount(sheetProducts.length + 1);
@@ -415,7 +416,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const refreshData = async () => {
-        await fetchData();
+        await fetchData(true); // Forced refresh hits the API
         await loadTrackingData();
     };
 
@@ -529,21 +530,55 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         });
 
-        // NEW: Handle window focus to catch any transactions missed while the app was backgrounded/paused
-        const handleFocus = () => {
-            console.log('[DataContext] Window focused: Refreshing for latest mobile syncs');
-            refreshData();
-        };
-        window.addEventListener('focus', handleFocus);
+        // NOTE: Window focus re-fetches removed — they caused most 429 quota exhaustion.
+        // Data is kept fresh via the 5-min read cache in sheetsQueue.
 
         return () => {
             window.removeEventListener('storage_products_updated', handleStorageUpdate);
-            window.removeEventListener('focus', handleFocus);
             statusSub.unsubscribe();
             locationSub.unsubscribe();
             transactionSub.unsubscribe();
         };
     }, []); // Removed fetchData/loadTrackingData from deps to prevent infinite loops if they change
+
+    // ── Auto-sync suppliers (payables data) once per session ──────────────────
+    // Supplier data lives in localStorage['sve_suppliers'] and is only populated
+    // by forceSyncPurchases(). Without this auto-trigger, Payables always shows
+    // ₹0 until the user manually presses "Force Sync" in the Purchases page.
+    useEffect(() => {
+        const SUPPLIER_SYNC_KEY  = 'erp_supplier_synced';
+        const SUPPLIER_CACHE_KEY = 'erp_supplier_sync_ts';
+        const CACHE_MAX_AGE_MS   = 30 * 60_000; // 30 minutes — re-sync at most once per 30 min
+
+        // Check if we synced recently (persists across sessions via localStorage)
+        const lastSync = parseInt(localStorage.getItem(SUPPLIER_CACHE_KEY) || '0', 10);
+        const cacheStale = Date.now() - lastSync > CACHE_MAX_AGE_MS;
+
+        // Also check session guard (prevents double-trigger if component remounts)
+        if (sessionStorage.getItem(SUPPLIER_SYNC_KEY) && !cacheStale) {
+            console.log('[DataContext] Supplier data is fresh, skipping auto-sync');
+            return;
+        }
+
+        sessionStorage.setItem(SUPPLIER_SYNC_KEY, 'true');
+
+        // Delay by 15 s so the initial app load settles first
+        // (product reads + dealer reads grab quota; give them room)
+        const timer = setTimeout(async () => {
+            try {
+                console.log('[DataContext] Auto-syncing supplier data (payables)...');
+                const ok = await forceSyncPurchases();
+                if (ok) {
+                    localStorage.setItem(SUPPLIER_CACHE_KEY, String(Date.now()));
+                    console.log('[DataContext] Supplier auto-sync complete ✓');
+                }
+            } catch (e) {
+                console.warn('[DataContext] Supplier auto-sync failed (non-critical):', e);
+            }
+        }, 15_000);
+
+        return () => clearTimeout(timer);
+    }, []);
 
     const updateStock = async (productId: string, quantity: number) => {
         const currentProducts = getLocalProducts();
@@ -581,18 +616,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProductCount(prev => prev + 1);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet, then re-read to get authoritative data (with rowIndex)
+        // Sync to Google Sheet (queued — no extra re-read needed)
         try {
             await addProductToSheet(newProduct);
             logToApplicationSheet('Product Created', `Added ${newProduct.name} (Category: ${newProduct.category})`, newProduct.price);
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                setProductCount(sheetProducts.length + 1);
-                saveLocalProducts(sheetProducts);
-            }
+            // UI already reflects the new product from local state
         } catch (e) {
-            console.warn('[DataContext] Could not sync product add to Google Sheet:', e);
+            console.warn('[DataContext] Could not queue product add to Google Sheet:', e);
         }
     };
 
@@ -607,19 +637,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet (search by name if rowIndex missing), then re-read
+        // Sync to Google Sheet (queued — no extra re-read needed)
         try {
             const productIndex = products.findIndex(p => p.id === updatedProduct.id);
             const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
             await updateProductInSheet(rowIndex, updatedProduct);
             logToApplicationSheet('Product Updated', `Updated product details for ${updatedProduct.name}`, updatedProduct.price);
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                saveLocalProducts(sheetProducts);
-            }
+            // UI already reflects the update from local state
         } catch (e) {
-            console.warn('[DataContext] Could not sync product update to Google Sheet:', e);
+            console.warn('[DataContext] Could not queue product update to Google Sheet:', e);
         }
     };
 
@@ -633,21 +659,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync deletion to Google Sheet (physically removes the row), then re-read
+        // Sync deletion to Google Sheet (queued)
         try {
             const rowIndex = (product as any)?.rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
             if (rowIndex > 0 || product?.name) {
                 await deleteProductFromSheet(rowIndex, product?.name);
             }
             logToApplicationSheet('Product Deleted', `Removed product: ${product?.name || id}`);
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                setProductCount(sheetProducts.length + 1);
-                saveLocalProducts(sheetProducts);
-            }
+            // UI already reflects deletion from local state
         } catch (e) {
-            console.warn('[DataContext] Could not sync product delete to Google Sheet:', e);
+            console.warn('[DataContext] Could not queue product delete to Google Sheet:', e);
         }
     };
 
@@ -1854,7 +1875,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     useEffect(() => {
         // Automatic Financial Year Rollover check
+        // Guard: only run ONCE per session to avoid repeated Sheet API calls
+        const ROLLOVER_SESSION_KEY = 'erp_rollover_checked';
+        if (sessionStorage.getItem(ROLLOVER_SESSION_KEY)) return;
+
         const runAutoRollover = async () => {
+            sessionStorage.setItem(ROLLOVER_SESSION_KEY, 'true'); // mark as checked immediately
+
+            // Delay startup to let the app settle and avoid quota spike on load
+            await new Promise(r => setTimeout(r, 10_000));
+
             const now = new Date();
             const currentYear = now.getFullYear();
             
@@ -1884,6 +1914,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     try {
                         await rollOverDealerYear(dealer.id, closingDateStr, openingDateStr);
                         logToApplicationSheet('Auto Rollover', `FY closed automatically for ${dealer.businessName}`, 0);
+                        // Small gap between dealers to avoid quota pressure
+                        await new Promise(r => setTimeout(r, 3_000));
                     } catch (err) {
                         console.error(`[DataContext] Auto rollover failed for ${dealer.businessName}:`, err);
                     }

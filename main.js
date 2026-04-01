@@ -137,8 +137,8 @@ function createWindow() {
             responseHeaders: {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
-                    `default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: app://* http://localhost:3000 https://*; ` +
-                    `connect-src 'self' app://* http://localhost:3000 ws://localhost:3000 https://* https://${supabaseHost} https://*.googleapis.com; ` +
+                    `default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: app://* http://127.0.0.1:3000 http://localhost:3000 https://*; ` +
+                    `connect-src 'self' app://* http://127.0.0.1:3000 ws://127.0.0.1:3000 http://localhost:3000 ws://localhost:3000 https://* https://${supabaseHost} https://*.googleapis.com; ` +
                     `img-src 'self' data: blob: app://* https://*; ` +
                     `frame-src 'self' https://*;`
                 ]
@@ -147,8 +147,8 @@ function createWindow() {
     })
 
     if (isDev) {
-        logToFile('[Main] Loading dev URL: http://localhost:3000');
-        mainWindow.loadURL('http://localhost:3000')
+        logToFile('[Main] Loading dev URL: http://127.0.0.1:3000');
+        mainWindow.loadURL('http://127.0.0.1:3000')
     } else {
         logToFile('[Main] Loading production URL: app://localhost/');
         mainWindow.loadURL('app://localhost/')

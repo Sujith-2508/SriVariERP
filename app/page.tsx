@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useMemo, useEffect, useState } from 'react';
@@ -23,6 +24,8 @@ export default function Home() {
     const [agentSalaries, setAgentSalaries] = useState<AgentSalaryData[]>([]);
     const [companyExpenses, setCompanyExpenses] = useState<CompanyExpense[]>([]);
     const [profitPeriod, setProfitPeriod] = useState<'monthly' | 'yearly'>('monthly');
+    // Incremented when supplier sync completes so the dashboard re-fetches
+    const [supplierRefreshKey, setSupplierRefreshKey] = useState(0);
 
     const [dateRangeModal, setDateRangeModal] = useState<{
         open: boolean;
@@ -82,7 +85,25 @@ export default function Home() {
             }
         };
         loadDashboardData();
-    }, [selectedMonth, selectedYear, profitPeriod]);
+    }, [selectedMonth, selectedYear, profitPeriod, supplierRefreshKey]);
+
+    // Re-fetch dashboard data when the background supplier sync completes
+    useEffect(() => {
+        // Poll the supplier sync timestamp written by DataContext auto-sync
+        const SUPPLIER_CACHE_KEY = 'erp_supplier_sync_ts';
+        let lastSeen = localStorage.getItem(SUPPLIER_CACHE_KEY);
+
+        const interval = setInterval(() => {
+            const current = localStorage.getItem(SUPPLIER_CACHE_KEY);
+            if (current && current !== lastSeen) {
+                lastSeen = current;
+                console.log('[Dashboard] Supplier sync detected — refreshing payables...');
+                setSupplierRefreshKey(k => k + 1);
+            }
+        }, 3_000); // Check every 3 seconds
+
+        return () => clearInterval(interval);
+    }, []);
 
     const handleExportCompanyStatementPDF = async () => {
         setIsGeneratingPdf(true);

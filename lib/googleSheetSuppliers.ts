@@ -27,6 +27,19 @@ const SPREADSHEET_ID = process.env.NEXT_PUBLIC_GOOGLE_SUPPLIERS_SHEET_ID || '1Cx
 const SHEET_NAME = 'refined suppliers';
 const SHEETS_API_BASE = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
+// ── Shared rate-limit key (coordinated with dealerWrite & sheetsQueue) ──
+// All three modules write a timestamp here so they all back-off together.
+const LAST_REQ_KEY = 'sve_last_sheet_req';
+const MIN_GAP_MS   = 2_000; // 1 request per 2 s → max 30/min (quota is 60)
+
+async function rateLimit(): Promise<void> {
+    if (typeof localStorage === 'undefined') return;
+    const last = parseInt(localStorage.getItem(LAST_REQ_KEY) || '0', 10);
+    const wait = MIN_GAP_MS - (Date.now() - last);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait + 50));
+    localStorage.setItem(LAST_REQ_KEY, String(Date.now()));
+}
+
 // Service account credentials cache
 let cachedToken: { token: string; expires: number } | null = null;
 
@@ -392,6 +405,7 @@ export async function createSupplierSheetTab(
     company: CompanySheetDetails = {}
 ): Promise<boolean> {
     try {
+        await rateLimit(); // throttle before meta-read
         // Reset cached token so we always get a write-scoped one
         cachedToken = null;
         const token = await getAccessToken();
@@ -677,6 +691,7 @@ export async function appendToSupplierSheetTab(
         return true;
     }
     try {
+        await rateLimit(); // throttle: max 1 write per 2 s across all sheet modules
         const token = await getAccessToken();
         const sheetId = await getSheetIdByName(token, supplierName);
         if (sheetId === null) {
@@ -740,6 +755,10 @@ export async function appendToSupplierSheetTab(
 
         if (!res.ok) {
             const errorText = await res.text();
+            if (res.status === 429) {
+                console.warn(`[GoogleSheetSuppliers] 429 rate limit on append for "${supplierName}" — write dropped (non-critical)`);
+                return false;
+            }
             console.error(`[GoogleSheetSuppliers] Final Append failed for "${supplierName}". Status: ${res.status}`, errorText);
             return false;
         }
@@ -763,6 +782,7 @@ export async function deleteSheetRowByRef(
     try {
         if (!supplierName || supplierName === 'Unknown' || !vchNo) return false;
 
+        await rateLimit(); // throttle before read+write sequence
         const token = await getAccessToken();
         const sheetId = await getSheetIdByName(token, supplierName);
         if (sheetId === null) {
