@@ -362,7 +362,7 @@ export default function AgentsPage() {
                                                     <td className="px-6 py-4">
                                                         <span className={`px-2 py-0.5 rounded text-[10px] font-black tracking-widest uppercase border ${agent.isActive
                                                             ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                                            : 'bg-slate-50 text-slate-500 border-slate-100'
+                                                            : 'bg-red-50 text-red-600 border-red-100'
                                                             }`}>
                                                             {agent.isActive ? 'ACTIVE' : 'OFF'}
                                                         </span>

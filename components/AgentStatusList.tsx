@@ -108,7 +108,7 @@ export function AgentStatusList({ agentData, onAgentClick, selectedAgentId }: Ag
                                                         ? 'fill-emerald-500 text-emerald-500'
                                                         : rawActive
                                                             ? 'fill-amber-400 text-amber-400'
-                                                            : 'fill-slate-400 text-slate-400'
+                                                            : 'fill-red-400 text-red-500'
                                                         }`}
                                                 />
                                                 <h4 className={`font-semibold ${isActive ? 'text-slate-800' : 'text-slate-600'}`}>{data.agent.name}</h4>
@@ -165,7 +165,7 @@ export function AgentStatusList({ agentData, onAgentClick, selectedAgentId }: Ag
                                                 ? 'bg-emerald-100 text-emerald-700'
                                                 : rawActive && isStale
                                                     ? 'bg-amber-100 text-amber-700'
-                                                    : 'bg-slate-100 text-slate-600'
+                                                    : 'bg-red-50 text-red-600'
                                                 }`}>
                                                 {statusLabel}
                                             </span>

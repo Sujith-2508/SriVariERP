@@ -12,8 +12,63 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
  */
 
 // ============================================
-// AGENT STATUS OPERATIONS
+// AUTO-CHECKOUT LOGIC (20 HOUR RULE)
 // ============================================
+
+/**
+ * Automatically close sessions that are older than 20 hours.
+ * This runs lazily whenever tracking data is fetched.
+ */
+export async function processAutoCheckouts(): Promise<void> {
+    const twentyHoursAgo = new Date(Date.now() - 20 * 60 * 60 * 1000);
+
+    // 1. Find all stalely active agents
+    const { data: staleAgents, error: staleError } = await supabase
+        .from('agent_status')
+        .select('*')
+        .eq('is_active', true)
+        .lt('last_active_at', twentyHoursAgo.toISOString());
+
+    if (staleError || !staleAgents || staleAgents.length === 0) return;
+
+    for (const status of staleAgents) {
+        console.log(`[Auto-Checkout] Processing stale session for agent: ${status.agent_id}`);
+
+        // 2. Mark as inactive in status table
+        await supabase
+            .from('agent_status')
+            .update({ is_active: false })
+            .eq('id', status.id);
+
+        // 3. Find their open attendance record
+        const { data: attendance } = await supabase
+            .from('attendance')
+            .select('*')
+            .eq('agent_id', status.agent_id)
+            .is('check_out_time', null)
+            .order('check_in_time', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (attendance) {
+            const checkIn = new Date(attendance.check_in_time);
+            // Calculate a 20-hour checkout or capped at now
+            const checkOut = new Date(Math.min(Date.now(), checkIn.getTime() + 20 * 60 * 60 * 1000));
+            
+            const hours = Number(((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60)).toFixed(2));
+
+            await supabase
+                .from('attendance')
+                .update({
+                    check_out_time: checkOut.toISOString(),
+                    total_hours: hours,
+                    status: 'PRESENT',
+                    notes: (attendance.notes || '') + ' (Auto-checkout after 20h)'
+                })
+                .eq('id', attendance.id);
+        }
+    }
+}
 
 /**
  * Get current status for a specific agent
@@ -54,6 +109,13 @@ export async function getAllAgentStatuses(): Promise<AgentStatus[]> {
  * Get combined tracking data for all agents
  */
 export async function getAllAgentTrackingData(): Promise<AgentTrackingData[]> {
+    // 0. Cleanup stale sessions (Lazy cleanup)
+    try {
+        await processAutoCheckouts();
+    } catch (e) {
+        console.warn('[Auto-Checkout] Cleanup skipped or failed:', e);
+    }
+
     // Get all agents
     const { data: agents, error: agentsError } = await supabase
         .from('agents')
@@ -478,7 +540,10 @@ function mapAttendance(data: any): Attendance {
     return {
         id: data.id,
         agentId: data.agent_id,
-        date: new Date(data.date),
+        date: (() => {
+            const [y, m, d] = data.date.split('-').map(Number);
+            return new Date(y, m - 1, d);
+        })(),
         checkInTime: data.check_in_time ? new Date(data.check_in_time) : undefined,
         checkOutTime: data.check_out_time ? new Date(data.check_out_time) : undefined,
         totalHours: data.total_hours,
