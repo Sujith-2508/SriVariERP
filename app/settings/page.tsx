@@ -12,7 +12,7 @@ import { useToast } from '@/contexts/ToastContext';
 
 export default function SettingsPage() {
     const { refreshData } = useData();
-    // â”€â”€â”€ Admin credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ————————————————————————————————————————————————————————————————————————————————————————————————————
     const [currentUsername, setCurrentUsername] = useState('');
     const [newUsername, setNewUsername] = useState('');
     const [currentPassword, setCurrentPassword] = useState('');
@@ -24,7 +24,7 @@ export default function SettingsPage() {
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [passwordsMatch, setPasswordsMatch] = useState(true);
     const { showToast } = useToast();
-    const [driveConnected, setDriveConnected] = useState(false);
+    const [driveStatus, setDriveStatus] = useState<string>('checking'); // connected, expired, error, not_connected, checking
     const [driveConnecting, setDriveConnecting] = useState(false);
     const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [isElectron, setIsElectron] = useState(false);
@@ -97,7 +97,15 @@ export default function SettingsPage() {
         // Check if Drive is already connected via Electron IPC
         const electron = (window as any).electron;
         if (electron?.drive?.isConnected) {
-            electron.drive.isConnected().then((connected: boolean) => setDriveConnected(connected));
+            electron.drive.isConnected().then((status: string) => {
+                setDriveStatus(status === 'connected' ? 'connected' : (status === 'not_connected' ? 'not_connected' : status));
+                if (status === 'expired') {
+                    setDriveMessage({ type: 'error', text: 'Google Drive connection has expired. Please Reconnect to resume automatic uploads.' });
+                }
+            });
+        } else {
+            // Web mode fallback
+            setDriveStatus(localStorage.getItem('drive_token') ? 'connected' : 'not_connected');
         }
 
         // Load company settings from Supabase
@@ -211,7 +219,7 @@ export default function SettingsPage() {
         try {
             const success = await electron.drive.disconnect();
             if (success) {
-                setDriveConnected(false);
+                setDriveStatus('not_connected');
                 setDriveMessage({ type: 'success', text: 'Disconnected from Google Drive successfully.' });
             }
         } catch (err: any) {
@@ -265,7 +273,7 @@ export default function SettingsPage() {
                 if (tokens.error) throw new Error(tokens.error_description || tokens.error);
 
                 await electron.drive.saveTokens(tokens);
-                setDriveConnected(true);
+                setDriveStatus('connected');
                 setDriveMessage({ type: 'success', text: 'Google Drive connected! Invoices will now be saved automatically.' });
                 setDriveConnecting(false);
             }
@@ -291,7 +299,7 @@ export default function SettingsPage() {
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
-        if (code && !driveConnected && !driveConnecting) {
+        if (code && driveStatus !== 'connected' && !driveConnecting) {
             const finalizeWebDrive = async () => {
                 setDriveConnecting(true);
                 try {
@@ -318,7 +326,7 @@ export default function SettingsPage() {
                         expires_at: Date.now() + (tokens.expires_in - 60) * 1000
                     };
                     localStorage.setItem('drive_token', JSON.stringify(updated));
-                    setDriveConnected(true);
+                    setDriveStatus('connected');
                     setDriveMessage({ type: 'success', text: 'Google Drive connected successfully!' });
                     // Clean URL
                     window.history.replaceState({}, document.title, window.location.pathname);
@@ -330,7 +338,7 @@ export default function SettingsPage() {
             };
             finalizeWebDrive();
         }
-    }, [driveConnected, driveConnecting]);
+    }, [driveStatus, driveConnecting]);
 
 
     const validatePassword = (pwd: string): { valid: boolean; message: string } => {
@@ -673,12 +681,20 @@ export default function SettingsPage() {
                     </p>
 
                     <div className="flex items-center gap-4">
-                        {driveConnected ? (
+                        {driveStatus === 'connected' ? (
                             <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 flex-1">
                                 <Check size={18} className="text-emerald-600 shrink-0" />
                                 <div>
                                     <p className="text-sm font-semibold text-emerald-700">Google Drive Connected</p>
                                     <p className="text-xs text-emerald-600">Invoices will be saved to <strong>ERP Invoices / Month Year /</strong> automatically.</p>
+                                </div>
+                            </div>
+                        ) : driveStatus === 'expired' || driveStatus === 'error' ? (
+                            <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex-1">
+                                <AlertCircle size={18} className="text-red-600 shrink-0" />
+                                <div>
+                                    <p className="text-sm font-semibold text-red-700">Connection {driveStatus === 'expired' ? 'Expired' : 'Error'}</p>
+                                    <p className="text-xs text-red-600">Your Google Drive session has {driveStatus === 'expired' ? 'expired' : 'encountered an error'}. Please reconnect.</p>
                                 </div>
                             </div>
                         ) : (
@@ -695,21 +711,21 @@ export default function SettingsPage() {
                             <button
                                 onClick={() => handleConnectDrive()}
                                 disabled={driveConnecting}
-                                className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 flex-1 ${driveConnected
+                                className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 flex-1 ${driveStatus === 'connected'
                                     ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
                                     : 'bg-blue-600 text-white hover:bg-blue-700'
                                     }`}
                             >
                                 {driveConnecting ? (
                                     <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Connecting...</>
-                                ) : driveConnected ? (
+                                ) : (driveStatus === 'connected' || driveStatus === 'expired' || driveStatus === 'error') ? (
                                     <>Reconnect</>
                                 ) : (
                                     <><HardDrive size={16} />Connect Google Drive</>
                                 )}
                             </button>
 
-                            {driveConnected && (
+                            {(driveStatus === 'connected' || driveStatus === 'expired' || driveStatus === 'error') && (
                                 <button
                                     onClick={handleDisconnectDrive}
                                     className="px-5 py-2.5 rounded-lg font-medium text-sm bg-white text-red-600 border border-red-200 hover:bg-red-50 transition-colors flex items-center justify-center gap-2 flex-1"

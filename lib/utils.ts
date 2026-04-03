@@ -1,8 +1,47 @@
 
 import { Transaction, TransactionType, InvoiceItem, Product } from '@/types';
 
+
+/**
+ * Calculates the next sequential invoice number by finding the maximum existing number.
+ * Scans both referenceId (INVXXX) and manualInvoiceNo in notes.
+ */
+export function getNextInvoiceNumber(transactions: Transaction[]): string {
+    const invoiceNos = transactions
+        .filter(t => t.type === TransactionType.INVOICE)
+        .map(t => {
+            // 1. Check referenceId (e.g. INV123)
+            const refMatch = t.referenceId?.match(/\d+/);
+            const refNo = refMatch ? parseInt(refMatch[0], 10) : 0;
+
+            // 2. Check manualInvoiceNo in notes (JSON)
+            let notesNo = 0;
+            if (t.notes) {
+                try {
+                    // Try exact match in JSON string first for speed
+                    const manualMatch = t.notes.match(/"manualInvoiceNo"\s*:\s*"(\d+)"/);
+                    if (manualMatch) {
+                        notesNo = parseInt(manualMatch[1], 10);
+                    } else {
+                        // Fallback to full parse
+                        const parsed = JSON.parse(t.notes);
+                        if (parsed.manualInvoiceNo) {
+                            notesNo = parseInt(parsed.manualInvoiceNo, 10);
+                        }
+                    }
+                } catch { /* ignore parse errors */ }
+            }
+
+            return Math.max(refNo, notesNo);
+        });
+
+    const maxNo = invoiceNos.length > 0 ? Math.max(...invoiceNos) : 0;
+    return (maxNo + 1).toString().padStart(3, '0');
+}
+
 /**
  * Returns today's date as a YYYY-MM-DD string in IST (Asia/Kolkata, UTC+5:30).
+
  * Use this everywhere you need "today's date" to avoid UTC date drift.
  * e.g. at 11:45 PM IST, new Date().toISOString() gives the PREVIOUS day (wrong).
  */

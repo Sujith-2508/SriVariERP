@@ -121,6 +121,23 @@ async function getDriveAccessToken(): Promise<string> {
 }
 
 /**
+ * Checks if a Google Drive OAuth token is available (Desktop/Web).
+ */
+export async function isGoogleDriveConnected(): Promise<boolean | 'expired'> {
+    const electron = (window as any).electron;
+    if (electron?.drive?.isConnected) {
+        const status = await electron.drive.isConnected();
+        if (status === 'connected') return true;
+        if (status === 'expired') return 'expired';
+        return false;
+    }
+    
+    // Web fallback
+    const token = await getOAuthAccessToken();
+    return !!token;
+}
+
+/**
  * Get a Drive OAuth token from Electron IPC (user's own account = has storage quota).
  * Returns null if not running in Electron or Drive not connected yet.
  */
@@ -130,7 +147,7 @@ async function getOAuthAccessToken(): Promise<string | null> {
         const electron = (window as any).electron;
         if (electron?.drive?.getAccessToken) {
             const token = await electron.drive.getAccessToken();
-            if (token) return token;
+            if (token && typeof token === 'string') return token;
         }
 
         // 2. Fallback to Browser localStorage for Web Version
@@ -573,12 +590,22 @@ export async function uploadInvoicePDFByMonth(
     // Prefer user OAuth token (has storage quota) over service account
     const oauthToken = await getOAuthAccessToken();
     if (!oauthToken) {
+        console.error('[DriveService] Upload failed: No valid OAuth token available.');
         throw new Error(
             'Google Drive not connected. Please go to Settings → Connect Google Drive and sign in once.'
         );
     }
-    const monthFolderId = await getMonthFolderId(oauthToken, invoiceDate);
-    return uploadPdfToFolder(oauthToken, base64Data, fileName, monthFolderId);
+    try {
+        console.log(`[DriveService] Starting upload for ${fileName}...`);
+        const monthFolderId = await getMonthFolderId(oauthToken, invoiceDate);
+        console.log(`[DriveService] Using month folder ID: ${monthFolderId}`);
+        const result = await uploadPdfToFolder(oauthToken, base64Data, fileName, monthFolderId);
+        console.log(`[DriveService] Upload successful! Link: ${result.webViewLink}`);
+        return result;
+    } catch (err: any) {
+        console.error('[DriveService] Detailed upload error:', err);
+        throw err;
+    }
 }
 
 /**

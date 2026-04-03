@@ -22,6 +22,7 @@ interface InvoiceData {
     notes?: string;
     invoiceDate?: Date;
     manualInvoiceNo?: string;
+    driveLink?: string;
 }
 
 interface DataContextType {
@@ -40,6 +41,7 @@ interface DataContextType {
     // Methods
     createInvoice: (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
     updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
+    updateTransactionDriveLink: (id: string, link: string) => Promise<void>;
     recordPayment: (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => Promise<string>;
     updateStock: (productId: string, quantity: number) => Promise<void>;
     addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
@@ -132,6 +134,7 @@ const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []
         destination: row.destination,
         paymentTerms: row.payment_terms,
         discountPercent: row.discount_percent ? Number(row.discount_percent) : undefined,
+        driveLink: row.drive_link,
         items: row.invoice_items && row.invoice_items.length > 0
             ? row.invoice_items.map(transformInvoiceItem)
             : (() => {
@@ -1057,6 +1060,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 profit_amount: netProfit,
                 profit_percentage: profitPercentage,
                 dealer_discount_amount: dealerDiscountAmount,
+                drive_link: invoiceData?.driveLink,
                 source: 'DESKTOP',
                 synced_to_sheet: true // Mark as synced for desktop actions
             })
@@ -1221,6 +1225,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 profit_amount: netProfit,
                 profit_percentage: profitPercentage,
                 dealer_discount_amount: dealerDiscountAmount,
+                drive_link: invoiceData?.driveLink,
             })
             .eq('id', invoiceId);
 
@@ -1269,6 +1274,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     transportCharges: invoiceData?.transportCharges,
                     paymentTerms: invoiceData?.paymentTerms,
                     discountPercent: invoiceData?.discountPercent,
+                    driveLink: invoiceData?.driveLink || t.driveLink,
                     items: items
                 };
             }
@@ -1361,6 +1367,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         return receiptNumber;
+    };
+
+    const updateTransactionDriveLink = async (id: string, link: string) => {
+        const { error } = await supabase
+            .from('transactions')
+            .update({ drive_link: link })
+            .eq('id', id);
+
+        if (error) {
+            console.error('[DataContext] Error updating drive link:', error);
+            throw error;
+        }
+
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, driveLink: link } : t));
     };
 
     // Agent CRUD methods
@@ -1957,6 +1977,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             error,
             createInvoice,
             updateInvoice,
+            updateTransactionDriveLink,
             recordPayment,
             updateStock,
             addProduct,

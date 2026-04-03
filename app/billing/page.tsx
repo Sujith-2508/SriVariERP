@@ -13,14 +13,19 @@ import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfGenerator';
-import { calculateDealerStatement } from '@/lib/utils';
-import { getISTDateString } from '@/lib/utils';
+import { 
+    getISTDateString, 
+    calculateDealerStatement, 
+    getNextInvoiceNumber,
+    calculateCOGS, 
+    cn 
+} from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
 import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function Billing() {
-    const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading, companySettings } = useData();
+    const { dealers, products, transactions, createInvoice, updateInvoice, updateTransactionDriveLink, addDealer, isLoading, refreshData, companySettings } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const router = useRouter();
@@ -47,6 +52,8 @@ export default function Billing() {
     const [showPrinterDialog, setShowPrinterDialog] = useState(false);
     const [printers, setPrinters] = useState<{ name: string; displayName: string; isDefault: boolean; status: number; description: string }[]>([]);
     const [selectedPrinter, setSelectedPrinter] = useState<string>('');
+    // Print Options
+    const [printCopies, setPrintCopies] = useState(1);
     const [printingStatus, setPrintingStatus] = useState<'idle' | 'loading' | 'printing' | 'done' | 'error'>('idle');
     const [printError, setPrintError] = useState<string | null>(null);
 
@@ -214,24 +221,18 @@ export default function Billing() {
 
     // Initialize Manual Invoice Number
     const isInvoiceInitialized = useRef(false);
+    const isSubmittingRef = useRef(false); // Guard against double-clicks
+
     useEffect(() => {
-        // Reset when switching between new/edit invoice
-        if (editInvoiceId) {
-            isInvoiceInitialized.current = false;
-            return; // editing: number is loaded from the existing invoice
+        if (!isInvoiceInitialized.current && transactions.length > 0) {
+            if (!editInvoiceId) {
+                // Initialize new invoice number based on MAX existing
+                const nextNo = getNextInvoiceNumber(transactions);
+                setManualInvoiceNo(nextNo);
+            }
+            isInvoiceInitialized.current = true;
         }
-        if (isInvoiceInitialized.current) return;
-
-        // Wait until DataContext has finished loading (isLoading = false)
-        // This ensures we read the true DB count, not a stale cache count
-        if (isLoading) return;
-
-        const invoiceCount = transactions.filter(t => t.type === 'INVOICE').length;
-        // padStart(3, '0') ensures 001, 002 format
-        setManualInvoiceNo(String(invoiceCount + 1).padStart(3, '0'));
-        isInvoiceInitialized.current = true;
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [transactions, editInvoiceId, isLoading]);
+    }, [transactions, editInvoiceId]);
 
     const generatedInvoiceNumber = `INV${manualInvoiceNo}`;
 
@@ -619,212 +620,166 @@ export default function Billing() {
             return;
         }
 
+        // Multi-layered guard against double-submission
+        if (isSubmitting || isSubmittingRef.current) {
+            console.log('[Billing] Submit already in progress, skipping duplicate call');
+            return;
+        }
+
         setIsSubmitting(true);
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        let finalId = editInvoiceId || '';
-        let finalRefId = '';
+        isSubmittingRef.current = true;
+        setDriveUploadStatus('idle');
+        setDriveError(null);
 
-        if (editInvoiceId) {
-            const { id, refId } = await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
-                vehicleName,
-                vehicleNumber,
-                destination,
-                transportCharges: parseFloat(transportCharges) || 0,
-                paymentTerms,
-                discountPercent: parseFloat(globalDiscount) || 0,
-                creditDays: parseInt(creditDays) || 30,
-                invoiceDate: new Date(invoiceDate),
-                manualInvoiceNo: manualInvoiceNo.trim(),
-                notes: JSON.stringify({
-                    buyerOrderNo,
-                    buyerOrderDate,
-                    dispatchDocNo,
-                    dispatchDate,
-                    deliveryNote,
-                    supplierRef,
-                    otherRef,
-                    termsOfDelivery,
-                    manualInvoiceNo,
-                    roundOff,
-                    globalCGST,
-                    globalSGST,
-                    globalIGST,
-                    invoiceItems: invoiceItems.map(item => ({
-                        productId: item.productId,
-                        productName: item.productName,
-                        quantity: item.quantity,
-                        unitPrice: item.unitPrice,
-                        costPrice: item.costPrice || 0,
-                        cgst: item.cgst,
-                        sgst: item.sgst,
-                        igst: item.igst,
-                        cgstAmount: item.cgstAmount,
-                        sgstAmount: item.sgstAmount,
-                        igstAmount: item.igstAmount,
-                        discount: item.discount,
-                        discountAmount: item.discountAmount,
-                        total: item.total,
-                        gstAmount: item.gstAmount,
-                        hsnCode: item.hsnCode,
-                        unit: item.unit,
-                        gstRate: item.gstRate
-                    }))
-                })
+        try {
+            await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay for UX/stability
+            
+            let finalId = '';
+            let finalRefId = '';
+
+            if (editInvoiceId) {
+                const result = await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
+                    vehicleName,
+                    vehicleNumber,
+                    destination,
+                    transportCharges: parseFloat(transportCharges) || 0,
+                    paymentTerms,
+                    discountPercent: parseFloat(globalDiscount) || 0,
+                    creditDays: parseInt(creditDays) || 30,
+                    invoiceDate: new Date(invoiceDate),
+                    manualInvoiceNo: manualInvoiceNo.trim(),
+                    notes: JSON.stringify({
+                        buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
+                        deliveryNote, supplierRef, otherRef, termsOfDelivery,
+                        manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST,
+                        invoiceItems
+                    })
+                });
+                finalId = result.id;
+                finalRefId = result.refId;
+            } else {
+                const result = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
+                    vehicleName,
+                    vehicleNumber,
+                    destination,
+                    transportCharges: parseFloat(transportCharges) || 0,
+                    paymentTerms,
+                    discountPercent: parseFloat(globalDiscount) || 0,
+                    creditDays: parseInt(creditDays) || 30,
+                    invoiceDate: new Date(invoiceDate),
+                    manualInvoiceNo: manualInvoiceNo.trim(),
+                    notes: JSON.stringify({
+                        buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
+                        deliveryNote, supplierRef, otherRef, termsOfDelivery,
+                        manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST,
+                        invoiceItems
+                    })
+                });
+                finalId = result.id;
+                finalRefId = result.refId;
+            }
+
+            setGeneratedRef(finalRefId);
+            setCreatedInvoiceId(finalId);
+
+            // --- DATA LOCK FOR BACKGROUND PROCESSES ---
+            // We capture all state into local variables NOW to ensure PDF generation
+            // uses exactly what was saved, even if state variables change during cleanup.
+            const lockedDealer = { ...selectedDealer };
+            const lockedItems = [...invoiceItems];
+            const lockedTotal = invoiceTotal;
+            const lockedDate = new Date(invoiceDate);
+            const lockedRef = finalRefId;
+            const lockedNotes = JSON.stringify({
+                buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
+                    deliveryNote, supplierRef, otherRef, termsOfDelivery,
+                    manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST
             });
-            finalId = id;
-            finalRefId = refId;
-        } else {
-            const { id, refId } = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
-                vehicleName,
-                vehicleNumber,
-                destination,
-                transportCharges: parseFloat(transportCharges) || 0,
-                paymentTerms,
-                discountPercent: parseFloat(globalDiscount) || 0,
-                creditDays: parseInt(creditDays) || 30,
-                invoiceDate: new Date(invoiceDate),
-                manualInvoiceNo: manualInvoiceNo.trim(),
-                notes: JSON.stringify({
-                    buyerOrderNo,
-                    buyerOrderDate,
-                    dispatchDocNo,
-                    dispatchDate,
-                    deliveryNote,
-                    supplierRef,
-                    otherRef,
-                    termsOfDelivery,
-                    manualInvoiceNo,
-                    roundOff,
-                    globalCGST,
-                    globalSGST,
-                    globalIGST,
-                    invoiceItems: invoiceItems.map(item => ({
-                        productId: item.productId,
-                        productName: item.productName,
-                        quantity: item.quantity,
-                        unitPrice: item.unitPrice,
-                        costPrice: item.costPrice || 0,
-                        cgst: item.cgst,
-                        sgst: item.sgst,
-                        igst: item.igst,
-                        cgstAmount: item.cgstAmount,
-                        sgstAmount: item.sgstAmount,
-                        igstAmount: item.igstAmount,
-                        discount: item.discount,
-                        discountAmount: item.discountAmount,
-                        total: item.total,
-                        gstAmount: item.gstAmount,
-                        hsnCode: item.hsnCode,
-                        unit: item.unit,
-                        gstRate: item.gstRate
-                    }))
-                })
-            });
-            finalId = id;
-            finalRefId = refId;
-        }
 
-        setGeneratedRef(finalRefId);
-        setCreatedInvoiceId(finalId);
+            // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
+            if (companySettings && lockedDealer) {
+                (async () => {
+                    try {
+                        const { isGoogleDriveConnected } = await import('@/lib/googleDriveService');
+                        const isConnected = await isGoogleDriveConnected();
+                        if (!isConnected) {
+                            console.log('[Billing] Skipping Drive upload: Not connected');
+                            setDriveUploadStatus('idle');
+                            return;
+                        }
 
-        // Real-time Sync to Google Sheets (disabled — month-wise Drive storage is used instead)
-        // syncInvoiceToSheets has been removed as ERP Invoices tab is no longer needed.
+                        setDriveUploadStatus('uploading');
+                        const invoiceDataToSave = {
+                            id: finalId,
+                            customerId: lockedDealer.id,
+                            type: TransactionType.INVOICE,
+                            amount: lockedTotal,
+                            date: lockedDate,
+                            referenceId: lockedRef,
+                            items: lockedItems,
+                            vehicleName, vehicleNumber, destination,
+                            transportCharges: parseFloat(transportCharges) || 0,
+                            paymentTerms,
+                            discountPercent: parseFloat(globalDiscount) || 0,
+                            creditDays: parseInt(creditDays) || 30,
+                            notes: lockedNotes
+                        };
 
-        // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
-        if (companySettings && selectedDealer) {
-            // Background process to avoid blocking UI success screen
-            (async () => {
-                try {
-                    const invoiceDataToSave = {
-                        id: (finalId || 'NEW'),
-                        customerId: selectedDealer.id,
-                        type: TransactionType.INVOICE,
-                        amount: invoiceTotal,
-                        date: new Date(invoiceDate),
-                        referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
-                        items: invoiceItems,
-                        vehicleName,
-                        vehicleNumber,
-                        destination,
-                        transportCharges: parseFloat(transportCharges) || 0,
-                        paymentTerms,
-                        discountPercent: parseFloat(globalDiscount) || 0,
-                        creditDays: parseInt(creditDays) || 30,
-                        notes: JSON.stringify({
-                            buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
-                            deliveryNote, supplierRef, otherRef, termsOfDelivery,
-                            manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST
-                        })
-                    };
+                        const invoiceBase64 = await generateInvoicePDFBase64(
+                            invoiceDataToSave as any,
+                            lockedDealer,
+                            lockedItems,
+                            companySettings
+                        );
 
-                    const invoiceBase64 = await generateInvoicePDFBase64(
-                        invoiceDataToSave as any,
-                        selectedDealer,
-                        invoiceItems,
-                        companySettings
-                    );
+                        const driveFileName = buildInvoiceFileName(lockedRef, lockedDealer.businessName, lockedDate);
+                        const uploadResult = await uploadInvoicePDFByMonth(invoiceBase64, driveFileName, lockedDate);
+                        
+                        // Save the link back to Supabase
+                        if (uploadResult?.webViewLink) {
+                            await updateTransactionDriveLink(finalId, uploadResult.webViewLink);
+                            console.log('[Billing] Drive link saved:', uploadResult.webViewLink);
+                        }
+                        
+                        setDriveUploadStatus('success');
+                    } catch (driveErr) {
+                        console.error('[Billing] Automatic Drive upload failed:', driveErr);
+                        setDriveUploadStatus('error');
+                    }
+                })();
+            }
 
-                    const driveFileName = buildInvoiceFileName(
-                        invoiceDataToSave.referenceId,
-                        selectedDealer.businessName,
-                        new Date(invoiceDate) // use invoice date → correct month folder
-                    );
-
-                    console.log('[Billing] Starting automatic Drive upload:', driveFileName);
-                    // Upload to ERP Invoices / {Month YYYY} / filename.pdf
-                    await uploadInvoicePDFByMonth(
-                        invoiceBase64,
-                        driveFileName,
-                        new Date(invoiceDate)
-                    );
-                    console.log('[Billing] Automatic Drive upload success (month-wise)!');
-                } catch (driveErr) {
-                    console.error('[Billing] Automatic Drive upload failed:', driveErr);
-                }
-            })();
-        }
-
-        setIsSubmitting(false);
-        setShowSuccess(true);
-        clearDraft(); // Clear draft only on success
-
-        // Prepare data for WhatsApp Preview instead of sending automatically
-        if (selectedDealer && selectedDealer.phone) {
+            // Prepare preview data using locked variables
             const invoiceDataForPreview = {
-                id: (finalId || ''),
-                customerId: selectedDealer.id,
+                id: finalId,
+                customerId: lockedDealer.id,
                 type: TransactionType.INVOICE,
-                amount: invoiceTotal,
-                date: new Date(invoiceDate),
-                referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
-                items: invoiceItems,
-                vehicleName,
-                vehicleNumber,
-                destination,
+                amount: lockedTotal,
+                date: lockedDate,
+                referenceId: lockedRef,
+                items: lockedItems,
+                vehicleName, vehicleNumber, destination,
                 transportCharges: parseFloat(transportCharges) || 0,
                 paymentTerms,
                 discountPercent: parseFloat(globalDiscount) || 0,
                 creditDays: parseInt(creditDays) || 30,
-                notes: JSON.stringify({
-                    buyerOrderNo,
-                    buyerOrderDate,
-                    dispatchDocNo,
-                    dispatchDate,
-                    deliveryNote,
-                    supplierRef,
-                    otherRef,
-                    termsOfDelivery,
-                    manualInvoiceNo,
-                    roundOff,
-                    globalCGST,
-                    globalSGST,
-                    globalIGST
-                })
+                notes: lockedNotes
             };
-            setPreviewData({ dealer: selectedDealer, invoiceData: invoiceDataForPreview });
+
+            setPreviewData({ dealer: lockedDealer, invoiceData: invoiceDataForPreview });
+            setShowSuccess(true);
             setShowWhatsAppPreview(true);
+            clearDraft();
+
+        } catch (err: any) {
+            console.error('[Billing] Submit failed:', err);
+            showToast(err.message || 'Failed to generate invoice', 'error');
+        } finally {
+            setIsSubmitting(false);
+            isSubmittingRef.current = false;
         }
     };
+
 
     const [isHandlingSendRef, setIsHandlingSendRef] = useState(false);
     const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
@@ -851,7 +806,15 @@ export default function Billing() {
             if (isElectron && window.electron?.whatsapp?.getStatus) {
                 const status = await window.electron.whatsapp.getStatus();
                 console.log('[WhatsApp] Electron WhatsApp status:', status);
-                if (status !== 'READY') {
+                if (status === 'AUTHENTICATED') {
+                    showToast('WhatsApp is still initializing. Please wait a few seconds...', 'info');
+                    // Wait a bit and try one more time to see if it becomes ready
+                    await new Promise(r => setTimeout(r, 4000));
+                    const newStatus = await window.electron.whatsapp.getStatus();
+                    if (newStatus !== 'READY') {
+                        throw new Error('WhatsApp is taking longer than expected to initialize. Please try again in 10 seconds.');
+                    }
+                } else if (status !== 'READY') {
                     throw new Error('WhatsApp is not connected in the desktop app. Please go to Settings to link your account.');
                 }
             }
@@ -2483,7 +2446,30 @@ export default function Billing() {
                             <p className="px-5 text-xs text-red-500 pb-2">{printError}</p>
                         )}
 
-                        {/* Actions */}
+                        {/* Print Options */}
+                        <div className="px-4 pb-2">
+                             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-slate-600">
+                                    <FileText size={16} />
+                                    <span className="text-sm font-medium">Number of Copies</span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <button 
+                                        onClick={() => setPrintCopies(Math.max(1, printCopies - 1))}
+                                        className="w-8 h-8 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
+                                    >
+                                        -
+                                    </button>
+                                    <span className="w-4 text-center font-bold text-slate-800">{printCopies}</span>
+                                    <button 
+                                        onClick={() => setPrintCopies(Math.min(10, printCopies + 1))}
+                                        className="w-8 h-8 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+                             </div>
+                        </div>
                         <div className="px-4 pb-4 space-y-2">
                             {/* Print Now — native silent print */}
                             <button
@@ -2498,12 +2484,22 @@ export default function Billing() {
                                     setPrintingStatus('printing');
                                     setPrintError(null);
                                     try {
-                                        await window.electron.printer.print(selectedPrinter);
+                                        // Loop for multiple copies
+                                        for (let i = 0; i < printCopies; i++) {
+                                            console.log(`[Printer] Printing copy ${i + 1} of ${printCopies}...`);
+                                            await window.electron.printer.print(selectedPrinter);
+                                            // Brief pause between jobs to ensure spooler handles them correctly
+                                            if (printCopies > 1 && i < printCopies - 1) {
+                                                await new Promise(r => setTimeout(r, 500));
+                                            }
+                                        }
+                                        
                                         setPrintingStatus('done');
                                         setTimeout(() => {
                                             setShowPrinterDialog(false);
                                             setShowPrintPreview(false);
                                             setPrintingStatus('idle');
+                                            setPrintCopies(1); // Reset copies
                                         }, 800);
                                     } catch (err: any) {
                                         setPrintingStatus('error');

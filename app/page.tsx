@@ -784,14 +784,24 @@ export default function Home() {
                                 .map((invoice, idx) => {
                                     const dealer = dealers.find(d => d.id === invoice.customerId);
                                     return (
-                                        <tr key={idx} className="hover:bg-slate-50 transition-colors cursor-pointer group" onClick={() => router.push(`/billing?invoice=${invoice.id}`)}>
+                                        <tr 
+                                            key={idx} 
+                                            className="hover:bg-slate-50 transition-colors cursor-pointer group" 
+                                            onClick={() => {
+                                                if (invoice.driveLink) {
+                                                    window.open(invoice.driveLink, '_blank');
+                                                } else {
+                                                    router.push(`/billing?invoice=${invoice.id}`);
+                                                }
+                                            }}
+                                        >
                                             <td className="px-4 py-3 text-sm text-slate-600">
                                                 {new Date(invoice.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                                             </td>
                                             <td className="px-4 py-3">
-                                                <span className="text-sm font-bold text-blue-600 group-hover:underline flex items-center gap-1">
+                                                <span className={`text-sm font-bold ${invoice.driveLink ? 'text-emerald-600' : 'text-blue-600'} group-hover:underline flex items-center gap-1`}>
                                                     {invoice.referenceId}
-                                                    <ExternalLink size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                    {invoice.driveLink ? <ExternalLink size={12} /> : <FileText size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3">

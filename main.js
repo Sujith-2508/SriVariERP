@@ -214,8 +214,12 @@ function initWhatsApp() {
                     const entryPath = path.join(sessionDir, entry);
                     const lock = path.join(entryPath, 'SingletonLock');
                     if (fs.existsSync(lock)) {
-                        fs.unlinkSync(lock);
-                        logToFile('[WhatsApp] Cleared stale lock in subdir:', lock);
+                        try {
+                            fs.unlinkSync(lock);
+                            logToFile('[WhatsApp] Cleared stale lock in subdir:', lock);
+                        } catch (e) {
+                            logToFile('[WhatsApp] Could not clear lock in subdir (likely in use):', lock);
+                        }
                     }
                 }
             }
@@ -366,9 +370,21 @@ function initWhatsApp() {
 }
 
 // IPC Handlers
-ipcMain.handle('whatsapp:send-pdf', async (event, { phoneNumber, pdfBase64, filename, caption }) => {
+ipcMain.handle('whatsapp:send-document', async (event, { phoneNumber, pdfBase64, filename, caption }) => {
     if (whatsappStatus !== 'READY') {
-        throw new Error('WhatsApp is not ready. Status: ' + whatsappStatus);
+        // If it's authenticated but not ready, wait up to 10 seconds before failing
+        if (whatsappStatus === 'AUTHENTICATED') {
+            console.log('[WhatsApp] Current status is AUTHENTICATED. Waiting for READY...');
+            let waitCount = 0;
+            while (whatsappStatus === 'AUTHENTICATED' && waitCount < 20) {
+                await new Promise(r => setTimeout(r, 500));
+                waitCount++;
+            }
+        }
+        
+        if (whatsappStatus !== 'READY') {
+            throw new Error(`WhatsApp is not ready. Current Status: ${whatsappStatus}. Please ensure your QR scan is fully processed.`);
+        }
     }
 
     // Guard against 'Cannot read properties of null (reading evaluate)'
@@ -426,8 +442,14 @@ ipcMain.handle('whatsapp:reconnect', async () => {
     }
 
     whatsappStatus = 'DISCONNECTED';
-    initWhatsApp();
-    return { status: whatsappStatus };
+    if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+    
+    // Slight delay before re-init to allow file locks to release
+    setTimeout(() => {
+        initWhatsApp();
+    }, 1000);
+
+    return { status: 'RECONNECTING' };
 });
 
 ipcMain.handle('whatsapp:get-status', () => {
@@ -555,14 +577,23 @@ async function getDriveOAuthAccessToken() {
     const serviceKey = process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY
         ? JSON.parse(process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY)
         : {};
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || 
+    // Priority list for OAuth credentials (Main process only runs in Desktop mode)
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_DESKTOP ||
+                     process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || 
                      process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_WEB || 
                      process.env.GOOGLE_OAUTH_CLIENT_ID || 
                      serviceKey.oauth_client_id || '';
-    const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || 
+                     
+    const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_DESKTOP ||
+                         process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || 
                          process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_WEB || 
                          process.env.GOOGLE_OAUTH_CLIENT_SECRET || 
                          serviceKey.oauth_client_secret || '';
+
+    if (!clientId) {
+        console.error('[Drive OAuth] No Client ID found for desktop refresh.');
+        return null;
+    }
 
     const result = await postOAuthRequest({
         client_id: clientId,
@@ -572,8 +603,8 @@ async function getDriveOAuthAccessToken() {
     });
 
     if (result.error) {
-        console.error('[Drive OAuth] Refresh failed:', result.error);
-        return null;
+        console.error('[Drive OAuth] Refresh failed:', result.error, result.error_description || '');
+        return null; // Return null so the caller knows it failed
     }
 
     const updated = {
@@ -585,10 +616,33 @@ async function getDriveOAuthAccessToken() {
     return result.access_token;
 }
 
-// IPC: Check if Drive is connected
-ipcMain.handle('drive:is-connected', () => {
+// IPC: Check if Drive is connected and verify token validity (DIAGNOSTIC)
+ipcMain.handle('drive:is-connected', async () => {
     const tokens = readDriveTokens();
-    return !!(tokens && tokens.refresh_token);
+    if (!tokens || !tokens.refresh_token) return 'not_connected';
+
+    // Helper for diagnostic refresh
+    async function checkRefresh() {
+        const serviceKey = process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY ? JSON.parse(process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY) : {};
+        const cid = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_DESKTOP || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
+        const csec = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_DESKTOP || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || '';
+        
+        try {
+            const res = await postOAuthRequest({
+                client_id: cid,
+                client_secret: csec,
+                refresh_token: tokens.refresh_token,
+                grant_type: 'refresh_token'
+            });
+            if (res.error) return res.error;
+            return 'OK';
+        } catch (e) { return 'NETWORK_ERROR'; }
+    }
+
+    const status = await checkRefresh();
+    if (status === 'OK') return 'connected';
+    if (status === 'invalid_grant' || status === 'invalid_request') return 'expired';
+    return 'error';
 });
 
 // IPC: Get a fresh OAuth access token (used by renderer for Drive uploads)

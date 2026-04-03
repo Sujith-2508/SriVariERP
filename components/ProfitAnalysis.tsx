@@ -29,6 +29,7 @@ export function ProfitAnalysis() {
         startDate: new Date().toISOString().slice(0, 10),
         endDate: new Date().toISOString().slice(0, 10)
     });
+    const [selectedDealerInvoices, setSelectedDealerInvoices] = useState<{ name: string; invoices: any[] } | null>(null);
 
     // --- DATA CALCULATION ---
 
@@ -466,7 +467,8 @@ export function ProfitAnalysis() {
                                             revenue: 0,
                                             cogs: 0,
                                             count: 0,
-                                            profit: 0
+                                            profit: 0,
+                                            invoices: []
                                         };
                                     }
 
@@ -475,6 +477,7 @@ export function ProfitAnalysis() {
                                     acc[dealerId].cogs += calc.cogs;
                                     acc[dealerId].profit += calc.grossProfit;
                                     acc[dealerId].count += 1;
+                                    acc[dealerId].invoices.push(inv);
 
                                     return acc;
                                 }, {});
@@ -492,9 +495,23 @@ export function ProfitAnalysis() {
                                 return sortedDealers.map((d: any, idx) => {
                                     const marginPercent = d.revenue > 0 ? (d.profit / d.revenue) * 100 : 0;
                                     return (
-                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                            <td className="p-4 font-bold text-slate-700">{d.name}</td>
-                                            <td className="p-4 text-center text-slate-500">{d.count}</td>
+                                        <tr key={idx} className="hover:bg-slate-50 transition-colors group">
+                                            <td className="p-4">
+                                                <button 
+                                                    onClick={() => setSelectedDealerInvoices({ name: d.name, invoices: d.invoices })}
+                                                    className="font-bold text-slate-700 hover:text-emerald-600 transition-colors text-left"
+                                                >
+                                                    {d.name}
+                                                </button>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                <button 
+                                                    onClick={() => setSelectedDealerInvoices({ name: d.name, invoices: d.invoices })}
+                                                    className="px-2 py-1 bg-slate-100 rounded-md text-slate-600 font-bold hover:bg-emerald-100 hover:text-emerald-700 transition-all"
+                                                >
+                                                    {d.count}
+                                                </button>
+                                            </td>
                                             <td className="p-4 text-right font-medium">{formatCurrency(d.revenue)}</td>
                                             <td className="p-4 text-right text-red-500 font-medium">-{formatCurrency(d.cogs)}</td>
                                             <td className="p-4 text-right text-emerald-600 font-bold">{formatCurrency(d.profit)}</td>
@@ -651,6 +668,70 @@ export function ProfitAnalysis() {
                                     )}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ─── Dealer Invoices List Modal ───────────────────────── */}
+            {selectedDealerInvoices && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setSelectedDealerInvoices(null)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200"
+                        onClick={e => e.stopPropagation()}>
+                        
+                        {/* Header */}
+                        <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+                            <div>
+                                <p className="font-bold text-white text-base">{selectedDealerInvoices.name}</p>
+                                <p className="text-slate-400 text-xs">Generated bills for selected period</p>
+                            </div>
+                            <button
+                                onClick={() => setSelectedDealerInvoices(null)}
+                                className="text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X size={22} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                            <div className="space-y-3">
+                                {selectedDealerInvoices.invoices
+                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                    .map((inv, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/30 transition-all group">
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-bold text-slate-800">{inv.referenceId}</span>
+                                                <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
+                                                    {new Date(inv.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                <span className="text-sm font-black text-slate-700">{formatCurrency(inv.amount)}</span>
+                                                {inv.driveLink ? (
+                                                    <button 
+                                                        onClick={() => window.open(inv.driveLink, '_blank')}
+                                                        className="p-2 bg-emerald-600 text-white rounded-lg shadow-md shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center gap-2 text-xs font-bold"
+                                                    >
+                                                        <Download size={14} />
+                                                        View PDF
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-[10px] text-slate-400 italic">No Drive Link</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                            <button 
+                                onClick={() => setSelectedDealerInvoices(null)}
+                                className="px-6 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                            >
+                                Close
+                            </button>
                         </div>
                     </div>
                 </div>
