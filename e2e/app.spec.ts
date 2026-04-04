@@ -2,7 +2,7 @@ import { _electron as electron, test, expect, ElectronApplication, Page } from '
 
 test.describe('E2E: Login and Navigation', () => {
     let electronApp: ElectronApplication | undefined;
-    let window: Page | undefined;
+    let appWindow: Page | undefined;
 
     test.beforeAll(async () => {
         try {
@@ -14,8 +14,8 @@ test.describe('E2E: Login and Navigation', () => {
                 },
             });
 
-            window = await electronApp.firstWindow();
-            await window.waitForLoadState('networkidle');
+            appWindow = await electronApp.firstWindow();
+            await appWindow.waitForLoadState('networkidle');
         } catch (err) {
             // Keep the primary launch error visible while avoiding secondary afterAll crashes.
             console.error('[E2E] Electron launch failed:', err);
@@ -30,47 +30,47 @@ test.describe('E2E: Login and Navigation', () => {
     });
 
     test('should show the login page if not authenticated', async () => {
-        test.skip(!window, 'Electron window was not initialized');
+        test.skip(!appWindow, 'Electron window was not initialized');
 
-        await window!.goto('http://127.0.0.1:3000/');
-        await window!.waitForLoadState('networkidle');
+        await appWindow!.goto('http://127.0.0.1:3000/');
+        await appWindow!.waitForLoadState('networkidle');
 
-        await window!.evaluate(() => {
+        await appWindow!.evaluate(() => {
             window.sessionStorage.clear();
         });
 
-        await window!.reload();
-        await window!.waitForLoadState('networkidle');
+        await appWindow!.reload();
+        await appWindow!.waitForLoadState('networkidle');
 
-        await expect(window!.locator('h1')).toContainText('Sri Vari Enterprises');
-        await expect(window!.locator('h2')).toContainText('Welcome Back');
+        await expect(appWindow!.locator('h1')).toContainText('Sri Vari Enterprises');
+        await expect(appWindow!.locator('h2')).toContainText('Welcome Back');
     });
 
     test('should show error message on invalid login', async () => {
-        test.skip(!window, 'Electron window was not initialized');
+        test.skip(!appWindow, 'Electron window was not initialized');
 
-        await window!.fill('input[type="text"]', 'wronguser');
-        await window!.fill('input[type="password"]', 'wrongpass');
-        await window!.locator('button[type="submit"]').click();
+        await appWindow!.fill('input[type="text"]', 'wronguser');
+        await appWindow!.fill('input[type="password"]', 'wrongpass');
+        await appWindow!.locator('button[type="submit"]').click();
 
-        await expect(window!.locator('text=Invalid username or password')).toBeVisible({ timeout: 15000 });
+        await expect(appWindow!.locator('text=Invalid username or password')).toBeVisible({ timeout: 15000 });
     });
 
     test('should navigate to dashboard after successful session injection', async () => {
-        test.skip(!window, 'Electron window was not initialized');
+        test.skip(!appWindow, 'Electron window was not initialized');
 
-        await window!.goto('http://127.0.0.1:3000/login');
-        await window!.waitForLoadState('networkidle');
+        await appWindow!.goto('http://127.0.0.1:3000/login');
+        await appWindow!.waitForLoadState('networkidle');
 
-        await window!.evaluate(() => {
+        await appWindow!.evaluate(() => {
             window.sessionStorage.setItem('isAuthenticated', 'true');
             window.sessionStorage.setItem('userId', 'test-user-id');
             window.sessionStorage.setItem('username', 'admin');
         });
 
-        await window!.goto('http://127.0.0.1:3000/');
-        await window!.waitForLoadState('networkidle');
+        await appWindow!.goto('http://127.0.0.1:3000/');
+        await appWindow!.waitForLoadState('networkidle');
 
-        await expect(window!.locator('text=Admin Portal')).toBeVisible({ timeout: 20000 });
+        await expect(appWindow!.locator('text=Admin Portal')).toBeVisible({ timeout: 20000 });
     });
 });
