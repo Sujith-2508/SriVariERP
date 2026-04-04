@@ -5,27 +5,23 @@ import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
-import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye, ExternalLink } from 'lucide-react';
+import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye } from 'lucide-react';
 import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency, getISTDateString } from '@/lib/utils';
-import { sortLedgerEntries, calculateRunningBalances, LedgerEntry } from '@/lib/ledgerUtils';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { deleteAllTabsExcept } from '@/lib/googleSheetDealers';
-import { isGoogleDriveConnected, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
-import { logToApplicationSheet } from '@/lib/googleSheetWriter';
-import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
+import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 
 // ... existing imports
 
 export default function DealerLedger() {
-    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers, companySettings } = useData();
+    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers, rollOverDealerYear } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [isSyncing, setIsSyncing] = useState(false);
-    const [syncingDealerId, setSyncingDealerId] = useState<string | null>(null);
     const [isImporting, setIsImporting] = useState(false);
     const [isTallyImporting, setIsTallyImporting] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -37,9 +33,6 @@ export default function DealerLedger() {
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [exportingPdf, setExportingPdf] = useState(false);
     const [bulkExporting, setBulkExporting] = useState(false);
-    const [bulkSyncStatus, setBulkSyncStatus] = useState<{ phase: string; done: number; total: number; detail?: string } | null>(null);
-    const effectiveCompanySettings: CompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
-
 
     // Date range modal state
     const [dateRangeModal, setDateRangeModal] = useState<{
@@ -60,6 +53,52 @@ export default function DealerLedger() {
         toDate: getISTDateString(),
     });
 
+    // Company Settings
+    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
+    const [settingsLoading, setSettingsLoading] = useState(true);
+
+    // Helper to get company settings (uses loaded settings, NOT blank fallback)
+    const getCompanySettings = (): CompanySettings => companySettings || {
+        id: '', companyName: 'Sri Vari Enterprises',
+        addressLine1: 'Block No.9 T.S. No 609', addressLine2: 'Palaniyappan Street', city: 'Pollachi', state: 'Tamil Nadu',
+        pinCode: '', gstNumber: '33DIGPM0162N1Z6', panNumber: '', phone: '', email: '',
+        bankName: '', bankBranch: '', accountNumber: '', ifscCode: '', accountHolderName: ''
+    };
+
+    // Load Company Settings
+    React.useEffect(() => {
+        const loadCompanySettings = async () => {
+            const { data, error } = await supabase
+                .from('company_settings')
+                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
+                .single();
+
+            if (!error && data) {
+                setCompanySettings({
+                    id: data.id,
+                    companyName: data.company_name,
+                    addressLine1: data.address_line1,
+                    addressLine2: data.address_line2,
+                    city: data.city,
+                    state: data.state,
+                    pinCode: data.pin_code,
+                    gstNumber: data.gst_number,
+                    panNumber: data.pan_number,
+                    phone: data.phone,
+                    email: data.email,
+                    bankName: data.bank_name,
+                    bankBranch: data.bank_branch,
+                    accountNumber: data.account_number,
+                    ifscCode: data.ifsc_code,
+                    accountHolderName: data.account_holder_name,
+                    accountType: data.account_type
+                });
+            }
+            setSettingsLoading(false);
+        };
+
+        loadCompanySettings();
+    }, []);
 
     const handleDownloadInvoicePDF = async () => {
         if (!selectedInvoice || !selectedDealer) return;
@@ -485,7 +524,7 @@ export default function DealerLedger() {
         try {
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
-                selectedDealer, invoices, payments, effectiveCompanySettings, summary
+                selectedDealer, invoices, payments, getCompanySettings(), summary
             );
             const byteChars = atob(base64Pdf);
             const byteArr = new Uint8Array(byteChars.length);
@@ -513,157 +552,55 @@ export default function DealerLedger() {
         const selectedDealer = dealers.find(d => d.id === selectedDealerId);
         if (!selectedDealer) return;
 
-        // ── Check WhatsApp connection first ─────────────────────────────────
-        if (window.electron?.whatsapp?.getStatus) {
-            const status = await window.electron.whatsapp.getStatus();
-            if (status !== 'READY') {
-                const goToSettings = await showConfirm({
-                    title: 'WhatsApp Not Connected',
-                    message: 'WhatsApp is not connected. Would you like to go to Settings to connect your WhatsApp account?',
-                    confirmLabel: 'Go to Settings',
-                    cancelLabel: 'Cancel',
-                    type: 'warning'
-                });
-                if (goToSettings) router.push('/settings');
-                return;
-            }
-        }
-
         setWhatsappSending('sending');
         setWhatsappError(null);
 
         try {
+            if (window.electron?.whatsapp?.getStatus) {
+                const status = await window.electron.whatsapp.getStatus();
+                if (status !== 'READY') {
+                    throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
+                }
+            }
+
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
-                selectedDealer, invoices, payments, effectiveCompanySettings, summary
+                selectedDealer, invoices, payments, getCompanySettings(), summary
             );
             const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
             const rangeText = getWhatsAppRangeText();
-            const fileName = `${safeName}_Statement_${getPdfLabel()}.pdf`;
 
-            const desktopSendAvailable = Boolean(window.electron?.whatsapp?.sendPDF);
-
-            if (desktopSendAvailable) {
-                const caption = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`;
+            if (window.electron?.whatsapp?.sendPDF) {
                 await window.electron.whatsapp.sendPDF(
                     selectedDealer.phone,
                     base64Pdf,
-                    fileName,
-                    caption
+                    `${safeName}_Statement_${getPdfLabel()}.pdf`,
+                    `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`
                 );
             } else {
-                const driveStatus = await isGoogleDriveConnected();
-                if (driveStatus !== true) {
-                    const goToDrive = await showConfirm({
-                        title: 'Google Drive Not Connected',
-                        message: 'Drive connection is required for web WhatsApp sends. Please connect Google Drive in Settings.',
-                        confirmLabel: 'Go to Settings',
-                        cancelLabel: 'Cancel',
-                        type: 'warning'
-                    });
-                    if (goToDrive) router.push('/settings');
-                    setWhatsappSending('idle');
-                    return;
-                }
-
-                let stmtLink = '';
+                // WEB FALLBACK: Upload to Drive and share Link
                 try {
-                    stmtLink = await uploadToWhatsAppFolder(base64Pdf, fileName);
-                } catch (uploadErr: any) {
-                    console.error('[Customers] Statement Drive upload failed:', uploadErr);
-                    throw new Error(uploadErr?.message || 'Drive upload failed. Statement was not sent.');
+                    const stmtLink = await uploadToWhatsAppFolder(base64Pdf, `${safeName}_Statement_${getPdfLabel()}.pdf`);
+                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. \n\nView Statement PDF: ${stmtLink}`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                    // Small delay to simulate sending
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (err: any) {
+                    console.error('Web WhatsApp share failed:', err);
+                    // Fallback to text only
+                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. (Full statement available in office)`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
                 }
-
-                const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.\n\nView Statement PDF: ${stmtLink}`;
-                const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                window.open(whatsappUrl, '_blank');
-                await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
             setWhatsappSending('success');
-            logToApplicationSheet('WhatsApp Statement Sent', `Dealer: ${selectedDealer.businessName}, Range: ${rangeText}, Balance: Rs. ${summary.totalOutstanding.toLocaleString()}`).catch(() => {});
             setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
             console.error('WhatsApp send failed', err);
             setWhatsappSending('error');
             setWhatsappError(err.message || 'Failed to send WhatsApp message');
-        }
-    };
-
-    const handleCopyWhatsAppStatementText = async () => {
-        const selectedDealer = dealers.find(d => d.id === selectedDealerId);
-        if (!selectedDealer) return;
-
-        try {
-            const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
-            const rangeText = getWhatsAppRangeText();
-
-            const driveStatus = await isGoogleDriveConnected();
-            if (driveStatus !== true) {
-                const goToDrive = await showConfirm({
-                    title: 'Google Drive Not Connected',
-                    message: 'Drive connection is required to copy statement text with PDF link. Please connect Google Drive in Settings.',
-                    confirmLabel: 'Go to Settings',
-                    cancelLabel: 'Cancel',
-                    type: 'warning'
-                });
-                if (goToDrive) router.push('/settings');
-                return;
-            }
-
-            const base64Pdf = await generateStatementPDFBase64(
-                selectedDealer,
-                invoices,
-                payments,
-                effectiveCompanySettings,
-                summary
-            );
-
-            const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
-            const fileName = `${safeName}_Statement_${getPdfLabel()}.pdf`;
-
-            let stmtLink = '';
-            try {
-                stmtLink = await uploadToWhatsAppFolder(base64Pdf, fileName);
-            } catch (uploadErr: any) {
-                console.error('[Customers] Statement Drive upload failed during copy:', uploadErr);
-                throw new Error(uploadErr?.message || 'Drive upload failed. Could not copy text with PDF link.');
-            }
-
-            const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.\n\nView Statement PDF: ${stmtLink}`;
-
-            let copied = false;
-            if (navigator.clipboard?.writeText) {
-                try {
-                    await navigator.clipboard.writeText(message);
-                    copied = true;
-                } catch {
-                    copied = false;
-                }
-            }
-
-            if (!copied) {
-                const textArea = document.createElement('textarea');
-                textArea.value = message;
-                textArea.style.position = 'fixed';
-                textArea.style.opacity = '0';
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                copied = document.execCommand('copy');
-                document.body.removeChild(textArea);
-            }
-
-            if (!copied) {
-                throw new Error('Unable to copy text automatically. Please try again.');
-            }
-
-            setDateRangeModal(prev => ({ ...prev, open: false }));
-            showToast('WhatsApp message with Drive link copied. Paste and send in WhatsApp.', 'success');
-            logToApplicationSheet('WhatsApp Statement Text Copied', `Dealer: ${selectedDealer.businessName}, Range: ${rangeText}, Balance: Rs. ${summary.totalOutstanding.toLocaleString()}`).catch(() => {});
-        } catch (err: any) {
-            console.error('Failed to copy WhatsApp statement text:', err);
-            showToast(err?.message || 'Failed to copy WhatsApp text', 'error');
         }
     };
 
@@ -677,52 +614,14 @@ export default function DealerLedger() {
         if (!confirmed) return;
 
         setIsSyncing(true);
-        setBulkSyncStatus({ phase: 'starting', done: 0, total: 0, detail: 'Preparing sync...' });
         try {
-            const totalDealers = dealers.length;
-            setBulkSyncStatus({ phase: 'syncing', done: 0, total: totalDealers, detail: 'Syncing dealers and ledgers...' });
             await bulkSyncDealers();
-            setBulkSyncStatus({ phase: 'completed', done: totalDealers, total: totalDealers, detail: 'Sync completed successfully.' });
-
-            if (totalDealers === 0) {
-                showToast('No dealers found to sync.', 'info');
-            } else {
-                showToast(`Full sync complete! ${totalDealers} dealers synced successfully.`, 'success');
-            }
+            showToast('Full sync complete! All data and ledgers are now up-to-date.', 'success');
         } catch (error) {
             console.error('Core sync failed:', error);
             showToast('Failed to sync. Please check your internet connection or Google Sheets connectivity.', 'error');
         } finally {
             setIsSyncing(false);
-            setBulkSyncStatus(null);
-        }
-    };
-
-    const getBulkSyncLabel = () => {
-        if (!bulkSyncStatus) return '';
-        const { phase, done, total, detail } = bulkSyncStatus;
-        const phaseText = phase === 'starting' ? 'Starting'
-            : phase === 'master-index' ? 'Syncing Master Index'
-                : phase === 'dealer-ledgers' ? 'Syncing Dealer Ledgers'
-                    : phase === 'final-refresh' ? 'Final Refresh'
-                        : phase === 'completed' ? 'Completed'
-                            : phase === 'error' ? 'Error'
-                                : phase;
-
-        const progressText = total > 0 ? `${done}/${total}` : '';
-        return [phaseText, progressText, detail].filter(Boolean).join(' • ');
-    };
-
-    const handleSyncSingleDealer = async (dealerId: string) => {
-        setSyncingDealerId(dealerId);
-        try {
-            await syncDealerLedgerToSheet(dealerId);
-            showToast('Dealer ledger synced to Google Sheets!', 'success');
-        } catch (error: any) {
-            console.error(`Sync failed for dealer ${dealerId}:`, error);
-            showToast(`Failed to sync dealer: ${error.message || 'Unknown error'}`, 'error');
-        } finally {
-            setSyncingDealerId(null);
         }
     };
 
@@ -793,7 +692,7 @@ export default function DealerLedger() {
             const sortedDealers = [...dealers].sort((a, b) =>
                 a.businessName.localeCompare(b.businessName)
             );
-            const company = effectiveCompanySettings;
+            const company = getCompanySettings();
             const label = getPdfLabel();
 
             // Create a master merged PDF document
@@ -833,37 +732,32 @@ export default function DealerLedger() {
     // --- MAIN CONTENT SELECTION ---
     let mainContent = null;
 
-    // Transaction Detail View (Invoice or Receipt)
+    // Invoice Detail View - shows payment history for specific invoice
     if (selectedInvoice && selectedDealer) {
-        const isReceipt = selectedInvoice.type === 'PAYMENT';
-        const isOpeningBalance = selectedInvoice.referenceId === 'BAL B/F';
-
         const paymentHistory = getInvoicePaymentHistory(selectedInvoice.id);
         const { invoices } = getDealerStatement(selectedDealer.id);
         const invoiceData = invoices.find(inv => inv.id === selectedInvoice.id);
 
-        const overdue = !isReceipt && !isOpeningBalance && invoiceData?.isOverdue && invoiceData.balance > 0;
+        const overdue = invoiceData?.isOverdue && invoiceData.balance > 0;
         const daysOverdue = invoiceData?.dueDate ? getDaysOverdue(new Date(invoiceData.dueDate)) : 0;
+
 
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
                 {/* Header */}
-                <div className="bg-white border-b border-slate-200 p-6 sticky top-0 z-10">
+                <div className="sticky top-0 z-10 p-6 bg-white border-b border-slate-200">
                     <div className="flex items-center gap-4">
                         <button
                             onClick={() => setSelectedInvoice(null)}
-                            className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center hover:bg-slate-200 transition-colors"
+                            className="flex items-center justify-center w-10 h-10 transition-colors rounded-lg bg-slate-100 hover:bg-slate-200"
                         >
                             <ChevronLeft size={18} />
                         </button>
                         <div>
                             <div className="flex items-center gap-3">
-                                <h1 className="text-xl font-bold text-slate-800">
-                                    {isReceipt ? `Receipt ${selectedInvoice.referenceId}` : 
-                                     isOpeningBalance ? 'Opening Balance' : `Invoice ${selectedInvoice.referenceId}`}
-                                </h1>
+                                <h1 className="text-xl font-bold text-slate-800">Invoice {selectedInvoice.referenceId}</h1>
                                 {overdue && (
-                                    <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold flex items-center gap-1 animate-pulse">
+                                    <span className="flex items-center gap-1 px-3 py-1 text-xs font-bold text-red-700 bg-red-100 rounded-full animate-pulse">
                                         <AlertTriangle size={12} />
                                         OVERDUE
                                     </span>
@@ -874,11 +768,11 @@ export default function DealerLedger() {
                     </div>
                 </div>
 
-                <div className="p-6 max-w-4xl mx-auto">
+                <div className="max-w-4xl p-6 mx-auto">
                     {/* Overdue Alert */}
                     {overdue && (
-                        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6 flex items-center gap-4">
-                            <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center shrink-0">
+                        <div className="flex items-center gap-4 p-4 mb-6 border-2 border-red-200 bg-red-50 rounded-xl">
+                            <div className="flex items-center justify-center w-12 h-12 bg-red-500 rounded-full shrink-0">
                                 <AlertTriangle size={24} className="text-white" />
                             </div>
                             <div>
@@ -891,121 +785,100 @@ export default function DealerLedger() {
                         </div>
                     )}
 
-                    {/* Transaction Details Card */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-                        <div className="bg-slate-800 text-white p-4">
+                    {/* Invoice Details Card */}
+                    <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
+                        <div className="p-4 text-white bg-slate-800">
                             <div className="flex items-center gap-2">
-                                {isReceipt ? <Receipt size={18} /> : <FileText size={18} />}
-                                <h3 className="font-bold">{isReceipt ? 'Receipt Details' : 'Invoice Details'}</h3>
+                                <FileText size={18} />
+                                <h3 className="font-bold">Invoice Details</h3>
                             </div>
                         </div>
                         <div className="p-6">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                            <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">{isReceipt ? 'Receipt Date' : 'Invoice Date'}</p>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Invoice Date</p>
                                     <p className="font-bold text-slate-800">
                                         {new Date(selectedInvoice.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                                     </p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">{isReceipt ? 'Amount Received' : 'Invoice Amount'}</p>
-                                    <p className="font-bold text-slate-800 text-lg">₹{selectedInvoice.amount.toLocaleString()}</p>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Invoice Amount</p>
+                                    <p className="text-lg font-bold text-slate-800">₹{selectedInvoice.amount.toLocaleString()}</p>
                                 </div>
-                                {!isReceipt && !isOpeningBalance && (
-                                    <>
-                                        <div>
-                                            <p className="text-xs text-slate-500 font-medium mb-1">Credit Days</p>
-                                            <p className="font-bold text-slate-800">{selectedInvoice.creditDays || 30} days</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-xs text-slate-500 font-medium mb-1">Due Date</p>
-                                            <p className={`font-bold ${overdue ? 'text-red-600' : 'text-slate-800'}`}>
-                                                {selectedInvoice.dueDate
-                                                    ? new Date(selectedInvoice.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                                                    : 'N/A'
-                                                }
-                                            </p>
-                                        </div>
-                                    </>
-                                )}
-                                {isReceipt && (
-                                    <>
-                                        <div>
-                                            <p className="text-xs text-slate-500 font-medium mb-1">Payment Mode</p>
-                                            <p className="font-bold text-slate-800">{selectedInvoice.notes || 'N/A'}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-xs text-slate-500 font-medium mb-1">Collected By</p>
-                                            <p className="font-bold text-slate-800 flex items-center gap-1">
-                                                <User size={14} className="text-slate-400" />
-                                                {selectedInvoice.agentName || 'Admin'}
-                                            </p>
-                                        </div>
-                                    </>
-                                )}
+                                <div>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Credit Days</p>
+                                    <p className="font-bold text-slate-800">{selectedInvoice.creditDays || 30} days</p>
+                                </div>
+                                <div>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Due Date</p>
+                                    <p className={`font-bold ${overdue ? 'text-red-600' : 'text-slate-800'}`}>
+                                        {selectedInvoice.dueDate
+                                            ? new Date(selectedInvoice.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                                            : 'N/A'
+                                        }
+                                    </p>
+                                </div>
                             </div>
 
-                            {/* Payment Status Bar - Only for Invoices/OB */}
-                            {!isReceipt && (
-                                <div className="mt-6 pt-6 border-t border-slate-100">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-sm text-slate-600">Payment Progress</span>
-                                        <span className="text-sm font-bold text-slate-800">
-                                            ₹{invoiceData?.paid.toLocaleString()} / ₹{selectedInvoice.amount.toLocaleString()}
-                                        </span>
-                                    </div>
-                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all ${invoiceData?.balance === 0 ? 'bg-emerald-500' : overdue ? 'bg-red-500' : 'bg-blue-500'}`}
-                                            style={{ width: `${((invoiceData?.paid || 0) / selectedInvoice.amount) * 100}%` }}
-                                        />
-                                    </div>
-                                    <div className="flex justify-between mt-2">
-                                        <span className="text-xs text-emerald-600 font-medium">Paid: ₹{invoiceData?.paid.toLocaleString()}</span>
-                                        <span className={`text-xs font-medium ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                            {invoiceData?.balance === 0 ? 'Fully Paid ✓' : `Balance: ₹${invoiceData?.balance.toLocaleString()}`}
-                                        </span>
-                                    </div>
+                            {/* Payment Status Bar */}
+                            <div className="pt-6 mt-6 border-t border-slate-100">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm text-slate-600">Payment Progress</span>
+                                    <span className="text-sm font-bold text-slate-800">
+                                        ₹{invoiceData?.paid.toLocaleString()} / ₹{selectedInvoice.amount.toLocaleString()}
+                                    </span>
                                 </div>
-                            )}
+                                <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                                    <div
+                                        className={`h-full rounded-full transition-all ${invoiceData?.balance === 0 ? 'bg-emerald-500' : overdue ? 'bg-red-500' : 'bg-blue-500'}`}
+                                        style={{ width: `${((invoiceData?.paid || 0) / selectedInvoice.amount) * 100}%` }}
+                                    />
+                                </div>
+                                <div className="flex justify-between mt-2">
+                                    <span className="text-xs font-medium text-emerald-600">Paid: ₹{invoiceData?.paid.toLocaleString()}</span>
+                                    <span className={`text-xs font-medium ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {invoiceData?.balance === 0 ? 'Fully Paid ✓' : `Balance: ₹${invoiceData?.balance.toLocaleString()}`}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     {/* Profit Analysis Card */}
-                    {!isReceipt && !isOpeningBalance && (() => {
+                    {(() => {
                         const profit = calculateInvoiceProfit(selectedInvoice, products);
                         return (
-                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-                                <div className="bg-emerald-800 text-white p-4">
+                            <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
+                                <div className="p-4 text-white bg-emerald-800">
                                     <div className="flex items-center gap-2">
                                         <IndianRupee size={18} />
                                         <h3 className="font-bold">Profit Analysis (Admin Only)</h3>
                                     </div>
                                 </div>
                                 <div className="p-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
                                         <div className="space-y-3">
-                                            <div className="flex justify-between items-center text-sm">
+                                            <div className="flex items-center justify-between text-sm">
                                                 <span className="text-slate-600">Revenue (Excl. GST)</span>
                                                 <span className="font-bold text-slate-800">{formatCurrency(profit.revenue)}</span>
                                             </div>
-                                            <div className="flex justify-between items-center text-sm">
+                                            <div className="flex items-center justify-between text-sm">
                                                 <span className="text-red-600">Cost of Goods (COGS)</span>
                                                 <span className="font-bold text-red-600">-{formatCurrency(profit.cogs)}</span>
                                             </div>
-                                            <div className="flex justify-between items-center text-sm">
+                                            <div className="flex items-center justify-between text-sm">
                                                 <span className="text-orange-600">Dealer Discount ({selectedInvoice.discountPercent}%)</span>
                                                 <span className="font-bold text-orange-600">-{formatCurrency(profit.dealerDiscount)}</span>
                                             </div>
                                             {profit.serviceCharges > 0 && (
-                                                <div className="flex justify-between items-center text-sm">
+                                                <div className="flex items-center justify-between text-sm">
                                                     <span className="text-red-600">Transport/Service</span>
                                                     <span className="font-bold text-red-600">-{formatCurrency(profit.serviceCharges)}</span>
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="flex flex-col justify-center items-center bg-slate-50 rounded-xl p-4 border border-slate-100">
-                                            <p className="text-sm text-slate-500 font-medium mb-1">Net Profit</p>
+                                        <div className="flex flex-col items-center justify-center p-4 border bg-slate-50 rounded-xl border-slate-100">
+                                            <p className="mb-1 text-sm font-medium text-slate-500">Net Profit</p>
                                             <p className="text-3xl font-bold text-emerald-600">{formatCurrency(profit.netProfit)}</p>
                                             <div className={`mt-2 px-3 py-1 rounded-full text-xs font-bold ${profit.profitPercentage >= 15 ? 'bg-emerald-100 text-emerald-700' :
                                                 profit.profitPercentage >= 5 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
@@ -1019,122 +892,87 @@ export default function DealerLedger() {
                         );
                     })()}
 
-                    {/* Applied Allocations Table */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-                        <div className="bg-emerald-600 text-white p-4">
+                    {/* Payment History Table */}
+                    <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
+                        <div className="p-4 text-white bg-emerald-600">
                             <div className="flex items-center gap-2">
-                                {isReceipt ? <FileText size={18} /> : <Receipt size={18} />}
-                                <h3 className="font-bold">{isReceipt ? 'Invoices Paid' : 'Payment History'}</h3>
+                                <Receipt size={18} />
+                                <h3 className="font-bold">Payment History</h3>
                             </div>
-                            <p className="text-emerald-100 text-sm mt-1">
-                                {isReceipt ? 'Invoices to which this receipt was applied (FIFO)' : 'Receipts applied to this invoice (FIFO)'}
-                            </p>
+                            <p className="mt-1 text-sm text-emerald-100">Receipts applied to this invoice (FIFO)</p>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
-                                <thead className="bg-slate-50 border-b border-slate-200">
+                                <thead className="border-b bg-slate-50 border-slate-200">
                                     <tr>
-                                        <th className="text-left p-4 font-semibold text-slate-600">{isReceipt ? 'Invoice No' : 'Receipt No'}</th>
-                                        <th className="text-left p-4 font-semibold text-slate-600">Date Applied</th>
-                                        <th className="text-right p-4 font-semibold text-slate-600">Amount Applied</th>
-                                        <th className="text-left p-4 font-semibold text-slate-600">{isReceipt ? 'Status' : 'Collected By'}</th>
+                                        <th className="p-4 font-semibold text-left text-slate-600">Receipt No</th>
+                                        <th className="p-4 font-semibold text-left text-slate-600">Date</th>
+                                        <th className="p-4 font-semibold text-right text-slate-600">Amount Applied</th>
+                                        <th className="p-4 font-semibold text-left text-slate-600">Collected By</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {isReceipt ? (
-                                        (selectedInvoice.paymentAllocations || []).length === 0 ? (
-                                            <tr>
-                                                <td colSpan={4} className="p-8 text-center text-slate-400">
-                                                    <FileText size={32} className="mx-auto mb-2 opacity-30" />
-                                                    No invoices were paid by this receipt
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            (selectedInvoice.paymentAllocations || []).map((alloc, idx) => (
-                                                <tr key={idx} className="hover:bg-slate-50">
-                                                    <td className="p-4">
-                                                        <span className="font-mono font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                                                            {alloc.invoiceRef}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-slate-700">
-                                                        {new Date(alloc.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                    </td>
-                                                    <td className="p-4 text-right font-bold text-emerald-600">
-                                                        ₹{alloc.amount.toLocaleString()}
-                                                    </td>
-                                                    <td className="p-4 text-emerald-600 flex items-center gap-1 font-bold">
-                                                        <Check size={14} /> Applied
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )
+                                    {paymentHistory.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={4} className="p-8 text-center text-slate-400">
+                                                <Receipt size={32} className="mx-auto mb-2 opacity-30" />
+                                                No payments recorded for this invoice yet
+                                            </td>
+                                        </tr>
                                     ) : (
-                                        paymentHistory.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={4} className="p-8 text-center text-slate-400">
-                                                    <Receipt size={32} className="mx-auto mb-2 opacity-30" />
-                                                    No payments recorded for this invoice yet
+                                        paymentHistory.map((payment, idx) => (
+                                            <tr key={idx} className="hover:bg-slate-50">
+                                                <td className="p-4">
+                                                    <span className="px-2 py-1 font-mono font-bold rounded text-emerald-600 bg-emerald-50">
+                                                        {payment.receiptRef}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 text-slate-700">
+                                                    {new Date(payment.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                </td>
+                                                <td className="p-4 font-bold text-right text-emerald-600">
+                                                    ₹{payment.amount.toLocaleString()}
+                                                </td>
+                                                <td className="flex items-center gap-2 p-4 text-slate-600">
+                                                    <User size={14} className="text-slate-400" />
+                                                    {payment.agentName || 'Admin'}
                                                 </td>
                                             </tr>
-                                        ) : (
-                                            paymentHistory.map((payment, idx) => (
-                                                <tr key={idx} className="hover:bg-slate-50">
-                                                    <td className="p-4">
-                                                        <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
-                                                            {payment.receiptRef}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-slate-700">
-                                                        {new Date(payment.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                    </td>
-                                                    <td className="p-4 text-right font-bold text-emerald-600">
-                                                        ₹{payment.amount.toLocaleString()}
-                                                    </td>
-                                                    <td className="p-4 text-slate-600 flex items-center gap-2">
-                                                        <User size={14} className="text-slate-400" />
-                                                        {payment.agentName || 'Admin'}
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )
+                                        ))
                                     )}
                                 </tbody>
-                                <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-                                    <tr>
-                                        <td colSpan={2} className="p-4 font-bold text-slate-700">Total Applied</td>
-                                        <td className="p-4 text-right font-bold text-emerald-600 text-lg">
-                                            ₹{(isReceipt 
-                                                ? (selectedInvoice.paymentAllocations || []).reduce((acc, p) => acc + p.amount, 0)
-                                                : paymentHistory.reduce((acc, p) => acc + p.amount, 0)
-                                            ).toLocaleString()}
-                                        </td>
-                                        <td></td>
-                                    </tr>
-                                </tfoot>
+                                {paymentHistory.length > 0 && (
+                                    <tfoot className="border-t-2 bg-slate-50 border-slate-200">
+                                        <tr>
+                                            <td colSpan={2} className="p-4 font-bold text-slate-700">Total Paid</td>
+                                            <td className="p-4 text-lg font-bold text-right text-emerald-600">
+                                                ₹{paymentHistory.reduce((acc, p) => acc + p.amount, 0).toLocaleString()}
+                                            </td>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
+                                )}
                             </table>
                         </div>
                     </div>
 
-                    {/* Balance Summary - Only for Invoices/OB */}
-                    {!isReceipt && (
-                        <div className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                            <div className="flex justify-between items-center">
-                                <div>
-                                    <p className="text-sm text-slate-500">Remaining Balance</p>
-                                    <p className={`text-3xl font-bold ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                        ₹{invoiceData?.balance?.toLocaleString()}
-                                    </p>
-                                </div>
-                                {invoiceData?.balance === 0 && (
-                                    <div className="flex items-center gap-2 bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full">
-                                        <span className="text-lg">✓</span>
-                                        <span className="font-bold">Fully Paid</span>
-                                    </div>
-                                )}
+                    {/* Balance Summary */}
+                    <div className="p-6 mt-6 bg-white border shadow-sm rounded-xl border-slate-200">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm text-slate-500">Remaining Balance</p>
+                                <p className={`text-3xl font-bold ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    ₹{invoiceData?.balance.toLocaleString()}
+                                </p>
                             </div>
+                            {invoiceData?.balance === 0 && (
+                                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-100 text-emerald-700">
+                                    <span className="text-lg">✓</span>
+                                    <span className="font-bold">Fully Paid</span>
+                                </div>
+                            )}
                         </div>
-                    )}
+                    </div>
                 </div>
             </div >
         );
@@ -1152,20 +990,19 @@ export default function DealerLedger() {
         );
 
         // Combine and sort invoices and payments for statement generation
-        const rawLedgerEntries = [
+        let runningBalance = 0;
+        const statementEntries = [
             ...invoices.map(inv => ({
                 date: inv.date,
-                createdAt: inv.originalTransaction?.createdAt ? new Date(inv.originalTransaction.createdAt) : inv.date,
                 reference: inv.referenceId,
                 type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
-                debit: inv.amount,
+                debit: inv.referenceId === 'BAL B/F' ? 0 : inv.amount,
                 credit: 0,
                 balance: 0,
                 originalTransaction: inv.originalTransaction
             })),
             ...payments.map(pay => ({
                 date: pay.date,
-                createdAt: pay.originalTransaction?.createdAt ? new Date(pay.originalTransaction.createdAt) : pay.date,
                 reference: pay.referenceId,
                 type: 'Payment',
                 debit: 0,
@@ -1173,65 +1010,45 @@ export default function DealerLedger() {
                 balance: 0,
                 originalTransaction: pay.originalTransaction
             }))
-        ];
-
-        const statementEntries = calculateRunningBalances(sortLedgerEntries(rawLedgerEntries as LedgerEntry[]));
-        const hasOpeningRow = statementEntries.some(e => e.reference === 'BAL B/F' || e.type === 'Opening Balance');
-        const openingDate = selectedDealer.openingBalanceDate
-            ? new Date(selectedDealer.openingBalanceDate)
-            : (statementEntries[0]?.date || new Date());
-
-        const normalizedEntries: LedgerEntry[] = hasOpeningRow
-            ? statementEntries
-            : [
-                {
-                    date: openingDate,
-                    createdAt: openingDate,
-                    reference: 'BAL B/F',
-                    type: 'Opening Balance',
-                    debit: summary.openingBalance || 0,
-                    credit: 0,
-                    balance: summary.openingBalance || 0,
-                },
-                ...statementEntries,
-            ];
-
-        const finalDealerBalance = normalizedEntries.length > 0
-            ? normalizedEntries[normalizedEntries.length - 1].balance
-            : (summary.openingBalance || 0);
-        const closingDate = normalizedEntries.length > 0
-            ? normalizedEntries[normalizedEntries.length - 1].date
-            : openingDate;
-
-        const statementEntriesWithClosing: LedgerEntry[] = [
-            ...normalizedEntries,
-            {
-                date: closingDate,
-                createdAt: closingDate,
-                reference: 'CL-END',
-                type: 'Closing Balance',
-                debit: 0,
-                credit: 0,
-                balance: finalDealerBalance,
-            },
-        ];
+        ]
+        .sort((a, b) => {
+            const dateA = a.date.getTime();
+            const dateB = b.date.getTime();
+            if (dateA !== dateB) return dateA - dateB;
+            
+            // BAL B/F always first if dates match
+            if (a.reference === 'BAL B/F') return -1;
+            if (b.reference === 'BAL B/F') return 1;
+            
+            return 0;
+        })
+        .map((entry, idx) => {
+            if (idx === 0) {
+                runningBalance = entry.debit - entry.credit;
+                entry.balance = runningBalance;
+            } else {
+                runningBalance += entry.debit - entry.credit;
+                entry.balance = runningBalance;
+            }
+            return entry;
+        });
 
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
                 {/* Header */}
-                <div className="bg-white border-b border-slate-200 p-6 sticky top-0 z-10">
-                    <div className="flex justify-between items-start">
+                <div className="sticky top-0 z-10 p-6 bg-white border-b border-slate-200">
+                    <div className="flex items-start justify-between">
                         <div className="flex items-center gap-4">
                             <button
                                 onClick={() => setSelectedDealerId(null)}
-                                className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center hover:bg-slate-200 transition-colors"
+                                className="flex items-center justify-center w-10 h-10 transition-colors rounded-lg bg-slate-100 hover:bg-slate-200"
                             >
                                 <X size={18} />
                             </button>
                             <div>
                                 <h1 className="text-xl font-bold text-slate-800">{selectedDealer.businessName}</h1>
                                 <p className="text-sm text-slate-500">{selectedDealer.contactPerson} • {selectedDealer.phone}</p>
-                                <p className="text-xs text-slate-400 mt-1">
+                                <p className="mt-1 text-xs text-slate-400">
                                     {selectedDealer.city && `${selectedDealer.city}, `}{selectedDealer.district}
                                     {selectedDealer.pinCode && ` - ${selectedDealer.pinCode}`}
                                 </p>
@@ -1245,21 +1062,9 @@ export default function DealerLedger() {
                                 </div>
                             )}
                             <button
-                                onClick={() => handleSyncSingleDealer(selectedDealer.id)}
-                                disabled={syncingDealerId === selectedDealer.id}
-                                className="bg-amber-500 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-amber-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                                {syncingDealerId === selectedDealer.id ? (
-                                    <Loader2 size={16} className="animate-spin" />
-                                ) : (
-                                    <CloudUpload size={16} />
-                                )}
-                                {syncingDealerId === selectedDealer.id ? 'Syncing...' : 'Sync to Sheet'}
-                            </button>
-                            <button
                                 onClick={() => openDateModal('export')}
                                 disabled={exportingPdf}
-                                className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-60">
+                                className="flex items-center gap-2 px-4 py-2 font-medium text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60">
                                 {exportingPdf ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                                 {exportingPdf ? 'Generating...' : 'Export PDF'}
                             </button>
@@ -1292,25 +1097,25 @@ export default function DealerLedger() {
 
                 <div className="p-6">
                     {/* Summary Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Opening Balance</p>
+                    <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-5">
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Opening Balance</p>
                             <p className="text-xl font-bold text-slate-800">₹{(summary.openingBalance || 0).toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Invoiced</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Invoiced</p>
                             <p className="text-xl font-bold text-slate-800">₹{totalInvoiced.toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Total Paid</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Total Paid</p>
                             <p className="text-xl font-bold text-emerald-600">₹{totalPaid.toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Net Outstanding</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Net Outstanding</p>
                             <p className="text-xl font-bold text-red-600">₹{totalBalance.toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Total Profit</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Total Profit</p>
                             <div className="flex items-baseline gap-2">
                                 <p className="text-xl font-bold text-emerald-600">
                                     {formatCurrency(dealerProfitStats.totalProfit)}
@@ -1323,8 +1128,8 @@ export default function DealerLedger() {
                     </div>
 
                     {/* FIFO Explanation */}
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-                        <h4 className="font-semibold text-blue-800 mb-1 flex items-center gap-2">
+                    <div className="p-4 mb-6 border border-blue-200 bg-blue-50 rounded-xl">
+                        <h4 className="flex items-center gap-2 mb-1 font-semibold text-blue-800">
                             <Clock size={16} />
                             FIFO Payment Logic • Click on any invoice to see payment details
                         </h4>
@@ -1334,8 +1139,8 @@ export default function DealerLedger() {
                     </div>
 
                     {/* Unified Ledger Account Table */}
-                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                    <div className="mb-6 overflow-hidden bg-white border rounded-xl border-slate-200">
+                        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
                             <div className="flex items-center gap-3">
                                 <h3 className="font-semibold text-slate-700">Ledger Account</h3>
                                 <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-100 uppercase tracking-wider">
@@ -1347,64 +1152,52 @@ export default function DealerLedger() {
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                                <thead className="border-b bg-slate-50 text-slate-600 border-slate-200">
                                     <tr>
-                                        <th className="p-4 text-left font-medium w-40">Date / Time</th>
-                                        <th className="p-4 text-left font-medium">Particulars</th>
-                                        <th className="p-4 text-left font-medium w-32">Vch Type</th>
-                                        <th className="p-4 text-left font-medium">Vch Ref.</th>
-                                        <th className="p-4 text-right font-medium">Debit (₹)</th>
-                                        <th className="p-4 text-right font-medium">Credit (₹)</th>
-                                        <th className="p-4 text-right font-medium">Balance (₹)</th>
-                                        <th className="p-4 text-center font-medium">Type</th>
-                                        <th className="p-4 text-center font-medium">Actions</th>
+                                        <th className="w-32 p-4 font-medium text-left">Date</th>
+                                        <th className="p-4 font-medium text-left">Particulars</th>
+                                        <th className="w-32 p-4 font-medium text-left">Vch Type</th>
+                                        <th className="p-4 font-medium text-left">Vch Ref.</th>
+                                        <th className="p-4 font-medium text-right">Debit (₹)</th>
+                                        <th className="p-4 font-medium text-right">Credit (₹)</th>
+                                        <th className="p-4 font-medium text-right">Balance (₹)</th>
+                                        <th className="p-4 font-medium text-center">Type</th>
+                                        <th className="p-4 font-medium text-center">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {statementEntriesWithClosing.map((entry, idx) => (
-                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                    {statementEntries.map((entry, idx) => (
+                                        <tr key={idx} className="transition-colors hover:bg-slate-50">
                                             <td className="p-4 text-slate-700">
-                                                <div className="font-medium">
-                                                    {entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                </div>
-                                                <div className="text-[11px] text-slate-400 mt-0.5">
-                                                    {(entry.createdAt || entry.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
-                                                </div>
+                                                {entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                                             </td>
                                             <td className="p-4 font-medium text-slate-800">
-                                                {entry.type === 'Opening Balance' ? 'Opening Balance' :
-                                                    entry.type === 'Closing Balance' ? 'Closing Balance' :
-                                                        entry.type === 'Invoice' ? `Sales - ${selectedDealer.businessName}` :
-                                                            `Receipt - ${selectedDealer.businessName}`}
+                                                {entry.type === 'Opening Balance' ? 'Opening Balance' : 
+                                                 entry.type === 'Invoice' ? `Sales - ${selectedDealer.businessName}` : 
+                                                 `Receipt - ${selectedDealer.businessName}`}
                                             </td>
-                                            <td className="p-4 text-slate-500 font-medium italic text-xs">
+                                            <td className="p-4 text-xs italic font-medium text-slate-500">
                                                 {entry.type}
                                             </td>
                                             <td className="p-4">
-                                                <span className="font-mono px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">
+                                                <span className="px-2 py-1 font-mono text-xs font-bold rounded bg-slate-100 text-slate-600">
                                                     {entry.reference}
                                                 </span>
                                             </td>
-                                            <td className="p-4 text-right text-red-600 font-bold">
+                                            <td className="p-4 font-bold text-right text-red-600">
                                                 {entry.debit > 0 ? entry.debit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
                                             </td>
-                                            <td className="p-4 text-right text-emerald-600 font-bold">
+                                            <td className="p-4 font-bold text-right text-emerald-600">
                                                 {entry.credit > 0 ? entry.credit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
                                             </td>
-                                            <td className="p-4 text-right font-bold text-slate-900 bg-slate-50/30">
+                                            <td className="p-4 font-bold text-right text-slate-900 bg-slate-50/30">
                                                 ₹{Math.abs(entry.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                             </td>
                                             <td className="p-4 text-center">
                                                 <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter ${
-                                                    entry.type === 'Closing Balance'
-                                                        ? (entry.balance >= 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700')
-                                                        : entry.type === 'Payment'
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : 'bg-red-100 text-red-700'
+                                                    entry.balance >= 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
                                                 }`}>
-                                                    {entry.type === 'Closing Balance'
-                                                        ? (entry.balance >= 0 ? 'Dr' : 'Cr')
-                                                        : (entry.type === 'Payment' ? 'Cr' : 'Dr')}
+                                                    {entry.balance >= 0 ? 'Dr' : 'Cr'}
                                                 </span>
                                             </td>
                                             <td className="p-4 text-center">
@@ -1435,8 +1228,8 @@ export default function DealerLedger() {
                     </div>
 
                     {/* Statement Footer */}
-                    <div className="bg-white rounded-xl border border-slate-200 p-4">
-                        <div className="flex justify-between items-center">
+                    <div className="p-4 bg-white border rounded-xl border-slate-200">
+                        <div className="flex items-center justify-between">
                             <div className="text-sm text-slate-500">
                                 Statement generated on {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
                             </div>
@@ -1454,18 +1247,17 @@ export default function DealerLedger() {
     // Dealer List View
     if (!mainContent) {
         mainContent = (
-            <div className="h-full overflow-y-auto p-6">
-                <div className="flex justify-between items-center mb-6">
+            <div className="h-full p-6 overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-800">Dealer Ledgers</h1>
                         <p className="text-sm text-slate-500">View dealer statements and payment history</p>
                     </div>
-                    <div className="flex gap-3 items-center">
-
+                    <div className="flex items-center gap-3">
                         <button
                             onClick={handleBulkSync}
                             disabled={isSyncing}
-                            className="bg-emerald-600/90 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white transition-all shadow-lg bg-emerald-600/90 rounded-xl hover:bg-emerald-700 shadow-emerald-100 disabled:opacity-50"
                             title="Re-sync all data correctly from Database to Google Sheets"
                         >
                             {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
@@ -1473,7 +1265,7 @@ export default function DealerLedger() {
                         </button>
                         <button
                             onClick={() => openDateModal('bulk-export')}
-                            className="bg-white text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-50 transition-all shadow-sm"
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-bold transition-all bg-white border shadow-sm text-emerald-700 border-emerald-200 rounded-xl hover:bg-emerald-50"
                             title="Export all dealer statements as a single PDF"
                         >
                             <Download size={16} />
@@ -1481,19 +1273,16 @@ export default function DealerLedger() {
                         </button>
                         <button
                             onClick={() => setIsAddModalOpen(true)}
-                            className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg"
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white transition-all shadow-lg bg-slate-900 rounded-xl hover:bg-slate-800"
                         >
                             <User size={16} />
                             Add Dealer
                         </button>
+                        <div className="flex items-center px-4 py-2 text-sm rounded-lg bg-slate-100 text-slate-600">
+                            Total: <strong className="ml-1">{dealers.length}</strong>
+                        </div>
                     </div>
                 </div>
-
-                {isSyncing && bulkSyncStatus && (
-                    <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                        {getBulkSyncLabel()}
-                    </div>
-                )}
 
                 {/* Search */}
                 <div className="relative max-w-md mb-6">
@@ -1509,21 +1298,21 @@ export default function DealerLedger() {
                 </div>
 
                 {/* Dealer Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                     {
                         filteredDealers.length === 0 ? (
-                            <div className="col-span-full bg-white rounded-3xl border border-slate-200 p-20 flex flex-col items-center justify-center text-center shadow-sm">
-                                <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-6">
+                            <div className="flex flex-col items-center justify-center p-20 text-center bg-white border shadow-sm col-span-full rounded-3xl border-slate-200">
+                                <div className="flex items-center justify-center w-24 h-24 mb-6 rounded-full bg-slate-50">
                                     <Building2 size={48} className="text-slate-200" />
                                 </div>
-                                <h3 className="text-2xl font-bold text-slate-800 mb-2">No Dealers Found</h3>
-                                <p className="text-slate-500 max-w-sm mb-8">
+                                <h3 className="mb-2 text-2xl font-bold text-slate-800">No Dealers Found</h3>
+                                <p className="max-w-sm mb-8 text-slate-500">
                                     {searchTerm ? `No results for "${searchTerm}". Try a different name.` : "Start by adding your first dealer. Once added, you can manage their invoices, receipts, and statements."}
                                 </p>
                                 {!searchTerm && (
                                     <button
                                         onClick={() => setIsAddModalOpen(true)}
-                                        className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95"
+                                        className="flex items-center gap-3 px-8 py-4 font-bold text-white transition-all shadow-lg bg-emerald-600 rounded-2xl hover:bg-emerald-700 shadow-emerald-100 active:scale-95"
                                     >
                                         <User size={20} />
                                         Create Your First Dealer
@@ -1532,14 +1321,14 @@ export default function DealerLedger() {
                             </div>
                         ) : (
                             filteredDealers.map(d => (
-                                <div key={d.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
-                                    <div className="flex justify-between items-start mb-3">
+                                <div key={d.id} className="p-5 transition-shadow bg-white border shadow-sm rounded-xl border-slate-200 hover:shadow-md">
+                                    <div className="flex items-start justify-between mb-3">
                                         <div>
-                                            <h3 className="font-bold text-lg text-slate-800 leading-tight">{d.businessName}</h3>
+                                            <h3 className="text-lg font-bold leading-tight text-slate-800">{d.businessName}</h3>
                                             <p className="text-sm text-slate-500 mt-0.5">{d.contactPerson}</p>
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-xs text-slate-400 uppercase font-medium">Balance</p>
+                                            <p className="text-xs font-medium uppercase text-slate-400">Balance</p>
                                             <p className={`font-bold text-lg ${d.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
                                                 ₹{d.balance.toLocaleString()}
                                             </p>
@@ -1577,30 +1366,9 @@ export default function DealerLedger() {
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            handleSyncSingleDealer(d.id);
-                                        }}
-                                        disabled={syncingDealerId === d.id}
-                                        className="w-full mt-2 bg-amber-50 hover:bg-amber-100 text-amber-700 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-amber-200 disabled:opacity-50"
-                                    >
-                                        {syncingDealerId === d.id ? (
-                                            <>
-                                                <RefreshCw size={14} className="animate-spin" />
-                                                Syncing...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <CloudUpload size={14} />
-                                                Sync to Sheet
-                                            </>
-                                        )}
-                                    </button>
-
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
                                             handleOpenEditModal(d);
                                         }}
-                                        className="w-full mt-2 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-blue-200"
+                                        className="flex items-center justify-center w-full gap-2 py-2 mt-2 text-sm font-medium text-blue-600 transition-colors border border-blue-200 rounded-lg bg-blue-50 hover:bg-blue-100"
                                     >
                                         <Edit size={14} />
                                         Edit Dealer
@@ -1621,7 +1389,7 @@ export default function DealerLedger() {
                                                     showToast('Dealer deleted successfully', 'info');
                                                 }
                                             }}
-                                            className="w-full mt-2 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-red-200"
+                                            className="flex items-center justify-center w-full gap-2 py-2 mt-2 text-sm font-medium text-red-600 transition-colors border border-red-200 rounded-lg bg-red-50 hover:bg-red-100"
                                         >
                                             <Trash2 size={14} />
                                             Delete Dealer
@@ -1643,9 +1411,9 @@ export default function DealerLedger() {
 
             {/* Add Dealer Modal */}
             {isAddModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsAddModalOpen(false)}>
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 duration-200 bg-black/50 backdrop-blur-sm animate-in fade-in" onClick={() => setIsAddModalOpen(false)}>
+                    <div className="w-full max-w-2xl overflow-hidden bg-white shadow-xl rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50">
                             <h2 className="text-xl font-bold text-slate-800">Add New Dealer</h2>
                             <button
                                 onClick={() => setIsAddModalOpen(false)}
@@ -1657,7 +1425,7 @@ export default function DealerLedger() {
                         <form onSubmit={handleAddDealer} className="p-6 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Business Name</label>
                                     <input
                                         ref={addRefs[0] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1670,7 +1438,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Contact Person</label>
                                     <input
                                         ref={addRefs[1] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1682,7 +1450,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Phone Number</label>
                                     <input
                                         ref={addRefs[2] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1709,13 +1477,13 @@ export default function DealerLedger() {
                                         placeholder="10-digit mobile number"
                                     />
                                     {addPhoneError && (
-                                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                                        <p className="flex items-center gap-1 mt-1 text-xs text-red-600">
                                             <span>⚠</span> {addPhoneError}
                                         </p>
                                     )}
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Address</label>
                                     <textarea
                                         ref={addRefs[3] as React.RefObject<HTMLTextAreaElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e as any)}
@@ -1727,7 +1495,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">City</label>
                                     <input
                                         ref={addRefs[4] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1740,7 +1508,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">State</label>
                                     <input
                                         ref={addRefs[5] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1753,7 +1521,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Pin Code</label>
                                     <input
                                         ref={addRefs[6] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1765,7 +1533,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">GST Number</label>
                                     <input
                                         ref={addRefs[7] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1778,7 +1546,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance (₹)</label>
                                     <input
                                         ref={addRefs[8] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1790,7 +1558,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance Date</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance Date</label>
                                     <input
                                         ref={addRefs[9] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1801,11 +1569,11 @@ export default function DealerLedger() {
                                     />
                                 </div>
                             </div>
-                            <div className="pt-4 flex gap-3">
+                            <div className="flex gap-3 pt-4">
                                 <button
                                     type="button"
                                     onClick={() => setIsAddModalOpen(false)}
-                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                    className="flex-1 py-3 font-medium transition-colors border rounded-lg text-slate-700 hover:bg-slate-50 border-slate-200"
                                 >
                                     Cancel
                                 </button>
@@ -1831,17 +1599,48 @@ export default function DealerLedger() {
 
             {/* Edit Dealer Modal */}
             {isEditModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsEditModalOpen(false)}>
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 duration-200 bg-black/50 backdrop-blur-sm animate-in fade-in" onClick={() => setIsEditModalOpen(false)}>
+                    <div className="w-full max-w-2xl overflow-hidden bg-white shadow-xl rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-blue-50">
                             <h2 className="text-xl font-bold text-slate-800">Edit Dealer</h2>
-                            <div className="flex gap-2 items-center">
+                            <div className="flex items-center gap-2">
+                                {editingDealer && (
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            const confirmed = await showConfirm({
+                                                title: 'Close Financial Year',
+                                                message: 'This will close the current financial year for this dealer. It will delete local transaction history (saving space) and append Closing/Opening rows to their Google Sheet ledger. Proceed?',
+                                                confirmLabel: 'Yes, Roll Over',
+                                                type: 'danger'
+                                            });
+                                            if (confirmed) {
+                                                const defaultYear = new Date().getMonth() < 3 ? new Date().getFullYear() : new Date().getFullYear();
+                                                const closingDateStr = prompt('Enter Closing Date (YYYY-MM-DD):', `${defaultYear}-03-31`);
+                                                if (!closingDateStr) return;
+                                                const openingDateStr = prompt('Enter New Opening Date (YYYY-MM-DD):', `${defaultYear}-04-01`);
+                                                if (!openingDateStr) return;
+                                                
+                                                try {
+                                                    await rollOverDealerYear(editingDealer.id, closingDateStr, openingDateStr);
+                                                    showToast('Financial year rolled over successfully!', 'success');
+                                                    setIsEditModalOpen(false);
+                                                } catch (e) {
+                                                    showToast('Rollover failed', 'error');
+                                                }
+                                            }
+                                        }}
+                                        className="px-3 py-1.5 text-sm bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-lg font-medium transition-colors"
+                                    >
+                                        Close Financial Year
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => {
                                         setIsEditModalOpen(false);
                                         setEditingDealer(null);
                                     }}
-                                    className="text-slate-400 hover:text-slate-600 ml-2"
+                                    className="ml-2 text-slate-400 hover:text-slate-600"
                                 >
                                     <X size={24} />
                                 </button>
@@ -1850,7 +1649,7 @@ export default function DealerLedger() {
                         <form onSubmit={handleEditDealer} className="p-6 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Business Name</label>
                                     <input
                                         ref={editRefs[0] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1863,7 +1662,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Contact Person</label>
                                     <input
                                         ref={editRefs[1] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1875,7 +1674,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Phone Number</label>
                                     <input
                                         ref={editRefs[2] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1902,13 +1701,13 @@ export default function DealerLedger() {
                                         placeholder="10-digit mobile number"
                                     />
                                     {editPhoneError && (
-                                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                                        <p className="flex items-center gap-1 mt-1 text-xs text-red-600">
                                             <span>⚠</span> {editPhoneError}
                                         </p>
                                     )}
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Address</label>
                                     <textarea
                                         ref={editRefs[3] as React.RefObject<HTMLTextAreaElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e as any)}
@@ -1920,7 +1719,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">City</label>
                                     <input
                                         ref={editRefs[4] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1933,7 +1732,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">State</label>
                                     <input
                                         ref={editRefs[5] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1946,7 +1745,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Pin Code</label>
                                     <input
                                         ref={editRefs[6] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1958,7 +1757,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">GST Number</label>
                                     <input
                                         ref={editRefs[7] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1971,7 +1770,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance (₹)</label>
                                     <input
                                         ref={editRefs[8] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1983,7 +1782,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance Date</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance Date</label>
                                     <input
                                         ref={editRefs[9] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1994,7 +1793,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                             </div>
-                            <div className="pt-4 flex gap-3">
+                            <div className="flex gap-3 pt-4">
                                 {editingDealer?.balance === 0 && (
                                     <button
                                         type="button"
@@ -2012,7 +1811,7 @@ export default function DealerLedger() {
                                                 showToast('Dealer deleted successfully', 'info');
                                             }
                                         }}
-                                        className="px-4 py-3 bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-100 transition-colors border border-red-200"
+                                        className="px-4 py-3 font-bold text-red-600 transition-colors border border-red-200 rounded-lg bg-red-50 hover:bg-red-100"
                                         title="Delete Dealer"
                                     >
                                         <Trash2 size={20} />
@@ -2024,7 +1823,7 @@ export default function DealerLedger() {
                                         setIsEditModalOpen(false);
                                         setEditingDealer(null);
                                     }}
-                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                    className="flex-1 py-3 font-medium transition-colors border rounded-lg text-slate-700 hover:bg-slate-50 border-slate-200"
                                 >
                                     Cancel
                                 </button>
@@ -2050,187 +1849,134 @@ export default function DealerLedger() {
 
             {/* ─── Date Range Modal ────────────────────────────────── */}
             {dateRangeModal.open && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-                    onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-                        onClick={e => e.stopPropagation()}>
-
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                    <div className="w-full max-w-md mx-4 overflow-hidden bg-white shadow-2xl rounded-2xl">
                         {/* Header */}
-                        <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center justify-between px-6 py-4 text-white bg-slate-800">
                             <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center">
-                                    {dateRangeModal.mode === 'whatsapp' ? (
-                                        <MessageSquare size={18} className="text-white" />
-                                    ) : (
-                                        <Download size={18} className="text-white" />
-                                    )}
-                                </div>
+                                <Calendar size={20} className="text-emerald-400" />
                                 <div>
-                                    <p className="font-bold text-white text-base">
-                                        {dateRangeModal.mode === 'bulk-export' ? 'Export All Dealers' : 
-                                         dateRangeModal.mode === 'whatsapp' ? 'Send Statement' : 'Export Statement'}
-                                    </p>
-                                    <p className="text-slate-400 text-xs">
-                                        {dateRangeModal.mode === 'whatsapp' ? 'Send via WhatsApp' : 'Select date range for PDF'}
+                                    <h2 className="text-base font-bold">Select Date Range</h2>
+                                    <p className="text-slate-400 text-xs mt-0.5">
+                                        {dateRangeModal.mode === 'export' ? 'For PDF Export' : 'For WhatsApp Statement'}
                                     </p>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                className="text-slate-400 hover:text-white transition-colors"
-                            >
-                                <X size={22} />
+                            <button onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                className="flex items-center justify-center w-8 h-8 transition-colors rounded-lg bg-slate-700 hover:bg-slate-600">
+                                <X size={16} />
                             </button>
                         </div>
 
-                        <div className="p-6 space-y-5">
-                            {/* 4 Option Cards */}
+                        <div className="p-6 space-y-4">
+                            {/* Quick options */}
                             <div className="grid grid-cols-2 gap-3">
-                                {[
-                                    { id: 'all', icon: <FileText size={22} />, label: 'Complete Statement', sub: 'All transactions' },
-                                    { id: 'fy-pick', icon: <Calendar size={22} />, label: 'Financial Year', sub: 'Apr–Mar range' },
-                                    { id: 'month-pick', icon: <Clock size={22} />, label: 'By Month', sub: 'Specific month' },
-                                    { id: 'custom', icon: <Search size={22} />, label: 'Custom Range', sub: 'Pick from–to dates' },
-                                ].map((opt) => (
+                                {([
+                                    { key: 'all', label: 'Complete Statement', icon: '📋' },
+                                    { key: 'fy-pick', label: 'Financial Year', icon: '📅' },
+                                    { key: 'month-pick', label: 'By Month', icon: '🗓️' },
+                                    { key: 'custom', label: 'Custom Range', icon: '✏️' },
+                                ] as const).map(opt => (
                                     <button
-                                        key={opt.id}
-                                        onClick={() => setDateRangeModal(prev => ({ ...prev, rangeType: opt.id as any }))}
-                                        className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all text-center ${
-                                            dateRangeModal.rangeType === opt.id
-                                                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                                                : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50/50'
-                                        }`}
+                                        key={opt.key}
+                                        onClick={() => setDateRangeModal(prev => ({ ...prev, rangeType: opt.key }))}
+                                        className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all font-medium text-sm ${dateRangeModal.rangeType === opt.key
+                                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                            }`}
                                     >
-                                        <span className={dateRangeModal.rangeType === opt.id ? 'text-emerald-600' : 'text-slate-400'}>{opt.icon}</span>
-                                        <span className="font-semibold text-sm leading-tight">{opt.label}</span>
-                                        <span className="text-xs text-slate-400">{opt.sub}</span>
+                                        <span className="text-lg">{opt.icon}</span>
+                                        {opt.label}
                                     </button>
                                 ))}
                             </div>
-
-                            {/* Dynamic Sub-fields */}
+                            {/* Financial Year picker */}
                             {dateRangeModal.rangeType === 'fy-pick' && (
                                 <div>
-                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Select Financial Year</label>
-                                    <select 
-                                        value={dateRangeModal.selectedYear}
+                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Select Financial Year</label>
+                                    <select value={dateRangeModal.selectedYear}
                                         onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
-                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium text-sm"
-                                    >
-                                        {(() => {
-                                            const currentYear = new Date().getFullYear();
-                                            const startYear = 2022;
-                                            const yearsList = Array.from({ length: (currentYear + 15) - startYear + 1 }, (_, i) => startYear + i).reverse();
-                                            return yearsList.map(y => (
-                                                <option key={y} value={y}>FY {y}-{String(y + 1).slice(-2)}</option>
-                                            ));
-                                        })()}
+                                        className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                        {Array.from({ length: new Date().getFullYear() + 16 - 2020 }, (_, i) => 2020 + i).reverse().map(y => (
+                                            <option key={y} value={y}>FY {y}-{String(y + 1).slice(-2)}</option>
+                                        ))}
                                     </select>
                                 </div>
                             )}
-
+                            {/* Month picker */}
                             {dateRangeModal.rangeType === 'month-pick' && (
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Month</label>
-                                        <select 
-                                            value={dateRangeModal.selectedMonth}
+                                        <label className="block text-xs font-semibold text-slate-500 mb-1.5">Month</label>
+                                        <select value={dateRangeModal.selectedMonth}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, selectedMonth: Number(e.target.value) }))}
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium text-sm"
-                                        >
-                                            {MONTHS.map((m, i) => (
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                            {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
                                                 <option key={i} value={i}>{m}</option>
                                             ))}
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Year</label>
-                                        <select 
-                                            value={dateRangeModal.selectedYear}
+                                        <label className="block text-xs font-semibold text-slate-500 mb-1.5">Year</label>
+                                        <select value={dateRangeModal.selectedYear}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
-                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium text-sm"
-                                        >
-                                            {(() => {
-                                                const currentYear = new Date().getFullYear();
-                                                const startYear = 2022;
-                                                const yearsList = Array.from({ length: (currentYear + 15) - startYear + 1 }, (_, i) => startYear + i).reverse();
-                                                return yearsList.map(y => (
-                                                    <option key={y} value={y}>{y}</option>
-                                                ));
-                                            })()}
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                            {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => 2020 + i).reverse().map(y => (
+                                                <option key={y} value={y}>{y}</option>
+                                            ))}
                                         </select>
                                     </div>
                                 </div>
                             )}
-
+                            {/* Custom date inputs */}
                             {dateRangeModal.rangeType === 'custom' && (
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-2 gap-3 pt-1">
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">From Date</label>
+                                        <label className="block text-xs font-semibold text-slate-500 mb-1.5">From Date</label>
                                         <input
                                             type="date"
                                             value={dateRangeModal.fromDate}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, fromDate: e.target.value }))}
-                                            className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">To Date</label>
+                                        <label className="block text-xs font-semibold text-slate-500 mb-1.5">To Date</label>
                                         <input
                                             type="date"
                                             value={dateRangeModal.toDate}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, toDate: e.target.value }))}
-                                            className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                                         />
                                     </div>
                                 </div>
                             )}
 
-                            {/* Actions */}
-                            {dateRangeModal.mode === 'whatsapp' ? (
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                                    <button
-                                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                        className="py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={handleCopyWhatsAppStatementText}
-                                        className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 border border-blue-500 flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
-                                    >
-                                        <FileText size={18} /> Copy Text + Link
-                                    </button>
-                                    <button
-                                        onClick={handleSendWhatsAppStatement}
-                                        className="py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
-                                    >
-                                        <MessageSquare size={18} /> Send Directly
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex gap-3 pt-2">
-                                    <button
-                                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                        className="flex-1 py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            if (dateRangeModal.mode === 'export') handleExportPDF();
-                                            else handleBulkExportPDF();
-                                        }}
-                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
-                                    >
-                                        {dateRangeModal.mode === 'export' ? (
-                                            <><Download size={18} /> Export PDF</>
-                                        ) : (
-                                            <><Download size={18} /> Export All</>
-                                        )}
-                                    </button>
-                                </div>
-                            )}
+                            {/* Action buttons */}
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                    className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl font-medium text-sm hover:bg-slate-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (dateRangeModal.mode === 'export') handleExportPDF();
+                                        else if (dateRangeModal.mode === 'bulk-export') handleBulkExportPDF();
+                                        else handleSendWhatsAppStatement();
+                                    }}
+                                    className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
+                                >
+                                    {dateRangeModal.mode === 'export' ? (
+                                        <><Download size={16} /> Generate PDF</>
+                                    ) : dateRangeModal.mode === 'bulk-export' ? (
+                                        <><Download size={16} /> Export All Dealers</>
+                                    ) : (
+                                        <><MessageSquare size={16} /> Send via WhatsApp</>
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
