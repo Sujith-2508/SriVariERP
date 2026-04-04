@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, User, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -28,6 +29,8 @@ export default function LoginPage() {
                 .single();
 
             if (queryError || !users) {
+                // Fire-and-forget: don't block UI on audit log
+                logToApplicationSheet('Login Failed', `Username: ${email} - No active user found`).catch(() => {});
                 setError('Invalid username or password. Please try again.');
                 setIsLoading(false);
                 return;
@@ -35,22 +38,22 @@ export default function LoginPage() {
 
             // Verify password
             if (users.password !== password) {
+                // Fire-and-forget: don't block UI on audit log
+                logToApplicationSheet('Login Failed', `Username: ${email} - Incorrect password`).catch(() => {});
                 setError('Invalid username or password. Please try again.');
                 setIsLoading(false);
                 return;
             }
 
-            // Update last login timestamp
-            await supabase
-                .from('users')
-                .update({ last_login: new Date().toISOString() })
-                .eq('id', users.id);
-
-            // Store auth state in sessionStorage
+            // Store auth state FIRST so redirect is instant
             sessionStorage.setItem('isAuthenticated', 'true');
             sessionStorage.setItem('userId', users.id);
             sessionStorage.setItem('username', users.username);
             sessionStorage.setItem('fullName', users.full_name || users.username);
+
+            // Fire-and-forget background tasks (don't block navigation)
+            logToApplicationSheet('User Login', `User ${users.username} logged in successfully`).catch(() => {});
+            supabase.from('users').update({ last_login: new Date().toISOString() }).eq('id', users.id).then(() => {});
 
             router.push('/');
         } catch (err) {

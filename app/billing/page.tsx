@@ -198,19 +198,123 @@ export default function Billing() {
     // Invoice Date
     const [invoiceDate, setInvoiceDate] = useState(getISTDateString());
     const [invoiceNoExists, setInvoiceNoExists] = useState(false);
+    const [invoiceNoCheckPending, setInvoiceNoCheckPending] = useState(false);
     const [manualInvNoTouched, setManualInvNoTouched] = useState(false);
-    const checkInvoiceNumberExists = (no: string) => {
-        if (!no.trim()) {
-            setInvoiceNoExists(false);
-            return;
-        }
-        const exists = transactions.some(t =>
-            t.id !== editInvoiceId &&
-            t.type === 'INVOICE' &&
-            (t.referenceId === `INV${no.trim()}` || (t.notes && t.notes.includes(`"manualInvoiceNo":"${no.trim()}"`)))
-        );
-        setInvoiceNoExists(exists);
+
+    const parseInvoiceNumberInput = (value: string): number | null => {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (!/^\d+$/.test(trimmed)) return null;
+        const parsed = Number.parseInt(trimmed, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     };
+
+    const formatInvoiceNumber = (invoiceNo: number): string => {
+        const width = Math.max(3, String(invoiceNo).length);
+        return String(invoiceNo).padStart(width, '0');
+    };
+
+    const getLocalNextInvoiceNo = useCallback(() => {
+        const used = new Set<number>();
+        transactions
+            .filter(t => t.type === 'INVOICE' && t.referenceId?.startsWith('INV'))
+            .forEach(t => {
+                const suffix = t.referenceId?.slice(3) || '';
+                if (/^\d+$/.test(suffix)) {
+                    const parsed = Number.parseInt(suffix, 10);
+                    if (Number.isFinite(parsed) && parsed > 0) {
+                        used.add(parsed);
+                    }
+                }
+            });
+
+        let candidate = 1;
+        while (used.has(candidate)) {
+            candidate += 1;
+        }
+
+        return formatInvoiceNumber(candidate);
+    }, [transactions]);
+
+    const fetchUsedInvoiceNumbersFromDb = useCallback(async (): Promise<Set<number>> => {
+        const { data, error } = await supabase
+            .from('transactions')
+            .select('id, reference_id')
+            .eq('type', 'INVOICE')
+            .ilike('reference_id', 'INV%');
+
+        if (error) {
+            throw error;
+        }
+
+        const used = new Set<number>();
+        (data || []).forEach((row: any) => {
+            const suffix = (row.reference_id || '').slice(3);
+            if (/^\d+$/.test(suffix)) {
+                const parsed = Number.parseInt(suffix, 10);
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    used.add(parsed);
+                }
+            }
+        });
+
+        return used;
+    }, []);
+
+    const fetchNextAvailableInvoiceNo = useCallback(async () => {
+        const used = await fetchUsedInvoiceNumbersFromDb();
+        let candidate = 1;
+        while (used.has(candidate)) {
+            candidate += 1;
+        }
+        return formatInvoiceNumber(candidate);
+    }, [fetchUsedInvoiceNumbersFromDb]);
+
+    const checkInvoiceNumberExists = useCallback(async (no: string) => {
+        const parsedNo = parseInvoiceNumberInput(no);
+        if (parsedNo === null) {
+            setInvoiceNoExists(false);
+            return false;
+        }
+
+        const used = await fetchUsedInvoiceNumbersFromDb();
+        const exists = used.has(parsedNo);
+
+        if (!exists) {
+            setInvoiceNoExists(false);
+            return false;
+        }
+
+        // If editing, allow current invoice number to pass.
+        if (editInvoiceId) {
+            const { data, error } = await supabase
+                .from('transactions')
+                .select('id')
+                .eq('type', 'INVOICE')
+                .eq('reference_id', `INV${formatInvoiceNumber(parsedNo)}`)
+                .limit(1);
+
+            if (!error && data && data.length === 1 && data[0].id === editInvoiceId) {
+                setInvoiceNoExists(false);
+                return false;
+            }
+        }
+
+        setInvoiceNoExists(true);
+        return true;
+    }, [editInvoiceId, fetchUsedInvoiceNumbersFromDb]);
+
+    const refreshNextInvoiceNumber = useCallback(async () => {
+        try {
+            const next = await fetchNextAvailableInvoiceNo();
+            setManualInvoiceNo(next);
+        } catch (err) {
+            console.warn('[Billing] Failed to fetch next invoice number from DB, using local fallback:', err);
+            setManualInvoiceNo(getLocalNextInvoiceNo());
+        }
+        setManualInvNoTouched(false);
+        setInvoiceNoExists(false);
+    }, [fetchNextAvailableInvoiceNo, getLocalNextInvoiceNo]);
 
     // Initialize Manual Invoice Number
     const isInvoiceInitialized = useRef(false);
@@ -218,6 +322,7 @@ export default function Billing() {
         // Reset when switching between new/edit invoice
         if (editInvoiceId) {
             isInvoiceInitialized.current = false;
+            setManualInvNoTouched(false);
             return; // editing: number is loaded from the existing invoice
         }
         if (isInvoiceInitialized.current) return;
@@ -225,12 +330,47 @@ export default function Billing() {
         // Wait until DataContext has finished loading (isLoading = false)
         // This ensures we read the true DB count, not a stale cache count
         if (isLoading) return;
+        if (manualInvNoTouched) return;
 
-        const invoiceCount = transactions.filter(t => t.type === 'INVOICE').length;
-        setManualInvoiceNo(String(invoiceCount + 1).padStart(3, '0'));
-        isInvoiceInitialized.current = true;
+        let isActive = true;
+
+        (async () => {
+            await refreshNextInvoiceNumber();
+            if (isActive) {
+                isInvoiceInitialized.current = true;
+            }
+        })();
+
+        return () => {
+            isActive = false;
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [transactions, editInvoiceId, isLoading]);
+    }, [transactions, editInvoiceId, isLoading, manualInvNoTouched, refreshNextInvoiceNumber]);
+
+    useEffect(() => {
+        if (!manualInvNoTouched) return;
+        if (!manualInvoiceNo.trim()) {
+            setInvoiceNoExists(false);
+            return;
+        }
+
+        let isActive = true;
+        const timeout = setTimeout(async () => {
+            setInvoiceNoCheckPending(true);
+            try {
+                await checkInvoiceNumberExists(manualInvoiceNo);
+            } catch (err) {
+                console.warn('[Billing] Invoice duplicate check failed:', err);
+            } finally {
+                if (isActive) setInvoiceNoCheckPending(false);
+            }
+        }, 250);
+
+        return () => {
+            isActive = false;
+            clearTimeout(timeout);
+        };
+    }, [manualInvoiceNo, manualInvNoTouched, checkInvoiceNumberExists]);
 
     // Load Company Settings
     // Load Company Settings
@@ -329,6 +469,7 @@ export default function Billing() {
 
                     if (notes.manualInvoiceNo) {
                         setManualInvoiceNo(notes.manualInvoiceNo);
+                        setManualInvNoTouched(false);
                         isInvoiceInitialized.current = true;
                     }
                 } catch (e) {
@@ -662,118 +803,136 @@ export default function Billing() {
             showToast('Please select a dealer and add at least one item.', 'warning', 'dealer-select');
             return;
         }
-        if (invoiceNoExists) {
-            showToast('Invoice number already exists. Please use a unique number.', 'warning', 'manual-invoice-no-field');
+        const parsedManualNo = parseInvoiceNumberInput(manualInvoiceNo);
+        if (manualInvoiceNo.trim() && parsedManualNo === null) {
+            showToast('Invoice number must contain digits only.', 'warning', 'manual-invoice-no-field');
             return;
         }
 
-        setIsSubmitting(true);
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        let finalId = editInvoiceId || '';
-        let finalRefId = '';
-
-        if (editInvoiceId) {
-            const { id, refId } = await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
-                vehicleName,
-                vehicleNumber,
-                destination,
-                transportCharges: parseFloat(transportCharges) || 0,
-                paymentTerms,
-                discountPercent: parseFloat(globalDiscount) || 0,
-                creditDays: parseInt(creditDays) || 30,
-                invoiceDate: new Date(invoiceDate),
-                manualInvoiceNo: manualInvoiceNo.trim(),
-                notes: JSON.stringify({
-                    buyerOrderNo,
-                    buyerOrderDate,
-                    dispatchDocNo,
-                    dispatchDate,
-                    deliveryNote,
-                    supplierRef,
-                    otherRef,
-                    termsOfDelivery,
-                    manualInvoiceNo,
-                    roundOff,
-                    globalCGST,
-                    globalSGST,
-                    globalIGST,
-                    invoiceItems: invoiceItems.map(item => ({
-                        productId: item.productId,
-                        productName: item.productName,
-                        quantity: item.quantity,
-                        unitPrice: item.unitPrice,
-                        costPrice: item.costPrice || 0,
-                        cgst: item.cgst,
-                        sgst: item.sgst,
-                        igst: item.igst,
-                        cgstAmount: item.cgstAmount,
-                        sgstAmount: item.sgstAmount,
-                        igstAmount: item.igstAmount,
-                        discount: item.discount,
-                        discountAmount: item.discountAmount,
-                        total: item.total,
-                        gstAmount: item.gstAmount,
-                        hsnCode: item.hsnCode,
-                        unit: item.unit,
-                        gstRate: item.gstRate
-                    }))
-                })
-            });
-            finalId = id;
-            finalRefId = refId;
-        } else {
-            const { id, refId } = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
-                vehicleName,
-                vehicleNumber,
-                destination,
-                transportCharges: parseFloat(transportCharges) || 0,
-                paymentTerms,
-                discountPercent: parseFloat(globalDiscount) || 0,
-                creditDays: parseInt(creditDays) || 30,
-                invoiceDate: new Date(invoiceDate),
-                manualInvoiceNo: manualInvoiceNo.trim(),
-                notes: JSON.stringify({
-                    buyerOrderNo,
-                    buyerOrderDate,
-                    dispatchDocNo,
-                    dispatchDate,
-                    deliveryNote,
-                    supplierRef,
-                    otherRef,
-                    termsOfDelivery,
-                    manualInvoiceNo,
-                    roundOff,
-                    globalCGST,
-                    globalSGST,
-                    globalIGST,
-                    invoiceItems: invoiceItems.map(item => ({
-                        productId: item.productId,
-                        productName: item.productName,
-                        quantity: item.quantity,
-                        unitPrice: item.unitPrice,
-                        costPrice: item.costPrice || 0,
-                        cgst: item.cgst,
-                        sgst: item.sgst,
-                        igst: item.igst,
-                        cgstAmount: item.cgstAmount,
-                        sgstAmount: item.sgstAmount,
-                        igstAmount: item.igstAmount,
-                        discount: item.discount,
-                        discountAmount: item.discountAmount,
-                        total: item.total,
-                        gstAmount: item.gstAmount,
-                        hsnCode: item.hsnCode,
-                        unit: item.unit,
-                        gstRate: item.gstRate
-                    }))
-                })
-            });
-            finalId = id;
-            finalRefId = refId;
+        if (parsedManualNo !== null) {
+            setManualInvoiceNo(formatInvoiceNumber(parsedManualNo));
         }
 
-        setGeneratedRef(finalRefId);
-        setCreatedInvoiceId(finalId);
+        setIsSubmitting(true);
+
+        try {
+            if (manualInvoiceNo.trim()) {
+                const existsInDb = await checkInvoiceNumberExists(manualInvoiceNo);
+                if (existsInDb) {
+                    showToast('Invoice number already exists in database. Please use a unique number.', 'warning', 'manual-invoice-no-field');
+                    if (!editInvoiceId) {
+                        await refreshNextInvoiceNumber();
+                    }
+                    return;
+                }
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            let finalId = editInvoiceId || '';
+            let finalRefId = '';
+
+            if (editInvoiceId) {
+                const { id, refId } = await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
+                    vehicleName,
+                    vehicleNumber,
+                    destination,
+                    transportCharges: parseFloat(transportCharges) || 0,
+                    paymentTerms,
+                    discountPercent: parseFloat(globalDiscount) || 0,
+                    creditDays: parseInt(creditDays) || 30,
+                    invoiceDate: new Date(invoiceDate),
+                    manualInvoiceNo: manualInvoiceNo.trim(),
+                    notes: JSON.stringify({
+                        buyerOrderNo,
+                        buyerOrderDate,
+                        dispatchDocNo,
+                        dispatchDate,
+                        deliveryNote,
+                        supplierRef,
+                        otherRef,
+                        termsOfDelivery,
+                        manualInvoiceNo,
+                        roundOff,
+                        globalCGST,
+                        globalSGST,
+                        globalIGST,
+                        invoiceItems: invoiceItems.map(item => ({
+                            productId: item.productId,
+                            productName: item.productName,
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            costPrice: item.costPrice || 0,
+                            cgst: item.cgst,
+                            sgst: item.sgst,
+                            igst: item.igst,
+                            cgstAmount: item.cgstAmount,
+                            sgstAmount: item.sgstAmount,
+                            igstAmount: item.igstAmount,
+                            discount: item.discount,
+                            discountAmount: item.discountAmount,
+                            total: item.total,
+                            gstAmount: item.gstAmount,
+                            hsnCode: item.hsnCode,
+                            unit: item.unit,
+                            gstRate: item.gstRate
+                        }))
+                    })
+                });
+                finalId = id;
+                finalRefId = refId;
+            } else {
+                const { id, refId } = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
+                    vehicleName,
+                    vehicleNumber,
+                    destination,
+                    transportCharges: parseFloat(transportCharges) || 0,
+                    paymentTerms,
+                    discountPercent: parseFloat(globalDiscount) || 0,
+                    creditDays: parseInt(creditDays) || 30,
+                    invoiceDate: new Date(invoiceDate),
+                    manualInvoiceNo: manualInvoiceNo.trim(),
+                    notes: JSON.stringify({
+                        buyerOrderNo,
+                        buyerOrderDate,
+                        dispatchDocNo,
+                        dispatchDate,
+                        deliveryNote,
+                        supplierRef,
+                        otherRef,
+                        termsOfDelivery,
+                        manualInvoiceNo,
+                        roundOff,
+                        globalCGST,
+                        globalSGST,
+                        globalIGST,
+                        invoiceItems: invoiceItems.map(item => ({
+                            productId: item.productId,
+                            productName: item.productName,
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            costPrice: item.costPrice || 0,
+                            cgst: item.cgst,
+                            sgst: item.sgst,
+                            igst: item.igst,
+                            cgstAmount: item.cgstAmount,
+                            sgstAmount: item.sgstAmount,
+                            igstAmount: item.igstAmount,
+                            discount: item.discount,
+                            discountAmount: item.discountAmount,
+                            total: item.total,
+                            gstAmount: item.gstAmount,
+                            hsnCode: item.hsnCode,
+                            unit: item.unit,
+                            gstRate: item.gstRate
+                        }))
+                    })
+                });
+                finalId = id;
+                finalRefId = refId;
+            }
+
+            setGeneratedRef(finalRefId);
+            setCreatedInvoiceId(finalId);
 
         // Real-time Sync to Google Sheets (disabled — month-wise Drive storage is used instead)
         // syncInvoiceToSheets has been removed as ERP Invoices tab is no longer needed.
@@ -832,45 +991,50 @@ export default function Billing() {
             })();
         }
 
-        setIsSubmitting(false);
-        setShowSuccess(true);
-        clearDraft(); // Clear draft only on success
+            setShowSuccess(true);
+            clearDraft(); // Clear draft only on success
 
         // Prepare data for WhatsApp Preview instead of sending automatically
-        if (selectedDealer && selectedDealer.phone) {
-            const invoiceDataForPreview = {
-                id: (finalId || ''),
-                customerId: selectedDealer.id,
-                type: TransactionType.INVOICE,
-                amount: invoiceTotal,
-                date: new Date(invoiceDate),
-                referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
-                items: invoiceItems,
-                vehicleName,
-                vehicleNumber,
-                destination,
-                transportCharges: parseFloat(transportCharges) || 0,
-                paymentTerms,
-                discountPercent: parseFloat(globalDiscount) || 0,
-                creditDays: parseInt(creditDays) || 30,
-                notes: JSON.stringify({
-                    buyerOrderNo,
-                    buyerOrderDate,
-                    dispatchDocNo,
-                    dispatchDate,
-                    deliveryNote,
-                    supplierRef,
-                    otherRef,
-                    termsOfDelivery,
-                    manualInvoiceNo,
-                    roundOff,
-                    globalCGST,
-                    globalSGST,
-                    globalIGST
-                })
-            };
-            setPreviewData({ dealer: selectedDealer, invoiceData: invoiceDataForPreview });
-            setShowWhatsAppPreview(true);
+            if (selectedDealer && selectedDealer.phone) {
+                const invoiceDataForPreview = {
+                    id: (finalId || ''),
+                    customerId: selectedDealer.id,
+                    type: TransactionType.INVOICE,
+                    amount: invoiceTotal,
+                    date: new Date(invoiceDate),
+                    referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
+                    items: invoiceItems,
+                    vehicleName,
+                    vehicleNumber,
+                    destination,
+                    transportCharges: parseFloat(transportCharges) || 0,
+                    paymentTerms,
+                    discountPercent: parseFloat(globalDiscount) || 0,
+                    creditDays: parseInt(creditDays) || 30,
+                    notes: JSON.stringify({
+                        buyerOrderNo,
+                        buyerOrderDate,
+                        dispatchDocNo,
+                        dispatchDate,
+                        deliveryNote,
+                        supplierRef,
+                        otherRef,
+                        termsOfDelivery,
+                        manualInvoiceNo,
+                        roundOff,
+                        globalCGST,
+                        globalSGST,
+                        globalIGST
+                    })
+                };
+                setPreviewData({ dealer: selectedDealer, invoiceData: invoiceDataForPreview });
+                setShowWhatsAppPreview(true);
+            }
+        } catch (err: any) {
+            console.error('[Billing] Failed to create/update invoice:', err);
+            showToast(err?.message || 'Failed to save invoice. Please try again.', 'error');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -1219,6 +1383,7 @@ export default function Billing() {
         }
         resetForm();
         clearDraft();
+        await refreshNextInvoiceNumber();
         // Focus search after reset
         setTimeout(() => dealerSearchInputRef.current?.focus(), 100);
     };
@@ -1316,9 +1481,9 @@ export default function Billing() {
                                             type="text"
                                             value={manualInvoiceNo}
                                             onChange={(e) => {
-                                                const val = e.target.value;
+                                                const val = e.target.value.replace(/\D/g, '');
+                                                setManualInvNoTouched(true);
                                                 setManualInvoiceNo(val);
-                                                checkInvoiceNumberExists(val);
                                             }}
                                             onFocus={(e) => e.target.select()}
                                             onKeyDown={(e) => {
@@ -1330,6 +1495,9 @@ export default function Billing() {
                                             placeholder="Auto"
                                             className={`w-24 p-1 bg-transparent font-bold outline-none ${invoiceNoExists ? 'text-red-500' : 'text-slate-800'}`}
                                         />
+                                        {invoiceNoCheckPending && (
+                                            <span className="text-[10px] text-slate-400">Checking...</span>
+                                        )}
                                         {invoiceNoExists && (
                                             <span className="absolute -bottom-4 left-0 text-[10px] text-red-500 font-medium whitespace-nowrap">Number already exists!</span>
                                         )}

@@ -9,7 +9,8 @@ import {
     SupplierData,
     PurchaseBillData,
     PurchasePaymentData,
-    PurchaseAllocationData
+    PurchaseAllocationData,
+    CompanySettings
 } from '@/types';
 import {
     getAllSuppliers,
@@ -31,7 +32,14 @@ import {
     forceSyncPurchases,
     suggestNextPaymentNumber
 } from '@/lib/purchaseService';
-import { createSupplierSheetTab, SupplierSheetDetails, CompanySheetDetails } from '@/lib/googleSheetSuppliers';
+import {
+    createSupplierSheetTab,
+    appendToSupplierSheetTab,
+    clearSupplierTransactionsForSync,
+    SupplierSheetDetails,
+    CompanySheetDetails,
+    SheetRowData
+} from '@/lib/googleSheetSuppliers';
 import { syncAllStatements } from '@/lib/folderSyncService';
 import { getISTDateString } from '@/lib/utils';
 import {
@@ -48,15 +56,19 @@ import {
     DollarSign,
     RefreshCw,
     Download,
-    Clock
+    Clock,
+    ExternalLink,
+    CloudUpload
 } from 'lucide-react';
 import SearchableSelect from '@/components/SearchableSelect';
 import { supabase } from '@/lib/supabase';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 
 type TabType = 'bills' | 'payments' | 'suppliers';
 
 export default function PurchasesPage() {
-    const { products } = useData();
+    const { products, companySettings } = useData();
+    const effectiveCompanySettings: CompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState<TabType>('bills');
@@ -84,6 +96,8 @@ export default function PurchasesPage() {
     const [statementData, setStatementData] = useState<SupplierStatementEntry[]>([]);
     const [billAllocations, setBillAllocations] = useState<PurchaseAllocationData[]>([]);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+    const [isSheetSyncing, setIsSheetSyncing] = useState(false);
+    const [syncingSupplierId, setSyncingSupplierId] = useState<string | null>(null);
     const [sheetTabStatus, setSheetTabStatus] = useState<string | null>(null);
 
     const [dateRangeModal, setDateRangeModal] = useState<{
@@ -111,32 +125,7 @@ export default function PurchasesPage() {
             const { generateSupplierStatementPDFBase64 } = await import('@/lib/pdfGenerator');
             const { supabase } = await import('@/lib/supabase');
 
-            // Load company settings
-            let company = {
-                companyName: 'Sri Vari ERP',
-                addressLine1: '',
-                addressLine2: '',
-                city: '',
-                gstNumber: '',
-                phone: '',
-                email: ''
-            };
-            const { data: compData, error } = await supabase
-                .from('company_settings')
-                .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
-                .limit(1);
-            if (compData && compData[0]) {
-                const c = compData[0];
-                company = {
-                    companyName: c.company_name,
-                    addressLine1: c.address_line1,
-                    addressLine2: c.address_line2,
-                    city: c.city,
-                    gstNumber: c.gst_number,
-                    phone: c.phone,
-                    email: c.email
-                };
-            }
+            const company = effectiveCompanySettings;
 
             // Determine date range
             let start: Date | undefined;
@@ -392,25 +381,14 @@ export default function PurchasesPage() {
         // Always Update/Create corresponding Google Sheet tab
         setSheetTabStatus('Updating Google Sheet tab...');
 
-        // Load company settings from Supabase (set in the Settings page)
-        let company: CompanySheetDetails = {};
-        try {
-            const { data: compData } = await supabase
-                .from('company_settings')
-                .select('company_name, address_line1, address_line2, city, gst_number, phone, email')
-                .limit(1);
-            if (compData && compData.length > 0) {
-                const c = compData[0];
-                company = {
-                    companyName: c.company_name,
-                    address: [c.address_line1, c.address_line2].filter(Boolean).join(', '),
-                    city: c.city,
-                    gstNumber: c.gst_number,
-                    phone: c.phone,
-                    email: c.email
-                };
-            }
-        } catch { /* ignore — company info is optional */ }
+        const company: CompanySheetDetails = {
+            companyName: effectiveCompanySettings.companyName,
+            address: [effectiveCompanySettings.addressLine1, effectiveCompanySettings.addressLine2].filter(Boolean).join(', '),
+            city: effectiveCompanySettings.city,
+            gstNumber: effectiveCompanySettings.gstNumber,
+            phone: effectiveCompanySettings.phone,
+            email: effectiveCompanySettings.email
+        };
 
         const supplierDetails: SupplierSheetDetails = {
             supplierName: supplierForm.name,
@@ -693,6 +671,87 @@ export default function PurchasesPage() {
         setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, balance: newBalance } : s));
     };
 
+    const syncSupplierToSheet = async (supplier: SupplierData): Promise<boolean> => {
+        try {
+            if (!supplier?.name || supplier.name === 'Unknown') return false;
+
+            const company: CompanySheetDetails = {
+                companyName: effectiveCompanySettings.companyName,
+                address: [effectiveCompanySettings.addressLine1, effectiveCompanySettings.addressLine2].filter(Boolean).join(', '),
+                city: effectiveCompanySettings.city,
+                gstNumber: effectiveCompanySettings.gstNumber,
+                phone: effectiveCompanySettings.phone,
+                email: effectiveCompanySettings.email
+            };
+
+            const supplierDetails: SupplierSheetDetails = {
+                supplierName: supplier.name,
+                supplierAddress: supplier.address,
+                supplierCity: supplier.city,
+                supplierGst: supplier.gstNumber,
+                supplierPhone: supplier.phone,
+                supplierContactPerson: supplier.contactPerson,
+                openingBalance: supplier.openingBalance || 0,
+                openingBalanceDate: supplier.openingBalanceDate
+                    ? (typeof supplier.openingBalanceDate === 'string'
+                        ? supplier.openingBalanceDate
+                        : supplier.openingBalanceDate.toISOString().split('T')[0])
+                    : getISTDateString()
+            };
+
+            await createSupplierSheetTab(supplierDetails, company);
+            await clearSupplierTransactionsForSync(supplier.name);
+
+            const statement = await getSupplierStatement(supplier.id);
+            const rows = statement.filter(entry => entry.rowKind !== 'OPENING');
+
+            for (const entry of rows) {
+                const isClosing = entry.rowKind === 'CLOSING';
+                const row: SheetRowData = {
+                    date: new Date(entry.date).toISOString().split('T')[0],
+                    particulars: entry.notes || (isClosing ? 'Closing Balance' : entry.type === 'BILL' ? 'Purchase' : 'Payment'),
+                    vchType: isClosing ? 'Closing' : (entry.type === 'BILL' ? 'Purchase' : 'Payment'),
+                    vchRef: isClosing ? 'FY CLOSE' : (entry.type === 'BILL' ? 'PURCHASE' : 'Payment'),
+                    vchNo: entry.reference,
+                    debit: entry.debit,
+                    credit: entry.credit,
+                    balance: entry.balance,
+                    balanceType: entry.balance >= 0 ? 'Cr' : 'Dr'
+                };
+
+                await appendToSupplierSheetTab(supplier.name, row);
+            }
+
+            return true;
+        } catch (err) {
+            console.warn(`[Purchases] Supplier sheet sync failed for ${supplier.name}:`, err);
+            return false;
+        }
+    };
+
+    const handleSyncSupplierToSheet = async (supplier: SupplierData) => {
+        if (isSheetSyncing || syncingSupplierId) return;
+
+        setIsSheetSyncing(true);
+        setSyncingSupplierId(supplier.id);
+        setSheetTabStatus(`Syncing supplier: ${supplier.name}`);
+
+        try {
+            const ok = await syncSupplierToSheet(supplier);
+            if (ok) {
+                showToast(`Synced ${supplier.name} to sheet`, 'success');
+                setSheetTabStatus(`✓ Synced supplier: ${supplier.name}`);
+            } else {
+                showToast(`Failed to sync ${supplier.name}`, 'warning');
+                setSheetTabStatus(`⚠ Failed syncing supplier: ${supplier.name}`);
+            }
+        } finally {
+            setSyncingSupplierId(null);
+            setIsSheetSyncing(false);
+            setTimeout(() => setSheetTabStatus(null), 6000);
+        }
+    };
+
     const handleViewBill = async (bill: PurchaseBillData) => {
         setSelectedBill(bill);
         const allocations = await getBillAllocations(bill.id);
@@ -808,7 +867,11 @@ export default function PurchasesPage() {
             const tableColumn = ["Date", "Type", "Reference", "Particulars", "Debit (+)", "Credit (-)", "Balance"];
             const tableRows = statementData.map(entry => [
                 new Date(entry.date).toLocaleDateString(),
-                entry.reference?.toUpperCase() === 'BAL B/F' ? 'Balance' : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment'),
+                entry.rowKind === 'OPENING'
+                    ? 'Opening'
+                    : entry.rowKind === 'CLOSING'
+                        ? 'Closing'
+                        : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment'),
                 entry.reference,
                 entry.notes || '-',
                 entry.debit > 0 ? entry.debit.toLocaleString() : '-',
@@ -994,9 +1057,21 @@ export default function PurchasesPage() {
                                                     <button
                                                         onClick={() => handleRefreshBalance(s)}
                                                         className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                                                        title="Refresh Balance"
+                                                        title="Recalculate Balance"
+                                                        aria-label="Recalculate Balance"
                                                     >
                                                         <RefreshCw size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleSyncSupplierToSheet(s)}
+                                                        disabled={isSheetSyncing || syncingSupplierId === s.id}
+                                                        className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg disabled:opacity-50"
+                                                        title="Sync Supplier to Sheet"
+                                                        aria-label="Sync Supplier to Sheet"
+                                                    >
+                                                        {syncingSupplierId === s.id
+                                                            ? <RefreshCw size={16} className="animate-spin" />
+                                                            : <CloudUpload size={16} />}
                                                     </button>
                                                     <button
                                                         onClick={() => viewStatement(s)}
@@ -1841,7 +1916,7 @@ export default function PurchasesPage() {
                             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
                             onClick={() => setIsStatementModalOpen(false)}
                         />
-                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10">
+                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden z-10">
                             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                                 <div>
                                     <h1 className="text-xl font-bold text-slate-800">
@@ -1864,56 +1939,86 @@ export default function PurchasesPage() {
                             </div>
 
                             <div className="p-6 overflow-y-auto max-h-[70vh]">
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                                    {(() => {
+                                        const openingBalance = statementData.find(e => e.rowKind === 'OPENING')?.balance || (selectedSupplier.openingBalance || 0);
+                                        const totalPurchases = statementData
+                                            .filter(e => e.type === 'BILL' && !e.rowKind)
+                                            .reduce((sum, e) => sum + e.credit, 0);
+                                        const totalPaid = statementData
+                                            .filter(e => e.type === 'PAYMENT' && !e.rowKind)
+                                            .reduce((sum, e) => sum + e.debit, 0);
+
+                                        return (
+                                            <>
+                                    <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
+                                        <p className="text-xs text-blue-500 uppercase font-semibold">Opening Balance</p>
+                                        <p className="text-lg font-bold text-blue-700">
+                                            ₹{openingBalance.toLocaleString()}
+                                        </p>
+                                    </div>
                                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                         <p className="text-xs text-slate-500 uppercase font-semibold">Total Purchases</p>
                                         <p className="text-lg font-bold text-slate-800">
-                                            ₹{statementData.reduce((sum, e) => sum + e.debit, 0).toLocaleString()}
+                                            ₹{totalPurchases.toLocaleString()}
                                         </p>
                                     </div>
                                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                         <p className="text-xs text-slate-500 uppercase font-semibold">Total Paid</p>
                                         <p className="text-lg font-bold text-emerald-600">
-                                            ₹{statementData.reduce((sum, e) => sum + e.credit, 0).toLocaleString()}
+                                            ₹{totalPaid.toLocaleString()}
                                         </p>
                                     </div>
                                     <div className="bg-red-50 p-4 rounded-xl border border-red-100">
                                         <p className="text-xs text-red-500 uppercase font-semibold">Current Balance</p>
                                         <p className="text-lg font-bold text-red-600">₹{(selectedSupplier.balance || 0).toLocaleString()}</p>
                                     </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
 
                                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                                    <table className="w-full text-sm text-left">
+                                    <table className="w-full table-fixed text-sm text-left">
                                         <thead className="bg-slate-50 text-slate-600 font-medium">
                                             <tr>
-                                                <th className="p-4 border-b">Date</th>
-                                                <th className="p-4 border-b">Type</th>
-                                                <th className="p-4 border-b">Reference</th>
-                                                <th className="p-4 border-b text-left">Particulars</th>
-                                                <th className="p-4 border-b text-right">Debit (+)</th>
-                                                <th className="p-4 border-b text-right">Credit (-)</th>
-                                                <th className="p-4 border-b text-right bg-slate-100/50">Balance</th>
+                                                <th className="p-3 border-b w-[110px]">Date</th>
+                                                <th className="p-3 border-b w-[90px]">Type</th>
+                                                <th className="p-3 border-b w-[120px]">Reference</th>
+                                                <th className="p-3 border-b text-left">Particulars</th>
+                                                <th className="p-3 border-b text-right w-[110px]">Debit (+)</th>
+                                                <th className="p-3 border-b text-right w-[110px]">Credit (-)</th>
+                                                <th className="p-3 border-b text-right bg-slate-100/50 w-[130px]">Balance</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {statementData.map((entry, idx) => (
-                                                <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="p-4 text-slate-600">{new Date(entry.date).toLocaleDateString()}</td>
-                                                    <td className="p-4">
-                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${entry.type === 'BILL' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                                                            {entry.type === 'BILL' ? 'BILL' : 'PAYMENT'}
+                                                <tr key={idx} className={`${entry.rowKind ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors`}>
+                                                    <td className="p-3 text-slate-600">{new Date(entry.date).toLocaleDateString()}</td>
+                                                    <td className="p-3">
+                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                                                            entry.rowKind === 'OPENING' || entry.rowKind === 'CLOSING'
+                                                                ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                                                                : entry.type === 'BILL'
+                                                                    ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                                                                    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                                        }`}>
+                                                            {entry.rowKind === 'OPENING'
+                                                                ? 'OPENING'
+                                                                : entry.rowKind === 'CLOSING'
+                                                                    ? 'CLOSING'
+                                                                    : (entry.type === 'BILL' ? 'BILL' : 'PAYMENT')}
                                                         </span>
                                                     </td>
-                                                    <td className="p-4 font-mono text-xs">{entry.reference}</td>
-                                                    <td className="p-4 text-slate-500 max-w-[200px] truncate" title={entry.notes}>{entry.notes || '-'}</td>
-                                                    <td className="p-4 text-right text-slate-800">
+                                                        <td className="p-3 font-mono text-xs truncate" title={entry.reference}>{entry.reference}</td>
+                                                        <td className="p-3 text-slate-500 truncate" title={entry.notes}>{entry.notes || '-'}</td>
+                                                        <td className="p-3 text-right text-slate-800 whitespace-nowrap">
                                                         {entry.debit > 0 ? `₹${entry.debit.toLocaleString()}` : '-'}
                                                     </td>
-                                                    <td className="p-4 text-right text-emerald-600">
+                                                        <td className="p-3 text-right text-emerald-600 whitespace-nowrap">
                                                         {entry.credit > 0 ? `₹${entry.credit.toLocaleString()}` : '-'}
                                                     </td>
-                                                    <td className="p-4 text-right font-bold bg-slate-50 text-slate-900 border-l border-slate-100">
+                                                        <td className="p-3 text-right font-bold bg-slate-50 text-slate-900 border-l border-slate-100 whitespace-nowrap">
                                                         ₹{(entry.balance || 0).toLocaleString()}
                                                     </td>
                                                 </tr>
@@ -1929,123 +2034,135 @@ export default function PurchasesPage() {
 
             {/* Date Range Modal */}
             {dateRangeModal.open && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                    />
-                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <div>
-                                <h3 className="text-xl font-bold text-slate-800">
-                                    {dateRangeModal.mode === 'bulk-export' ? 'Export All Statements' : 'Export Statement'}
-                                </h3>
-                                <p className="text-xs text-slate-500 mt-1">Select date range for PDF generation</p>
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                    onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+                        onClick={e => e.stopPropagation()}>
+
+                        {/* Header */}
+                        <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center">
+                                    <Download size={18} className="text-white" />
+                                </div>
+                                <div>
+                                    <p className="font-bold text-white text-base">
+                                        {dateRangeModal.mode === 'bulk-export' ? 'Export All Statements' : 'Export Statement'}
+                                    </p>
+                                    <p className="text-slate-400 text-xs">Select date range for PDF generation</p>
+                                </div>
                             </div>
                             <button
                                 onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                                className="text-slate-400 hover:text-white transition-colors"
                             >
-                                <X size={20} className="text-slate-500" />
+                                <X size={22} />
                             </button>
                         </div>
 
-                        <div className="p-6 space-y-6">
+                        <div className="p-6 space-y-5">
+                            {/* 4 Option Cards */}
                             <div className="grid grid-cols-2 gap-3">
                                 {[
-                                    { id: 'all', label: 'Complete', icon: FileText },
-                                    { id: 'fy-pick', label: 'Financial Year', icon: Calendar },
-                                    { id: 'month-pick', label: 'Month Wise', icon: Clock },
-                                    { id: 'custom', label: 'Custom Range', icon: Search }
-                                ].map((opt) => {
-                                    const Icon = opt.icon;
-                                    return (
-                                        <button
-                                            key={opt.id}
-                                            onClick={() => setDateRangeModal(prev => ({ ...prev, range: opt.id as any }))}
-                                            className={`p-3 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${dateRangeModal.range === opt.id
+                                    { id: 'all', icon: <FileText size={22} />, label: 'Complete Statement', sub: 'All historical records' },
+                                    { id: 'fy-pick', icon: <Calendar size={22} />, label: 'Financial Year', sub: 'Apr–Mar yearly range' },
+                                    { id: 'month-pick', icon: <Clock size={22} />, label: 'By Month', sub: 'Specific month' },
+                                    { id: 'custom', icon: <Search size={22} />, label: 'Custom Range', sub: 'Pick start & end date' },
+                                ].map((opt) => (
+                                    <button
+                                        key={opt.id}
+                                        onClick={() => setDateRangeModal(prev => ({ ...prev, range: opt.id as any }))}
+                                        className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all text-center ${
+                                            dateRangeModal.range === opt.id
                                                 ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                                                : 'border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50'
-                                                }`}
-                                        >
-                                            <Icon size={20} />
-                                            <span className="text-xs font-bold">{opt.label}</span>
-                                        </button>
-                                    );
-                                })}
+                                                : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50/50'
+                                        }`}
+                                    >
+                                        <span className={dateRangeModal.range === opt.id ? 'text-emerald-600' : 'text-slate-400'}>{opt.icon}</span>
+                                        <span className="font-semibold text-sm leading-tight">{opt.label}</span>
+                                        <span className="text-xs text-slate-400">{opt.sub}</span>
+                                    </button>
+                                ))}
                             </div>
 
-                            <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                {dateRangeModal.range === 'fy-pick' && (
-                                    <div>
-                                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">Select Financial Year</label>
-                                        <select
-                                            className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-sm"
-                                            value={dateRangeModal.selectedFY}
-                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedFY: e.target.value }))}
-                                        >
-                                            {Array.from({ length: 15 }, (_, i) => 2020 + i).map(year => (
+                            {/* Dynamic Sub-fields */}
+                            {dateRangeModal.range === 'fy-pick' && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Financial Year</label>
+                                    <select
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium text-sm"
+                                        value={dateRangeModal.selectedFY}
+                                        onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedFY: e.target.value }))}
+                                    >
+                                        {(() => {
+                                            const currentYear = new Date().getFullYear();
+                                            const startYear = 2022;
+                                            const years = Array.from({ length: (currentYear + 15) - startYear + 1 }, (_, i) => startYear + i).reverse();
+                                            return years.map(year => (
                                                 <option key={year} value={year.toString()}>
-                                                    FY {year}-{String(year + 1).slice(2)}
+                                                    FY {year}–{String(year + 1).slice(-2)}
                                                 </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
+                                            ));
+                                        })()}
+                                    </select>
+                                </div>
+                            )}
 
-                                {dateRangeModal.range === 'month-pick' && (
+                            {dateRangeModal.range === 'month-pick' && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Month</label>
+                                    <input
+                                        type="month"
+                                        className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium text-sm"
+                                        value={dateRangeModal.selectedMonth}
+                                        onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedMonth: e.target.value }))}
+                                    />
+                                </div>
+                            )}
+
+                            {dateRangeModal.range === 'custom' && (
+                                <div className="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">Select Month</label>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Start Date</label>
                                         <input
-                                            type="month"
-                                            className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-sm"
-                                            value={dateRangeModal.selectedMonth}
-                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, selectedMonth: e.target.value }))}
+                                            type="date"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                            value={dateRangeModal.startDate}
+                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, startDate: e.target.value }))}
                                         />
                                     </div>
-                                )}
-
-                                {dateRangeModal.range === 'custom' && (
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">Start Date</label>
-                                            <input
-                                                type="date"
-                                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-                                                value={dateRangeModal.startDate}
-                                                onChange={(e) => setDateRangeModal(prev => ({ ...prev, startDate: e.target.value }))}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] uppercase font-bold text-slate-400 mb-2">End Date</label>
-                                            <input
-                                                type="date"
-                                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-                                                value={dateRangeModal.endDate}
-                                                onChange={(e) => setDateRangeModal(prev => ({ ...prev, endDate: e.target.value }))}
-                                            />
-                                        </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">End Date</label>
+                                        <input
+                                            type="date"
+                                            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white text-sm"
+                                            value={dateRangeModal.endDate}
+                                            onChange={(e) => setDateRangeModal(prev => ({ ...prev, endDate: e.target.value }))}
+                                        />
                                     </div>
-                                )}
+                                </div>
+                            )}
 
-                                {dateRangeModal.range === 'all' && (
-                                    <div className="text-center py-2">
-                                        <p className="text-sm text-slate-600">Generating complete historical statement</p>
-                                    </div>
-                                )}
+                            {/* Actions */}
+                            <div className="flex gap-3 pt-1">
+                                <button
+                                    onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                    className="flex-1 py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleBulkExportSuppliersPDF}
+                                    disabled={isGeneratingPdf}
+                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {isGeneratingPdf ? (
+                                        <><RefreshCw size={16} className="animate-spin" /> Generating...</>
+                                    ) : (
+                                        <><Download size={16} /> Export All Dealers</>
+                                    )}
+                                </button>
                             </div>
-
-                            <button
-                                onClick={handleBulkExportSuppliersPDF}
-                                disabled={isGeneratingPdf}
-                                className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 shadow-lg shadow-emerald-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isGeneratingPdf ? (
-                                    <><RefreshCw size={20} className="animate-spin" /> Generating PDF...</>
-                                ) : (
-                                    <><Download size={20} /> Download Statements</>
-                                )}
-                            </button>
                         </div>
                     </div>
                 </div>

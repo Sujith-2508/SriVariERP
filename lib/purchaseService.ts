@@ -50,6 +50,7 @@ function saveLocalData<T>(key: string, data: T[]) {
 // ============================================
 
 import { fetchRefinedSuppliers, fetchHistoricalVouchers, HistoricalVoucher, SyncData, appendToSupplierSheetTab, SheetRowData, deleteSheetRowByRef } from './googleSheetSuppliers';
+import { logToApplicationSheet } from './googleSheetWriter';
 import { syncAllStatements, syncLocalToDrive } from './folderSyncService';
 
 export async function forceSyncPurchases(): Promise<boolean> {
@@ -417,6 +418,7 @@ export async function createSupplier(supplier: Omit<SupplierData, 'id' | 'create
     };
 
     saveLocalData(KEYS.SUPPLIERS, [newSupplier, ...suppliers]);
+    logToApplicationSheet('Supplier Created', `New supplier: ${newSupplier.name}, City: ${newSupplier.city || 'Unknown'}`);
 
     // NEW: Create 'BAL B/F' bill for FIFO allocation
     if (newSupplier.openingBalance && newSupplier.openingBalance > 0) {
@@ -457,6 +459,7 @@ export async function updateSupplier(supplierId: string, updates: Partial<Suppli
 
     suppliers[index] = updatedSupplier;
     saveLocalData(KEYS.SUPPLIERS, suppliers);
+    logToApplicationSheet('Supplier Updated', `Updated core info for supplier: ${updatedSupplier.name}`);
 
     // NEW: Update or Create 'BAL B/F' bill for FIFO allocation
     if (updates.openingBalance !== undefined || updates.openingBalanceDate !== undefined) {
@@ -554,6 +557,7 @@ export async function deleteSupplier(supplierId: string): Promise<boolean> {
         return bill && bill.supplierId !== supplierId;
     });
     saveLocalData(KEYS.ALLOCATIONS, allocations);
+    logToApplicationSheet('Supplier Deleted', `Removed supplier: ${supplier.name}`);
 
     return true;
 }
@@ -627,10 +631,10 @@ export async function rollOverSupplierYear(supplierId: string, closingDateStr: s
     // 3. Append to Google Sheet
     await appendToSupplierSheetTab(supplier.name, {
         date: formatTableDate(new Date(closingDateStr)),
-        particulars: '================ FINANCIAL YEAR CLOSED ================',
+        particulars: 'Closing Balance (Financial Year End)',
         vchType: '',
         vchRef: '',
-        vchNo: '',
+        vchNo: 'CL-END',
         debit: 0,
         credit: 0,
         balance: Math.abs(currentBalance),
@@ -642,7 +646,7 @@ export async function rollOverSupplierYear(supplierId: string, closingDateStr: s
         particulars: `Opening Balance (Forwarded)`,
         vchType: '',
         vchRef: '',
-        vchNo: '',
+        vchNo: 'OPEN-FWD',
         debit: 0,
         credit: 0,
         balance: Math.abs(currentBalance),
@@ -750,6 +754,7 @@ export async function createPurchaseBill(bill: {
         appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
             console.warn('[PurchaseService] Sheet append failed for bill:', err)
         );
+        logToApplicationSheet('Purchase Bill Created', `Bill ${newBill.billNumber} from ${supplier.name}`, newBill.amount);
     }
 
     return newBill;
@@ -823,6 +828,7 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
         deleteSheetRowByRef(supplier.name, bill.billNumber).catch(err =>
             console.warn('[PurchaseService] Sheet row deletion failed for bill:', err)
         );
+        logToApplicationSheet('Purchase Bill Deleted', `Removed Bill ${bill.billNumber} from ${supplier.name}`);
     }
 
     return true;
@@ -906,7 +912,8 @@ export async function updatePurchaseBill(
     const supplier = latestSuppliers.find(s => s.id === supplierId);
     if (supplier) {
         syncLocalToDrive('PURCHASE', bills[index], supplier.name);
-
+        logToApplicationSheet('Purchase Bill Updated', `Updated Bill ${bills[index].billNumber} from ${supplier.name}`, bills[index].amount);
+        
         // If amount changed, append an adjustment row to Google Sheet
         if (updates.amount !== undefined && Math.abs(updates.amount - oldAmount) > 0.01) {
             const diff = updates.amount - oldAmount;
@@ -1014,6 +1021,7 @@ export async function createPurchasePayment(payment: {
         appendToSupplierSheetTab(supplier.name, sheetRow).catch(err =>
             console.warn('[PurchaseService] Sheet append failed for payment:', err)
         );
+        logToApplicationSheet('Purchase Payment Made', `Payment ${newPayment.paymentNumber} to ${supplier.name} via ${newPayment.paymentMode}`, newPayment.amount);
     }
 
     return newPayment;
@@ -1154,6 +1162,7 @@ export async function deletePurchasePayment(paymentId: string): Promise<boolean>
         deleteSheetRowByRef(sObj.name, payment.paymentNumber).catch(err =>
             console.warn('[PurchaseService] Sheet row deletion failed for payment:', err)
         );
+        logToApplicationSheet('Purchase Payment Deleted', `Removed Payment ${payment.paymentNumber} to ${sObj.name}`);
     }
 
     return true;
@@ -1165,12 +1174,14 @@ export async function deletePurchasePayment(paymentId: string): Promise<boolean>
 
 export interface SupplierStatementEntry {
     date: Date;
+    createdAt?: Date;
     type: 'BILL' | 'PAYMENT';
     reference: string;
     debit: number;
     credit: number;
     balance: number;
     notes?: string;
+    rowKind?: 'OPENING' | 'CLOSING';
 }
 
 export async function getSupplierStatement(
@@ -1179,94 +1190,123 @@ export async function getSupplierStatement(
     endDate?: Date
 ): Promise<SupplierStatementEntry[]> {
     const supplier = getLocalData<SupplierData>(KEYS.SUPPLIERS).find(s => s.id === supplierId);
-    const openingBalanceRow: SupplierStatementEntry[] = (supplier?.openingBalance && supplier.openingBalance !== 0) ? [{
-        date: supplier.openingBalanceDate ? new Date(supplier.openingBalanceDate) : new Date('2000-01-01'),
-        type: 'BILL' as any,
-        reference: 'Bal B/F',
-        debit: 0,
-        credit: 0,
-        balance: supplier.openingBalance,
-        notes: 'Opening Balance'
-    }] : [];
 
     // Map Bills (Purchases) as CREDIT (Increase amount we owe)
     // Map Payments as DEBIT (Decrease amount we owe)
-    const bills = (await getPurchaseBills(supplierId)).map(b => ({
-        date: new Date(b.billDate),
-        type: 'BILL' as const,
-        reference: b.billNumber,
-        debit: 0,
-        credit: b.amount,
-        balance: 0,
-        notes: b.notes
-    }));
+    const bills = await getPurchaseBills(supplierId);
+    const payments = await getPurchasePayments(supplierId);
 
-    const payments = (await getPurchasePayments(supplierId)).map(p => ({
-        date: new Date(p.paymentDate),
-        type: 'PAYMENT' as const,
-        reference: p.paymentNumber,
-        debit: p.amount,
-        credit: 0,
-        balance: 0,
-        notes: p.notes
-    }));
+    const openingBill = bills.find(b => b.billNumber === 'BAL B/F');
+    const openingBalance = openingBill ? openingBill.amount : (supplier?.openingBalance || 0);
 
-    // If we have a 'BAL B/F' bill, we don't need the manual openingBalanceRow
-    const obBill = bills.find(b => b.reference === 'BAL B/F');
-    const hasBALBF = !!obBill;
+    const allTxnDates = [
+        ...bills.map(b => new Date(b.billDate)),
+        ...payments.map(p => new Date(p.paymentDate)),
+    ].filter(d => !isNaN(d.getTime()));
 
-    // Create a specialized opening row from the bill if it exists, or from supplier data
-    let finalOpeningRow: SupplierStatementEntry[] = [];
-    if (hasBALBF) {
-        finalOpeningRow = [{
-            date: obBill.date,
-            type: 'BILL' as any,
-            reference: 'BAL B/F',
-            debit: 0,
-            credit: 0, // Hide from columns as requested
-            balance: obBill.credit, // This will be the starting point
-            notes: 'Opening Balance'
-        }];
-    } else if (openingBalanceRow.length > 0) {
-        finalOpeningRow = [{
-            ...openingBalanceRow[0],
-            debit: 0,
-            credit: 0
-        }];
-    }
+    const defaultOpeningDate = allTxnDates.length > 0
+        ? new Date(Math.min(...allTxnDates.map(d => d.getTime())))
+        : new Date();
+    const openingDate = openingBill
+        ? new Date(openingBill.billDate)
+        : (supplier?.openingBalanceDate ? new Date(supplier.openingBalanceDate) : defaultOpeningDate);
 
-    // Filter out the 'BAL B/F' from the main bills list to avoid double counting and handle it separately
-    const otherBills = bills.filter(b => b.reference !== 'BAL B/F');
+    const transactionEntries: SupplierStatementEntry[] = [
+        ...bills
+            .filter(b => b.billNumber !== 'BAL B/F')
+            .map(b => ({
+                date: new Date(b.billDate),
+                createdAt: b.createdAt ? new Date(b.createdAt) : new Date(b.billDate),
+                type: 'BILL' as const,
+                reference: b.billNumber,
+                debit: 0,
+                credit: b.amount,
+                balance: 0,
+                notes: b.notes,
+            })),
+        ...payments.map(p => ({
+            date: new Date(p.paymentDate),
+            createdAt: p.createdAt ? new Date(p.createdAt) : new Date(p.paymentDate),
+            type: 'PAYMENT' as const,
+            reference: p.paymentNumber,
+            debit: p.amount,
+            credit: 0,
+            balance: 0,
+            notes: p.notes,
+        })),
+    ];
 
-    let entries = [...finalOpeningRow, ...otherBills, ...payments];
+    const getEventMs = (entry: SupplierStatementEntry) => {
+        const baseMs = entry.date.getTime();
+        const created = entry.createdAt;
+        if (!created || isNaN(created.getTime())) return baseMs;
 
-    if (startDate) {
-        entries = entries.filter(e => e.date >= startDate);
-    }
-    if (endDate) {
-        entries = entries.filter(e => e.date <= endDate);
-    }
+        const sameDay = created.getFullYear() === entry.date.getFullYear()
+            && created.getMonth() === entry.date.getMonth()
+            && created.getDate() === entry.date.getDate();
+        return sameDay ? created.getTime() : baseMs;
+    };
 
-    // Sort by date then type (BILL before PAYMENT on same date)
-    entries.sort((a, b) => {
-        if (a.date.getTime() !== b.date.getTime()) {
-            return a.date.getTime() - b.date.getTime();
-        }
-        // If same date, Opening Balance (BAL B/F) first
-        if (a.reference === 'BAL B/F') return -1;
-        if (b.reference === 'BAL B/F') return 1;
-        return a.type === 'BILL' ? -1 : 1;
+    transactionEntries.sort((a, b) => {
+        const eventA = getEventMs(a);
+        const eventB = getEventMs(b);
+        if (eventA !== eventB) return eventA - eventB;
+
+        const dateA = a.date.getTime();
+        const dateB = b.date.getTime();
+        if (dateA !== dateB) return dateA - dateB;
+
+        return (a.reference || '').localeCompare(b.reference || '');
     });
 
-    // Calculate running balance starting from the Opening Balance
-    let currentBalance = 0;
-    const result = entries.map(e => {
-        if (e.reference === 'BAL B/F') {
-            currentBalance = e.balance;
-            return { ...e };
+    const startMs = startDate ? startDate.getTime() : Number.NEGATIVE_INFINITY;
+    const endMs = endDate ? endDate.getTime() : Number.POSITIVE_INFINITY;
+
+    let periodOpeningBalance = openingBalance;
+    for (const entry of transactionEntries) {
+        const eventMs = getEventMs(entry);
+        if (eventMs < startMs) {
+            periodOpeningBalance += (entry.credit - entry.debit);
         }
-        currentBalance += (e.credit - e.debit);
-        return { ...e, balance: currentBalance };
+    }
+
+    const inRangeEntries = transactionEntries.filter(entry => {
+        const eventMs = getEventMs(entry);
+        return eventMs >= startMs && eventMs <= endMs;
+    });
+
+    const openingRowDate = startDate ? new Date(startDate) : openingDate;
+    const result: SupplierStatementEntry[] = [{
+        date: openingRowDate,
+        createdAt: openingRowDate,
+        type: 'BILL',
+        reference: 'BAL B/F',
+        debit: 0,
+        credit: 0,
+        balance: periodOpeningBalance,
+        notes: 'Opening Balance',
+        rowKind: 'OPENING',
+    }];
+
+    let runningBalance = periodOpeningBalance;
+    for (const entry of inRangeEntries) {
+        runningBalance += (entry.credit - entry.debit);
+        result.push({ ...entry, balance: runningBalance });
+    }
+
+    const closingRowDate = endDate
+        ? new Date(endDate)
+        : (result[result.length - 1]?.date ? new Date(result[result.length - 1].date) : new Date());
+    result.push({
+        date: closingRowDate,
+        createdAt: closingRowDate,
+        type: 'BILL',
+        reference: 'CL-END',
+        debit: 0,
+        credit: 0,
+        balance: runningBalance,
+        notes: 'Closing Balance',
+        rowKind: 'CLOSING',
     });
 
     return result;

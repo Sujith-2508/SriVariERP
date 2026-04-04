@@ -74,6 +74,7 @@ export interface Transaction {
   cogs?: number;
   profitAmount?: number;
   profitPercentage?: number;
+  driveLink?: string;        // Link to the generated PDF on Google Drive
 }
 
 export interface InvoiceItem {

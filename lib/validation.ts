@@ -6,6 +6,10 @@
  * - At least 1 special character
  */
 export const validatePassword = (password: string): { isValid: boolean; message: string } => {
+    if (typeof password !== 'string' || password.length === 0) {
+        return { isValid: false, message: 'Password is required.' };
+    }
+
     if (password.length < 8) {
         return { isValid: false, message: 'Password must be at least 8 characters long.' };
     }

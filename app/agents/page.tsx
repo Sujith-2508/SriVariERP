@@ -1,19 +1,27 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/contexts/DataContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
 import { Agent } from '@/types';
-import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt, Activity } from 'lucide-react';
-import { LiveMap } from '@/components/LiveMap';
+import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt, Activity, FileText, ExternalLink } from 'lucide-react';
 import { AgentStatusList } from '@/components/AgentStatusList';
 import { AttendanceCalendar } from '@/components/AttendanceCalendar';
 import AgentSalaryManagement from '@/components/AgentSalaryManagement';
 import CompanyExpenseManagement from '@/components/CompanyExpenseManagement';
 import { ProfitAnalysis } from '@/components/ProfitAnalysis';
 import { AgentRecentActivity } from '@/components/AgentRecentActivity';
+
+const LiveMap = dynamic(
+    () => import('@/components/LiveMap').then((mod) => mod.LiveMap),
+    {
+        ssr: false,
+        loading: () => <div className="h-full w-full bg-slate-50 animate-pulse" />,
+    }
+);
 
 type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses' | 'analysis';
 
@@ -99,6 +107,18 @@ export default function AgentsPage() {
         if (!/^\d{10}$/.test(formData.phone)) {
             showToast('Phone number must be exactly 10 digits', 'warning');
             return;
+        }
+
+        // Check for duplicate agentId if adding new agent
+        if (!editingAgent) {
+            const duplicateId = agents.find(a => 
+                a.agentId && formData.agentId && 
+                a.agentId.toLowerCase().trim() === formData.agentId.toLowerCase().trim()
+            );
+            if (duplicateId) {
+                showToast(`Agent ID "${formData.agentId}" already exists.`, 'warning');
+                return;
+            }
         }
 
         try {
@@ -350,7 +370,7 @@ export default function AgentsPage() {
                                                     <td className="px-6 py-4">
                                                         <span className={`px-2 py-0.5 rounded text-[10px] font-black tracking-widest uppercase border ${agent.isActive
                                                             ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                                            : 'bg-slate-50 text-slate-500 border-slate-100'
+                                                            : 'bg-red-50 text-red-600 border-red-100'
                                                             }`}>
                                                             {agent.isActive ? 'ACTIVE' : 'OFF'}
                                                         </span>

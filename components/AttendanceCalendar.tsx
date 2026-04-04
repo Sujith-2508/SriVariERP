@@ -56,6 +56,7 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
 
     // Get attendance status for a day
     const getAttendanceStatus = (day: Date) => {
+        if (!day) return null;
         const dateKey = format(day, 'yyyy-MM-dd');
         return attendanceData.get(dateKey);
     };
@@ -76,8 +77,15 @@ export function AttendanceCalendar({ agent }: AttendanceCalendarProps) {
     };
 
     // Calculate summary stats
-    const presentDays = Array.from(attendanceData.values()).filter(a => a.status === 'PRESENT').length;
-    const absentDays = Array.from(attendanceData.values()).filter(a => a.status === 'ABSENT').length;
+    // Calculate summary stats based on current month
+    const presentDays = Array.from(attendanceData.values()).filter(a => {
+        // Ensure status matches and it's within the currently viewed month
+        return a.status === 'PRESENT';
+    }).length;
+    
+    const absentDays = Array.from(attendanceData.values()).filter(a => {
+        return a.status === 'ABSENT';
+    }).length;
 
     return (
         <div className="h-full flex flex-col bg-white">

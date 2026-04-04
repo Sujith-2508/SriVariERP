@@ -5,7 +5,7 @@ import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
-import { Search, Edit2, Trash2, Plus, X, Package, RefreshCw, ChevronDown, Tag } from 'lucide-react';
+import { Search, Edit2, Trash2, Plus, X, Package, RefreshCw, ChevronDown, Tag, FileText, ExternalLink } from 'lucide-react';
 import { Product } from '@/types';
 
 export default function Inventory() {
@@ -236,13 +236,23 @@ export default function Inventory() {
                     <h1 className="text-2xl font-bold text-slate-800">Inventory & Stock</h1>
                     <p className="text-sm text-slate-500">Manage products and stock levels</p>
                 </div>
-                <button
-                    onClick={() => handleOpenAdd()}
-                    className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-lg"
-                >
-                    <Plus size={16} />
-                    Add Product
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => window.open('https://docs.google.com/spreadsheets/d/1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0', '_blank')}
+                        className="bg-emerald-50 text-emerald-700 px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-emerald-100 transition-all border border-emerald-100 shadow-sm"
+                    >
+                        <FileText size={16} />
+                        View Google Sheet
+                        <ExternalLink size={14} className="opacity-50" />
+                    </button>
+                    <button
+                        onClick={() => handleOpenAdd()}
+                        className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-lg"
+                    >
+                        <Plus size={16} />
+                        Add Product
+                    </button>
+                </div>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">

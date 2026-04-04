@@ -7,31 +7,40 @@
   "main": "main.js",
   "scripts": {
     "dev": "next dev",
+    "lint": "tsc --noEmit --pretty false --incremental false",
+    "typecheck": "tsc --noEmit --incremental false",
+    "validate:scripts": "node -e \"const p=require('./package.json');const s=p.scripts||{};const req=['build','lint','typecheck','test:unit','test:integration'];const miss=req.filter((k)=>!s[k]);if(miss.length){console.error('Missing required scripts:',miss.join(', '));process.exit(1)}console.log('All required scripts are present.')\"",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ci": "cross-env CI=true npm run test:e2e -- --workers=1",
+    "test:e2e:auth": "cross-env CI=true E2E_VALIDATE_REAL_LOGIN=true npm run test:e2e -- -g \"real configured credentials\" --workers=1",
+    "ci:local": "npm run validate:scripts && npm run lint && npm run typecheck && npm run test:unit && npm run test:integration && npm run build",
+    "verify:dev": "npm run lint && npm run typecheck && npm run test:unit && npm run test:integration && npm run build:clean",
     "build": "next build",
+    "build:clean": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true})\" && next build",
     "start": "next start",
     "export": "next build",
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "build:electron": "ELECTRON_BUILD=1 next build && electron-builder",
-    "build:win": "ELECTRON_BUILD=1 next build && electron-builder --win",
-    "build:mac": "ELECTRON_BUILD=1 next build && electron-builder --mac",
-    "build:all": "ELECTRON_BUILD=1 next build && electron-builder --win --mac"
+    "build:electron": "cross-env ELECTRON_BUILD=1 next build && electron-builder",
+    "build:win": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win",
+    "build:mac": "cross-env ELECTRON_BUILD=1 next build && electron-builder --mac",
+    "build:all": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win --mac",
+    "test:watch": "vitest"
   },
   "build": {
     "appId": "com.srivari.erp",
-    "productName": "Sri Vari ERP",
+    "afterPack": "./scripts/afterPack.js",
+    "compression": "maximum",
+    "icon": "public/icon.png",
     "win": {
       "icon": "public/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "portable",
           "arch": [
             "x64"
           ]
@@ -39,11 +48,15 @@
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Sri Vari ERP"
+      "shortcutName": "Sri Vari ERP",
+      "artifactName": "${productName} v${version} ${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName} Portable ${version} ${arch}.${ext}"
     },
     "mac": {
       "icon": "public/icon.png"
@@ -60,11 +73,6 @@
       "public/icon.png"
     ],
     "asar": true,
-    "asarUnpack": [
-      "node_modules/whatsapp-web.js/**/*",
-      "node_modules/puppeteer/**/*",
-      "node_modules/puppeteer-core/**/*"
-    ],
     "directories": {
       "output": "dist"
     }
@@ -83,6 +91,7 @@
     "lucide-react": "^0.469.0",
     "next": "^15.1.0",
     "pdf-lib": "^1.17.1",
+    "playwright": "^1.58.2",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -93,17 +102,27 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/google.maps": "^3.58.1",
     "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
+    "cross-env": "^10.1.0",
     "electron": "^33.2.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^24.13.3",
+    "jsdom": "^27.0.1",
+    "msw": "^2.12.14",
+    "playwright-core": "^1.58.2",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
+    "vitest": "^3.2.4",
     "wait-on": "^8.0.1"
   }
 }

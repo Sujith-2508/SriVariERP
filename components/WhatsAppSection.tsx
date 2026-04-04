@@ -1,37 +1,59 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, Check, X, Loader2, QrCode, LogOut, RefreshCw } from 'lucide-react';
+import { MessageSquare, Check, X, Loader2, QrCode, LogOut, RefreshCw, AlertCircle } from 'lucide-react';
+import QRCode from 'qrcode';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 export default function WhatsAppSection() {
     const [qr, setQr] = useState<string | null>(null);
     const [status, setStatus] = useState<string>('DISCONNECTED'); // DISCONNECTED, CONNECTING, QR_READY, AUTHENTICATED, READY
     const [error, setError] = useState<string | null>(null);
+    const [isElectron, setIsElectron] = useState(false);
 
     useEffect(() => {
+        setIsElectron(!!(window as any).electron);
         if (!window.electron?.whatsapp) return;
 
         // Fetch initial status
         window.electron.whatsapp.getStatus().then(setStatus);
 
         // Listen for events
-        window.electron.whatsapp.onQR((qrDataUrl) => {
-            setQr(qrDataUrl);
-            setStatus('QR_READY');
+        window.electron.whatsapp.onQR(async (qrString) => {
+            try {
+                // PERFORMANCE OPTIMIZATION: Generate the QR image client-side.
+                // This is much faster than sending a large Base64 image over IPC.
+                const qrDataUrl = await QRCode.toDataURL(qrString, {
+                    width: 256,
+                    margin: 2,
+                    color: {
+                        dark: '#0f172a', // slate-900
+                        light: '#ffffff'
+                    }
+                });
+                setQr(qrDataUrl);
+                setStatus('QR_READY');
+            } catch (err) {
+                console.error('QR Generation Error:', err);
+                setError('Failed to display QR code');
+            }
         });
 
         window.electron.whatsapp.onReady(() => {
             setStatus('READY');
             setQr(null);
+            logToApplicationSheet('WhatsApp Connected', 'System is READY to send messages');
         });
 
         window.electron.whatsapp.onAuthenticated(() => {
             setStatus('AUTHENTICATED');
+            logToApplicationSheet('WhatsApp Authenticated', 'QR scan successful, initializing session...');
         });
 
         window.electron.whatsapp.onAuthFailure((msg) => {
             setError(msg);
             setStatus('DISCONNECTED');
+            logToApplicationSheet('WhatsApp Auth Failure', `Authentication failed: ${msg}`);
         });
 
         window.electron.whatsapp.onStatus((newStatus) => {
@@ -46,17 +68,27 @@ export default function WhatsAppSection() {
             await window.electron.whatsapp.logout();
             setStatus('DISCONNECTED');
             setQr(null);
+            await logToApplicationSheet('WhatsApp Disconnected', 'User manually disconnected WhatsApp account');
         } catch (err) {
             console.error('Logout failed', err);
         }
     };
 
     const getStatusUI = () => {
+        if (!isElectron) {
+            return (
+                <div className="flex items-center gap-2 text-amber-600 font-bold">
+                    <AlertCircle size={18} />
+                    In Web Mode
+                </div>
+            );
+        }
+
         if (!window.electron?.whatsapp) {
             return (
-                <div className="flex items-center gap-2 text-blue-600 font-bold">
-                    <Check size={18} />
-                    Web Mode Active
+                <div className="flex items-center gap-2 text-slate-400 font-medium">
+                    <Loader2 size={18} className="animate-spin" />
+                    Initializing Desktop Service...
                 </div>
             );
         }
@@ -167,22 +199,27 @@ export default function WhatsAppSection() {
                             </ul>
                         </div>
 
-                        <div className="flex gap-3">
-                            {status === 'READY' ? (
+                        <div className="flex flex-wrap gap-3">
+                            {status !== 'READY' && (
+                                <button
+                                    onClick={() => {
+                                        window.electron.whatsapp.reconnect();
+                                        logToApplicationSheet('WhatsApp Reconnect Requested', 'User triggered Re-sync Connection');
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-all border border-slate-800 shadow-sm"
+                                >
+                                    <RefreshCw size={16} />
+                                    {status === 'DISCONNECTED' ? 'Start Connection' : 'Re-sync Connection'}
+                                </button>
+                            )}
+
+                            {status !== 'DISCONNECTED' && (
                                 <button
                                     onClick={handleLogout}
                                     className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors text-sm font-bold"
                                 >
                                     <LogOut size={16} />
                                     Disconnect Account
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={() => (window as any).electron.whatsapp.reconnect()}
-                                    className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-all border border-slate-800 shadow-sm"
-                                >
-                                    <RefreshCw size={16} />
-                                    Re-sync Connection
                                 </button>
                             )}
                         </div>

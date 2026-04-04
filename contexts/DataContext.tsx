@@ -500,7 +500,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         // 3. Sync to Google Sheet
                         console.log('[DataContext] REAL-TIME syncing mobile payment to Sheet:', data.reference_id);
                         const transformedTxn = transformTransaction(data);
-                        syncTransactionToDealerSheet(dealer.businessName, transformedTxn, dealer.balance).catch(e =>
+                        syncTransactionToDealerSheet(dealer.businessName, transformedTxn).catch(e =>
                             console.warn('[DataContext] Real-time sheet sync failed:', e)
                         );
                     }
@@ -932,24 +932,82 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return invoice?.paymentAllocations || [];
     };
 
-    const createInvoice = async (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {
-        let invoiceNumber = '';
-        if (invoiceData?.manualInvoiceNo) {
-            invoiceNumber = `INV${invoiceData.manualInvoiceNo}`;
-        } else {
-            // Robust auto-generation: Find the highest existing numeric INV suffix
-            const invoiceSuffixes = transactions
-                .filter(t => t.type === 'INVOICE' && t.referenceId?.startsWith('INV'))
-                .map(t => {
-                    const suffix = t.referenceId?.replace('INV', '');
-                    return suffix && /^\d+$/.test(suffix) ? parseInt(suffix) : 0;
-                })
-                .filter(n => n > 0);
+    const parseInvoiceReferenceNumber = (referenceId?: string | null): number | null => {
+        if (!referenceId || !referenceId.startsWith('INV')) return null;
+        const suffix = referenceId.slice(3).trim();
+        if (!/^\d+$/.test(suffix)) return null;
+        const parsed = Number.parseInt(suffix, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
 
-            const maxSuffix = invoiceSuffixes.length > 0 ? Math.max(...invoiceSuffixes) : 0;
-            const nextNo = Math.max(maxSuffix + 1, invoiceCount + 1);
-            invoiceNumber = `INV${String(nextNo).padStart(3, '0')}`;
+    const formatInvoiceReference = (invoiceNo: number): string => {
+        const width = Math.max(3, String(invoiceNo).length);
+        return `INV${String(invoiceNo).padStart(width, '0')}`;
+    };
+
+    const fetchUsedInvoiceNumbersFromDb = async (excludeTransactionId?: string): Promise<Set<number>> => {
+        let query = supabase
+            .from('transactions')
+            .select('id, reference_id')
+            .eq('type', 'INVOICE')
+            .ilike('reference_id', 'INV%');
+
+        if (excludeTransactionId) {
+            query = query.neq('id', excludeTransactionId);
         }
+
+        const { data, error } = await query;
+        if (error) {
+            throw new Error(`Failed to validate invoice number: ${error.message}`);
+        }
+
+        const used = new Set<number>();
+        for (const row of data || []) {
+            const parsed = parseInvoiceReferenceNumber(row.reference_id);
+            if (parsed !== null) used.add(parsed);
+        }
+
+        return used;
+    };
+
+    const getFirstAvailableInvoiceNumber = (used: Set<number>): number => {
+        let candidate = 1;
+        while (used.has(candidate)) {
+            candidate += 1;
+        }
+        return candidate;
+    };
+
+    const resolveInvoiceReferenceForSave = async (
+        manualInvoiceNo?: string,
+        excludeTransactionId?: string
+    ): Promise<string> => {
+        const used = await fetchUsedInvoiceNumbersFromDb(excludeTransactionId);
+        const trimmed = manualInvoiceNo?.trim() || '';
+
+        if (trimmed) {
+            if (!/^\d+$/.test(trimmed)) {
+                throw new Error('Invoice number must contain only digits.');
+            }
+
+            const parsedManual = Number.parseInt(trimmed, 10);
+            if (!Number.isFinite(parsedManual) || parsedManual <= 0) {
+                throw new Error('Invoice number must be greater than zero.');
+            }
+
+            if (used.has(parsedManual)) {
+                throw new Error(`Invoice number ${formatInvoiceReference(parsedManual)} is already used.`);
+            }
+
+            return formatInvoiceReference(parsedManual);
+        }
+
+        const next = getFirstAvailableInvoiceNumber(used);
+        return formatInvoiceReference(next);
+    };
+
+    const createInvoice = async (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {
+        const invoiceNumber = await resolveInvoiceReferenceForSave(invoiceData?.manualInvoiceNo);
 
         const invoiceDate = invoiceData?.invoiceDate || new Date();
 
@@ -1097,12 +1155,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                     return createdA - createdB;
                 });
-            let runningBal = 0;
-            for (const t of allDealerTxns) {
-                if (t.type === 'INVOICE') runningBal += t.amount;
-                else runningBal -= t.amount;
-            }
-            syncTransactionToDealerSheet(dealer.businessName, newTxn, runningBal).catch(e =>
+            syncTransactionToDealerSheet(dealer.businessName, newTxn).catch(e =>
                 console.warn('[DataContext] Failed to sync invoice to dealer sheet:', e)
             );
         }
@@ -1114,6 +1167,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // 1. Get existing transaction to calculate balance diff and restore stock
         const existingTxn = transactions.find(t => t.id === invoiceId);
         if (!existingTxn) throw new Error("Invoice not found");
+
+        const nextReferenceId = invoiceData?.manualInvoiceNo
+            ? await resolveInvoiceReferenceForSave(invoiceData.manualInvoiceNo, invoiceId)
+            : (existingTxn.referenceId || await resolveInvoiceReferenceForSave(undefined, invoiceId));
 
         // Get old items from notes JSON or context for stock restoration
         let oldItems: InvoiceItem[] = existingTxn.items || [];
@@ -1158,7 +1215,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .from('transactions')
             .update({
                 amount: totalAmount,
-                reference_id: invoiceData?.manualInvoiceNo ? `INV${invoiceData.manualInvoiceNo.trim()}` : existingTxn.referenceId,
+                reference_id: nextReferenceId,
                 credit_days: creditDays,
                 due_date: dueDate.toISOString(),
                 vehicle_name: invoiceData?.vehicleName,
@@ -1211,7 +1268,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return {
                     ...t,
                     amount: totalAmount,
-                    referenceId: invoiceData?.manualInvoiceNo ? `INV${invoiceData.manualInvoiceNo.trim()}` : t.referenceId,
+                    referenceId: nextReferenceId,
                     creditDays: creditDays,
                     dueDate: dueDate,
                     vehicleName: invoiceData?.vehicleName,
@@ -1226,7 +1283,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return t;
         }));
 
-        return { id: invoiceId, refId: invoiceData?.manualInvoiceNo ? `INV${invoiceData.manualInvoiceNo.trim()}` : (existingTxn.referenceId || 'UPDATED') };
+        return { id: invoiceId, refId: nextReferenceId };
     };
 
     const recordPayment = async (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => {
@@ -1299,12 +1356,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                     return createdA - createdB;
                 });
-            let runningBal = 0;
-            for (const t of allDealerTxns) {
-                if (t.type === 'INVOICE') runningBal += t.amount;
-                else runningBal -= t.amount;
-            }
-            syncTransactionToDealerSheet(dealer.businessName, newTxn, runningBal).catch(e =>
+            syncTransactionToDealerSheet(dealer.businessName, newTxn).catch(e =>
                 console.warn('[DataContext] Failed to sync payment to dealer sheet:', e)
             );
         }

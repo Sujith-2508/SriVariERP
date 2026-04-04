@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electron', {
         onAuthFailure: (callback) => ipcRenderer.on('whatsapp:auth_failure', (event, msg) => callback(msg)),
         onStatus: (callback) => ipcRenderer.on('whatsapp:status', (event, status) => callback(status)),
         sendPDF: (phoneNumber, pdfBase64, filename, caption) =>
-            ipcRenderer.invoke('whatsapp:send-pdf', { phoneNumber, pdfBase64, filename, caption }),
+            ipcRenderer.invoke('whatsapp:send-document', { phoneNumber, pdfBase64, filename, caption }),
         getStatus: () => ipcRenderer.invoke('whatsapp:get-status'),
         logout: () => ipcRenderer.invoke('whatsapp:logout'),
         reconnect: () => ipcRenderer.invoke('whatsapp:reconnect')
@@ -20,8 +20,10 @@ contextBridge.exposeInMainWorld('electron', {
     drive: {
         isConnected: () => ipcRenderer.invoke('drive:is-connected'),
         getAccessToken: () => ipcRenderer.invoke('drive:get-access-token'),
+        getServiceToken: (credentials) => ipcRenderer.invoke('google:get-service-token', { credentials }),
         connect: (clientId) => ipcRenderer.invoke('drive:connect', { clientId }),
-        saveTokens: (tokens) => ipcRenderer.invoke('drive:save-tokens', tokens)
+        saveTokens: (tokens) => ipcRenderer.invoke('drive:save-tokens', tokens),
+        disconnect: () => ipcRenderer.invoke('drive:disconnect')
     }
 });
 

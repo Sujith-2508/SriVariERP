@@ -1,14 +1,18 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive, Building2, Landmark } from 'lucide-react';
+import { Settings, User, Lock, Eye, EyeOff, Check, AlertCircle, HardDrive, Building2, Landmark, LogOut } from 'lucide-react';
 import WhatsAppSection from '@/components/WhatsAppSection';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { supabase } from '@/lib/supabase';
 import { validatePassword } from '@/lib/validation';
+import { useData } from '@/contexts/DataContext';
+import { logToApplicationSheet } from '@/lib/googleSheetWriter';
+import { useToast } from '@/contexts/ToastContext';
 
 export default function SettingsPage() {
-    // â”€â”€â”€ Admin credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const { refreshData } = useData();
+    // ————————————————————————————————————————————————————————————————————————————————————————————————————
     const [currentUsername, setCurrentUsername] = useState('');
     const [newUsername, setNewUsername] = useState('');
     const [currentPassword, setCurrentPassword] = useState('');
@@ -18,9 +22,16 @@ export default function SettingsPage() {
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-    const [driveConnected, setDriveConnected] = useState(false);
+    const [passwordsMatch, setPasswordsMatch] = useState(true);
+    const { showToast } = useToast();
+    const [driveStatus, setDriveStatus] = useState<string>('checking'); // connected, expired, error, not_connected, checking
     const [driveConnecting, setDriveConnecting] = useState(false);
     const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [isElectron, setIsElectron] = useState(false);
+
+    useEffect(() => {
+        setIsElectron(!!(window as any).electron);
+    }, []);
 
     // --- User Profile ---
     const [userId, setUserId] = useState<string | null>(null);
@@ -86,7 +97,15 @@ export default function SettingsPage() {
         // Check if Drive is already connected via Electron IPC
         const electron = (window as any).electron;
         if (electron?.drive?.isConnected) {
-            electron.drive.isConnected().then((connected: boolean) => setDriveConnected(connected));
+            electron.drive.isConnected().then((status: string) => {
+                setDriveStatus(status === 'connected' ? 'connected' : (status === 'not_connected' ? 'not_connected' : status));
+                if (status === 'expired') {
+                    setDriveMessage({ type: 'error', text: 'Google Drive connection has expired. Please Reconnect to resume automatic uploads.' });
+                }
+            });
+        } else {
+            // Web mode fallback
+            setDriveStatus(localStorage.getItem('drive_token') ? 'connected' : 'not_connected');
         }
 
         // Load company settings from Supabase
@@ -119,6 +138,15 @@ export default function SettingsPage() {
         };
         loadCompany();
     }, []);
+
+    // Real-time password matching
+    useEffect(() => {
+        if (confirmPassword && newPassword) {
+            setPasswordsMatch(newPassword === confirmPassword);
+        } else {
+            setPasswordsMatch(true);
+        }
+    }, [newPassword, confirmPassword]);
 
     const handleSaveCompanySettings = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -164,6 +192,11 @@ export default function SettingsPage() {
             }
 
             if (error) throw error;
+            
+            // Refresh global context so all pages see the new settings immediately
+            await refreshData();
+            await logToApplicationSheet('Company Settings Updated', `Updated company profile: ${payload.company_name} (GST: ${payload.gst_number})`);
+            
             setCompanyMessage({ type: 'success', text: 'Company & bank details saved successfully!' });
         } catch (err: any) {
             console.error('Save settings error:', err);
@@ -171,6 +204,26 @@ export default function SettingsPage() {
         } finally {
             setCompanySaving(false);
             setTimeout(() => setCompanyMessage(null), 5000);
+        }
+    };
+
+    const handleDisconnectDrive = async () => {
+        const electron = (window as any).electron;
+        if (!electron?.drive?.disconnect) {
+            localStorage.removeItem('drive_token');
+            setDriveStatus('not_connected');
+            setDriveMessage({ type: 'success', text: `Disconnected from Google Drive ${!isElectron ? '(Web Mode)' : ''}.` });
+            return;
+        }
+
+        try {
+            const success = await electron.drive.disconnect();
+            if (success) {
+                setDriveStatus('not_connected');
+                setDriveMessage({ type: 'success', text: 'Disconnected from Google Drive successfully.' });
+            }
+        } catch (err: any) {
+            setDriveMessage({ type: 'error', text: 'Failed to disconnect Drive: ' + err.message });
         }
     };
 
@@ -219,8 +272,12 @@ export default function SettingsPage() {
                 const tokens = await resp.json();
                 if (tokens.error) throw new Error(tokens.error_description || tokens.error);
 
-                await electron.drive.saveTokens(tokens);
-                setDriveConnected(true);
+                await electron.drive.saveTokens({
+                    ...tokens,
+                    oauth_client_id: clientId,
+                    oauth_client_secret: clientSecret || ''
+                });
+                setDriveStatus('connected');
                 setDriveMessage({ type: 'success', text: 'Google Drive connected! Invoices will now be saved automatically.' });
                 setDriveConnecting(false);
             }
@@ -246,7 +303,7 @@ export default function SettingsPage() {
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
-        if (code && !driveConnected && !driveConnecting) {
+        if (code && driveStatus !== 'connected' && !driveConnecting) {
             const finalizeWebDrive = async () => {
                 setDriveConnecting(true);
                 try {
@@ -273,7 +330,7 @@ export default function SettingsPage() {
                         expires_at: Date.now() + (tokens.expires_in - 60) * 1000
                     };
                     localStorage.setItem('drive_token', JSON.stringify(updated));
-                    setDriveConnected(true);
+                    setDriveStatus('connected');
                     setDriveMessage({ type: 'success', text: 'Google Drive connected successfully!' });
                     // Clean URL
                     window.history.replaceState({}, document.title, window.location.pathname);
@@ -285,7 +342,7 @@ export default function SettingsPage() {
             };
             finalizeWebDrive();
         }
-    }, [driveConnected, driveConnecting]);
+    }, [driveStatus, driveConnecting]);
 
 
     const validatePassword = (pwd: string): { valid: boolean; message: string } => {
@@ -308,14 +365,14 @@ export default function SettingsPage() {
             .eq('id', userId);
 
         if (error) {
-            setMessage({ type: 'error', text: 'Failed to update username: ' + error.message });
+            showToast('Failed to update username: ' + error.message, 'error');
         } else {
             sessionStorage.setItem('username', newUsername.trim());
             setCurrentUsername(newUsername.trim());
             setNewUsername('');
-            setMessage({ type: 'success', text: 'Username updated successfully!' });
+            await logToApplicationSheet('Security Settings Updated', `Admin username changed from ${currentUsername} to ${newUsername.trim()}`);
+            showToast('Username updated successfully!', 'success');
         }
-        setTimeout(() => setMessage(null), 4000);
     };
 
     const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -337,18 +394,18 @@ export default function SettingsPage() {
         }
 
         if (currentPassword !== user.password) {
-            setMessage({ type: 'error', text: 'Current password is incorrect' });
+            showToast('Current password is incorrect', 'error', '#current-password');
             return;
         }
 
         const validation = validatePassword(newPassword);
         if (!validation.valid) {
-            setMessage({ type: 'error', text: validation.message });
+            showToast(validation.message, 'error', '#new-password');
             return;
         }
 
         if (newPassword !== confirmPassword) {
-            setMessage({ type: 'error', text: 'New passwords do not match' });
+            showToast('New passwords do not match', 'error', '#confirm-password');
             return;
         }
 
@@ -358,12 +415,12 @@ export default function SettingsPage() {
             .eq('id', userId);
 
         if (updateError) {
-            setMessage({ type: 'error', text: 'Failed to update password.' });
+            showToast('Failed to update password.', 'error');
         } else {
             setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
-            setMessage({ type: 'success', text: 'Password updated successfully!' });
+            await logToApplicationSheet('Security Settings Updated', `Admin password changed.`);
+            showToast('Password updated successfully!', 'success');
         }
-        setTimeout(() => setMessage(null), 4000);
     };
 
     // Recovery info update removed
@@ -628,12 +685,20 @@ export default function SettingsPage() {
                     </p>
 
                     <div className="flex items-center gap-4">
-                        {driveConnected ? (
+                        {driveStatus === 'connected' ? (
                             <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 flex-1">
                                 <Check size={18} className="text-emerald-600 shrink-0" />
                                 <div>
                                     <p className="text-sm font-semibold text-emerald-700">Google Drive Connected</p>
                                     <p className="text-xs text-emerald-600">Invoices will be saved to <strong>ERP Invoices / Month Year /</strong> automatically.</p>
+                                </div>
+                            </div>
+                        ) : driveStatus === 'expired' || driveStatus === 'error' ? (
+                            <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex-1">
+                                <AlertCircle size={18} className="text-red-600 shrink-0" />
+                                <div>
+                                    <p className="text-sm font-semibold text-red-700">Connection {driveStatus === 'expired' ? 'Expired' : 'Error'}</p>
+                                    <p className="text-xs text-red-600">Your Google Drive session has {driveStatus === 'expired' ? 'expired' : 'encountered an error'}. Please reconnect.</p>
                                 </div>
                             </div>
                         ) : (
@@ -646,22 +711,34 @@ export default function SettingsPage() {
                             </div>
                         )}
 
-                        <button
-                            onClick={() => handleConnectDrive()}
-                            disabled={driveConnecting}
-                            className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${driveConnected
-                                ? 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 border border-slate-200'
-                                : 'bg-blue-600 text-white hover:bg-blue-700'
-                                }`}
-                        >
-                            {driveConnecting ? (
-                                <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Connecting...</>
-                            ) : driveConnected ? (
-                                <>Reconnect</>
-                            ) : (
-                                <><HardDrive size={16} />Connect Google Drive</>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => handleConnectDrive()}
+                                disabled={driveConnecting}
+                                className={`px-5 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2 flex-1 ${driveStatus === 'connected'
+                                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                                    }`}
+                            >
+                                {driveConnecting ? (
+                                    <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Connecting...</>
+                                ) : (driveStatus === 'connected' || driveStatus === 'expired' || driveStatus === 'error') ? (
+                                    <>Reconnect</>
+                                ) : (
+                                    <><HardDrive size={16} />Connect Google Drive</>
+                                )}
+                            </button>
+
+                            {(driveStatus === 'connected' || driveStatus === 'expired' || driveStatus === 'error') && (
+                                <button
+                                    onClick={handleDisconnectDrive}
+                                    className="px-5 py-2.5 rounded-lg font-medium text-sm bg-white text-red-600 border border-red-200 hover:bg-red-50 transition-colors flex items-center justify-center gap-2 flex-1"
+                                >
+                                    <LogOut size={16} />
+                                    Disconnect
+                                </button>
                             )}
-                        </button>
+                        </div>
                     </div>
 
                     {driveMessage && (
@@ -735,9 +812,18 @@ export default function SettingsPage() {
                                         {show ? <EyeOff size={18} /> : <Eye size={18} />}
                                     </button>
                                 </div>
+                                {label === 'Confirm New Password' && !passwordsMatch && (
+                                    <p className="text-[10px] text-red-500 font-bold mt-1 animate-pulse">âš  Passwords do not match</p>
+                                )}
                             </div>
                         ))}
-                        <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors">Update Password</button>
+                        <button 
+                            type="submit" 
+                            disabled={!passwordsMatch || !newPassword || !currentPassword}
+                            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-600/20 active:scale-95"
+                        >
+                            Update Password
+                        </button>
                     </form>
                 </div>
 

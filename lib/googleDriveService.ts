@@ -13,6 +13,7 @@
 
 const DRIVE_API_BASE = 'https://www.googleapis.com/upload/drive/v3/files';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3/files';
+const DRIVE_MAX_RETRIES = 3;
 
 // Caches
 let cachedDriveToken: { token: string; expires: number } | null = null;
@@ -121,6 +122,23 @@ async function getDriveAccessToken(): Promise<string> {
 }
 
 /**
+ * Checks if a Google Drive OAuth token is available (Desktop/Web).
+ */
+export async function isGoogleDriveConnected(): Promise<boolean | 'expired'> {
+    const electron = (window as any).electron;
+    if (electron?.drive?.isConnected) {
+        const status = await electron.drive.isConnected();
+        if (status === 'connected') return true;
+        if (status === 'expired') return 'expired';
+        return false;
+    }
+    
+    // Web fallback
+    const token = await getOAuthAccessToken();
+    return !!token;
+}
+
+/**
  * Get a Drive OAuth token from Electron IPC (user's own account = has storage quota).
  * Returns null if not running in Electron or Drive not connected yet.
  */
@@ -130,7 +148,7 @@ async function getOAuthAccessToken(): Promise<string | null> {
         const electron = (window as any).electron;
         if (electron?.drive?.getAccessToken) {
             const token = await electron.drive.getAccessToken();
-            if (token) return token;
+            if (token && typeof token === 'string') return token;
         }
 
         // 2. Fallback to Browser localStorage for Web Version
@@ -147,16 +165,20 @@ async function getOAuthAccessToken(): Promise<string | null> {
                 const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_WEB || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || localStorage.getItem('google_oauth_client_id');
                 const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_WEB || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || localStorage.getItem('google_oauth_client_secret');
 
-                if (tokens.refresh_token && clientId && clientSecret) {
+                if (tokens.refresh_token && clientId) {
+                    const body = new URLSearchParams({
+                        client_id: clientId,
+                        refresh_token: tokens.refresh_token,
+                        grant_type: 'refresh_token'
+                    });
+                    if (clientSecret) {
+                        body.set('client_secret', clientSecret);
+                    }
+
                     const resp = await fetch('https://oauth2.googleapis.com/token', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: new URLSearchParams({
-                            client_id: clientId,
-                            client_secret: clientSecret,
-                            refresh_token: tokens.refresh_token,
-                            grant_type: 'refresh_token'
-                        })
+                        body,
                     });
                     const result = await resp.json();
                     if (result.access_token) {
@@ -175,6 +197,61 @@ async function getOAuthAccessToken(): Promise<string | null> {
         console.error('[DriveService] Web Auth retrieval failed:', e);
     }
     return null;
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isDriveAuthError(err: any): boolean {
+    const msg = String(err?.message || err || '').toLowerCase();
+    return msg.includes('401') || msg.includes('invalid credentials') || msg.includes('unauthorized') || msg.includes('invalid_grant');
+}
+
+function isDriveTransientError(err: any): boolean {
+    const msg = String(err?.message || err || '').toLowerCase();
+    return (
+        msg.includes('429') ||
+        msg.includes('rate limit') ||
+        msg.includes('quota') ||
+        msg.includes('timeout') ||
+        msg.includes('failed to fetch') ||
+        msg.includes('network') ||
+        msg.includes('500') ||
+        msg.includes('502') ||
+        msg.includes('503') ||
+        msg.includes('504')
+    );
+}
+
+async function withOAuthDriveRetry<T>(
+    label: string,
+    operation: (oauthToken: string) => Promise<T>
+): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= DRIVE_MAX_RETRIES; attempt++) {
+        try {
+            const token = await getOAuthAccessToken();
+            if (!token) {
+                throw new Error('Google Drive not connected. Please connect it in Settings.');
+            }
+            return await operation(token);
+        } catch (err: any) {
+            lastError = err;
+            const authError = isDriveAuthError(err);
+            const transientError = isDriveTransientError(err);
+            const canRetry = attempt < DRIVE_MAX_RETRIES && (authError || transientError);
+
+            if (!canRetry) break;
+
+            const delay = authError ? 500 : 800 * Math.pow(2, attempt - 1);
+            console.warn(`[DriveService] ${label} retry ${attempt}/${DRIVE_MAX_RETRIES}:`, err?.message || err);
+            await sleep(delay);
+        }
+    }
+
+    throw lastError;
 }
 
 // --- Folder Management ---
@@ -570,15 +647,14 @@ export async function uploadInvoicePDFByMonth(
     fileName: string,
     invoiceDate: Date
 ): Promise<{ id: string; webViewLink: string }> {
-    // Prefer user OAuth token (has storage quota) over service account
-    const oauthToken = await getOAuthAccessToken();
-    if (!oauthToken) {
-        throw new Error(
-            'Google Drive not connected. Please go to Settings → Connect Google Drive and sign in once.'
-        );
-    }
-    const monthFolderId = await getMonthFolderId(oauthToken, invoiceDate);
-    return uploadPdfToFolder(oauthToken, base64Data, fileName, monthFolderId);
+    return withOAuthDriveRetry('uploadInvoicePDFByMonth', async (oauthToken) => {
+        console.log(`[DriveService] Starting upload for ${fileName}...`);
+        const monthFolderId = await getMonthFolderId(oauthToken, invoiceDate);
+        console.log(`[DriveService] Using month folder ID: ${monthFolderId}`);
+        const result = await uploadPdfToFolder(oauthToken, base64Data, fileName, monthFolderId);
+        console.log(`[DriveService] Upload successful! Link: ${result.webViewLink}`);
+        return result;
+    });
 }
 
 /**
@@ -604,17 +680,15 @@ export async function uploadToWhatsAppFolder(
     base64Data: string,
     fileName: string
 ): Promise<string> {
-    const oauthToken = await getOAuthAccessToken();
-    if (!oauthToken) {
-        throw new Error('Google Drive not connected. Please connect it in Settings to send PDF links.');
-    }
+    const result = await withOAuthDriveRetry('uploadToWhatsAppFolder', async (oauthToken) => {
+        const rootId = await getRootFolder(oauthToken);
+        const folderId = await findOrCreateSubFolder(oauthToken, WHATSAPP_UPLOADS_FOLDER, rootId);
 
-    const rootId = await getRootFolder(oauthToken);
-    const folderId = await findOrCreateSubFolder(oauthToken, WHATSAPP_UPLOADS_FOLDER, rootId);
+        // Ensure the folder is public so links work for everyone
+        await makeFolderPublic(oauthToken, folderId);
 
-    // Ensure the folder is public so links work for everyone
-    await makeFolderPublic(oauthToken, folderId);
+        return uploadPdfToFolder(oauthToken, base64Data, fileName, folderId);
+    });
 
-    const result = await uploadPdfToFolder(oauthToken, base64Data, fileName, folderId);
     return result.webViewLink;
 }

@@ -27,6 +27,19 @@ const SPREADSHEET_ID = process.env.NEXT_PUBLIC_GOOGLE_SUPPLIERS_SHEET_ID || '1Cx
 const SHEET_NAME = 'refined suppliers';
 const SHEETS_API_BASE = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
+// ── Shared rate-limit key (coordinated with dealerWrite & sheetsQueue) ──
+// All three modules write a timestamp here so they all back-off together.
+const LAST_REQ_KEY = 'sve_last_sheet_req';
+const MIN_GAP_MS   = 2_000; // 1 request per 2 s → max 30/min (quota is 60)
+
+async function rateLimit(): Promise<void> {
+    if (typeof localStorage === 'undefined') return;
+    const last = parseInt(localStorage.getItem(LAST_REQ_KEY) || '0', 10);
+    const wait = MIN_GAP_MS - (Date.now() - last);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait + 50));
+    localStorage.setItem(LAST_REQ_KEY, String(Date.now()));
+}
+
 // Service account credentials cache
 let cachedToken: { token: string; expires: number } | null = null;
 
@@ -392,6 +405,7 @@ export async function createSupplierSheetTab(
     company: CompanySheetDetails = {}
 ): Promise<boolean> {
     try {
+        await rateLimit(); // throttle before meta-read
         // Reset cached token so we always get a write-scoped one
         cachedToken = null;
         const token = await getAccessToken();
@@ -677,6 +691,7 @@ export async function appendToSupplierSheetTab(
         return true;
     }
     try {
+        await rateLimit(); // throttle: max 1 write per 2 s across all sheet modules
         const token = await getAccessToken();
         const sheetId = await getSheetIdByName(token, supplierName);
         if (sheetId === null) {
@@ -684,20 +699,28 @@ export async function appendToSupplierSheetTab(
             return false;
         }
 
-        const isOpeningBal = row.particulars.toLowerCase().includes('opening balance');
-        const isClosingBal = row.particulars.includes('CLOSED');
+        const particularsLc = row.particulars.toLowerCase();
+        const isOpeningBal = particularsLc.includes('opening balance');
+        const isClosingBal = particularsLc.includes('closed') || particularsLc.includes('closing balance') || row.vchNo === 'CL-END';
 
         const formatAmount = (val: number) => val === 0 ? '0' : val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const debitStr = formatAmount(row.debit);
         const creditStr = formatAmount(row.credit);
-        const balStr = formatAmount(Math.abs(row.balance));
+        const balStr = formatAmount(Math.abs(row.balance || 0));
 
         const dt = new Date(row.date);
         const dateStr = !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : row.date;
 
-        // Build the cells with explicit formatting (Light green for Opening balances, White otherwise)
+        const derivedBalanceType = (row.balance || 0) >= 0 ? 'Cr' : 'Dr';
+        const balanceType = row.balanceType || derivedBalanceType;
+
+        // Build the cells with explicit formatting (Opening/Closing highlighted for readability)
         const cellFormat = {
-            backgroundColor: isOpeningBal ? { red: 0.87, green: 0.925, blue: 0.83 } : { red: 1, green: 1, blue: 1 },
+            backgroundColor: isOpeningBal
+                ? { red: 0.87, green: 0.925, blue: 0.83 }
+                : isClosingBal
+                    ? { red: 1, green: 0.95, blue: 0.8 }
+                    : { red: 1, green: 1, blue: 1 },
             textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 }, bold: isOpeningBal || isClosingBal, fontSize: 10 },
             horizontalAlignment: 'LEFT' as const
         };
@@ -714,8 +737,8 @@ export async function appendToSupplierSheetTab(
                 { userEnteredValue: { stringValue: row.vchNo }, userEnteredFormat: cellFormat },
                 { userEnteredValue: { stringValue: debitStr }, userEnteredFormat: { ...debitFormat, horizontalAlignment: 'RIGHT' } },
                 { userEnteredValue: { stringValue: creditStr }, userEnteredFormat: { ...creditFormat, horizontalAlignment: 'RIGHT' } },
-                { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: true } } },
-                { userEnteredValue: { stringValue: row.balanceType }, userEnteredFormat: cellFormat }
+                { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: isOpeningBal || isClosingBal } } },
+                { userEnteredValue: { stringValue: balanceType }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'CENTER' } }
             ]
         };
 
@@ -740,6 +763,10 @@ export async function appendToSupplierSheetTab(
 
         if (!res.ok) {
             const errorText = await res.text();
+            if (res.status === 429) {
+                console.warn(`[GoogleSheetSuppliers] 429 rate limit on append for "${supplierName}" — write dropped (non-critical)`);
+                return false;
+            }
             console.error(`[GoogleSheetSuppliers] Final Append failed for "${supplierName}". Status: ${res.status}`, errorText);
             return false;
         }
@@ -748,6 +775,36 @@ export async function appendToSupplierSheetTab(
         return true;
     } catch (error: unknown) {
         console.warn('[GoogleSheetSuppliers] appendToSupplierSheetTab error:', error);
+        return false;
+    }
+}
+
+export async function clearSupplierTransactionsForSync(supplierName: string): Promise<boolean> {
+    try {
+        await rateLimit();
+        const token = await getAccessToken();
+        const escapedName = supplierName.replace(/'/g, "''");
+
+        const res = await fetchWithRetry(`${SHEETS_API_BASE}/values:batchClear`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                ranges: [`'${escapedName}'!A12:I10000`]
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.text();
+            console.warn(`[GoogleSheetSuppliers] Failed to clear rows for "${supplierName}": ${err}`);
+            return false;
+        }
+
+        return true;
+    } catch (err) {
+        console.warn('[GoogleSheetSuppliers] clearSupplierTransactionsForSync error:', err);
         return false;
     }
 }
@@ -763,6 +820,7 @@ export async function deleteSheetRowByRef(
     try {
         if (!supplierName || supplierName === 'Unknown' || !vchNo) return false;
 
+        await rateLimit(); // throttle before read+write sequence
         const token = await getAccessToken();
         const sheetId = await getSheetIdByName(token, supplierName);
         if (sheetId === null) {
@@ -826,5 +884,100 @@ export async function deleteSheetRowByRef(
     } catch (err) {
         console.warn('[GoogleSheetSuppliers] deleteSheetRowByRef error:', err);
         return false;
+    }
+}
+
+// ──────────── Supplier Ledger Health Check ────────────
+export interface SupplierLedgerHealthCheckResult {
+    healthy: boolean;
+    issues: string[];
+    stats: {
+        openingBalanceCount: number;
+        transactionCount: number;
+        closingBalanceCount: number;
+        duplicateRefs: number;
+    };
+}
+
+export async function validateSupplierLedger(supplierName: string): Promise<SupplierLedgerHealthCheckResult> {
+    const issues: string[] = [];
+    const stats = {
+        openingBalanceCount: 0,
+        transactionCount: 0,
+        closingBalanceCount: 0,
+        duplicateRefs: 0,
+    };
+
+    try {
+        const token = await getAccessToken();
+        const sheetId = await getSheetIdByName(token, supplierName);
+        if (sheetId === null) {
+            return { healthy: false, issues: ['Supplier sheet tab not found'], stats };
+        }
+
+        const response = await fetchWithRetry(
+            `${SHEETS_API_BASE}/values/'${encodeURIComponent(supplierName)}'!A10:I500`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        
+        if (!response.ok) {
+            return { healthy: false, issues: ['Failed to read sheet'], stats };
+        }
+
+        const data = await response.json();
+        const rows = data.values || [];
+        const seenRefs = new Set<string>();
+
+        // Check header row
+        if (rows.length > 0 && rows[0][0] !== 'Date') {
+            issues.push('Ledger header is missing or corrupted');
+        }
+
+        // Analyze data rows
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.length === 0) continue;
+
+            const particulars = (row[1] || '').toLowerCase();
+            const vchNo = (row[4] || '').toString().trim();
+            const balance = (row[7] || '').toString().trim();
+
+            if (!particulars) continue;
+
+            if (particulars.includes('opening balance')) {
+                stats.openingBalanceCount++;
+                if (stats.openingBalanceCount > 1) {
+                    issues.push(`Multiple opening balance rows found (row ${i + 10})`);
+                }
+                continue;
+            }
+
+            if (particulars.includes('closing') || particulars.includes('carried forward')) {
+                stats.closingBalanceCount++;
+                continue;
+            }
+
+            stats.transactionCount++;
+
+            if (vchNo) {
+                if (seenRefs.has(vchNo)) {
+                    stats.duplicateRefs++;
+                    issues.push(`Duplicate voucher reference: ${vchNo}`);
+                }
+                seenRefs.add(vchNo);
+            }
+
+            // Balance values are allowed in transaction rows for supplier ledgers.
+            void balance;
+        }
+
+        if (stats.openingBalanceCount === 0) {
+            issues.push('No opening balance row found');
+        }
+
+        return { healthy: issues.length === 0, issues, stats };
+    } catch (e) {
+        console.error(`[GoogleSheetSuppliers] Health check failed for ${supplierName}:`, e);
+        return { healthy: false, issues: [`Failed to read ledger: ${e}`], stats };
     }
 }
