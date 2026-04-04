@@ -8,7 +8,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test:e2e": "npx playwright test",
     "start": "next start",
     "export": "next build",
     "electron": "electron .",
