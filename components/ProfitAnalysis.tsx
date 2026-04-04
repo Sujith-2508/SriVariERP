@@ -8,11 +8,13 @@ import { getSalaryByRange } from '@/lib/salaryService';
 import { getExpensesByRange } from '@/lib/expenseService';
 import { generateProfitAnalysisPDF } from '@/lib/pdfGenerator';
 import { TrendingUp, TrendingDown, Calendar, ArrowLeft, ArrowRight, DollarSign, Percent, Package, Users, Download, X, FileText, Clock, Search, RefreshCw } from 'lucide-react';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export function ProfitAnalysis() {
     const { transactions, products, dealers, companySettings } = useData();
+    const effectiveCompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
     const [period, setPeriod] = useState<Period>('monthly');
     const [date, setDate] = useState(new Date());
 
@@ -232,7 +234,7 @@ export function ProfitAnalysis() {
             const rangeNetProfit = rGp - (totalSalaries + totalCompExpenses); // Consistency for PDF
             const rangeMargin = rRevenue > 0 ? (rangeNetProfit / rRevenue) * 100 : 0;
 
-            generateProfitAnalysisPDF(companySettings, {
+            generateProfitAnalysisPDF(effectiveCompanySettings, {
                 periodLabel: periodLbl,
                 revenue: rRevenue,
                 cogs: rCogs,

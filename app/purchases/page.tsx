@@ -9,7 +9,8 @@ import {
     SupplierData,
     PurchaseBillData,
     PurchasePaymentData,
-    PurchaseAllocationData
+    PurchaseAllocationData,
+    CompanySettings
 } from '@/types';
 import {
     getAllSuppliers,
@@ -61,11 +62,13 @@ import {
 } from 'lucide-react';
 import SearchableSelect from '@/components/SearchableSelect';
 import { supabase } from '@/lib/supabase';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 
 type TabType = 'bills' | 'payments' | 'suppliers';
 
 export default function PurchasesPage() {
     const { products, companySettings } = useData();
+    const effectiveCompanySettings: CompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState<TabType>('bills');
@@ -122,7 +125,7 @@ export default function PurchasesPage() {
             const { generateSupplierStatementPDFBase64 } = await import('@/lib/pdfGenerator');
             const { supabase } = await import('@/lib/supabase');
 
-            const company = companySettings;
+            const company = effectiveCompanySettings;
 
             // Determine date range
             let start: Date | undefined;
@@ -379,12 +382,12 @@ export default function PurchasesPage() {
         setSheetTabStatus('Updating Google Sheet tab...');
 
         const company: CompanySheetDetails = {
-            companyName: companySettings.companyName,
-            address: [companySettings.addressLine1, companySettings.addressLine2].filter(Boolean).join(', '),
-            city: companySettings.city,
-            gstNumber: companySettings.gstNumber,
-            phone: companySettings.phone,
-            email: companySettings.email
+            companyName: effectiveCompanySettings.companyName,
+            address: [effectiveCompanySettings.addressLine1, effectiveCompanySettings.addressLine2].filter(Boolean).join(', '),
+            city: effectiveCompanySettings.city,
+            gstNumber: effectiveCompanySettings.gstNumber,
+            phone: effectiveCompanySettings.phone,
+            email: effectiveCompanySettings.email
         };
 
         const supplierDetails: SupplierSheetDetails = {
@@ -673,12 +676,12 @@ export default function PurchasesPage() {
             if (!supplier?.name || supplier.name === 'Unknown') return false;
 
             const company: CompanySheetDetails = {
-                companyName: companySettings.companyName,
-                address: [companySettings.addressLine1, companySettings.addressLine2].filter(Boolean).join(', '),
-                city: companySettings.city,
-                gstNumber: companySettings.gstNumber,
-                phone: companySettings.phone,
-                email: companySettings.email
+                companyName: effectiveCompanySettings.companyName,
+                address: [effectiveCompanySettings.addressLine1, effectiveCompanySettings.addressLine2].filter(Boolean).join(', '),
+                city: effectiveCompanySettings.city,
+                gstNumber: effectiveCompanySettings.gstNumber,
+                phone: effectiveCompanySettings.phone,
+                email: effectiveCompanySettings.email
             };
 
             const supplierDetails: SupplierSheetDetails = {

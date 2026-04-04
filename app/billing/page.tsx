@@ -13,63 +13,13 @@ import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfGenerator';
-import { 
-    getISTDateString, 
-    calculateDealerStatement, 
-    getNextInvoiceNumber,
-    calculateCOGS, 
-    cn 
-} from '@/lib/utils';
+import { calculateDealerStatement } from '@/lib/utils';
+import { getISTDateString } from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
-import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder, isGoogleDriveConnected } from '@/lib/googleDriveService';
-import { logToApplicationSheet } from '@/lib/googleSheetWriter';
-
-function toErrorPayload(err: unknown): Record<string, unknown> {
-    if (err instanceof Error) {
-        const e = err as Error & { code?: string; details?: string; hint?: string };
-        return {
-            name: e.name,
-            message: e.message,
-            code: e.code,
-            details: e.details,
-            hint: e.hint,
-        };
-    }
-    if (typeof err === 'object' && err !== null) {
-        const anyErr = err as any;
-        return {
-            message: anyErr.message,
-            code: anyErr.code,
-            details: anyErr.details,
-            hint: anyErr.hint,
-            raw: anyErr,
-        };
-    }
-    return { message: String(err) };
-}
-
-const WA_LAST_READY_AT_KEY = 'sve_whatsapp_last_ready_at';
-
-function markWhatsAppReadyNow() {
-    try {
-        localStorage.setItem(WA_LAST_READY_AT_KEY, String(Date.now()));
-    } catch {
-        // ignore storage errors
-    }
-}
-
-function getLastWhatsAppReadyAt(): number {
-    try {
-        const raw = localStorage.getItem(WA_LAST_READY_AT_KEY);
-        const parsed = raw ? parseInt(raw, 10) : 0;
-        return Number.isFinite(parsed) ? parsed : 0;
-    } catch {
-        return 0;
-    }
-}
+import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 
 export default function Billing() {
-    const { dealers, products, transactions, createInvoice, updateInvoice, updateTransactionDriveLink, addDealer, isLoading, refreshData, companySettings } = useData();
+    const { dealers, products, createInvoice, updateInvoice, addDealer, transactions, isLoading } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const router = useRouter();
@@ -84,6 +34,7 @@ export default function Billing() {
     const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
     const [generatedRef, setGeneratedRef] = useState<string>('');
     const [showPrintPreview, setShowPrintPreview] = useState(false);
+    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
     const [whatsappSending, setWhatsappSending] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [showWhatsAppPreview, setShowWhatsAppPreview] = useState(false);
@@ -96,8 +47,6 @@ export default function Billing() {
     const [showPrinterDialog, setShowPrinterDialog] = useState(false);
     const [printers, setPrinters] = useState<{ name: string; displayName: string; isDefault: boolean; status: number; description: string }[]>([]);
     const [selectedPrinter, setSelectedPrinter] = useState<string>('');
-    // Print Options
-    const [printCopies, setPrintCopies] = useState(1);
     const [printingStatus, setPrintingStatus] = useState<'idle' | 'loading' | 'printing' | 'done' | 'error'>('idle');
     const [printError, setPrintError] = useState<string | null>(null);
 
@@ -249,34 +198,228 @@ export default function Billing() {
     // Invoice Date
     const [invoiceDate, setInvoiceDate] = useState(getISTDateString());
     const [invoiceNoExists, setInvoiceNoExists] = useState(false);
+    const [invoiceNoCheckPending, setInvoiceNoCheckPending] = useState(false);
     const [manualInvNoTouched, setManualInvNoTouched] = useState(false);
-    const checkInvoiceNumberExists = (no: string) => {
-        if (!no.trim()) {
-            setInvoiceNoExists(false);
-            return;
-        }
-        const exists = transactions.some(t =>
-            t.id !== editInvoiceId &&
-            t.type === 'INVOICE' &&
-            (t.referenceId === `INV${no.trim()}` || (t.notes && t.notes.includes(`"manualInvoiceNo":"${no.trim()}"`)))
-        );
-        setInvoiceNoExists(exists);
+
+    const parseInvoiceNumberInput = (value: string): number | null => {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (!/^\d+$/.test(trimmed)) return null;
+        const parsed = Number.parseInt(trimmed, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     };
+
+    const formatInvoiceNumber = (invoiceNo: number): string => {
+        const width = Math.max(3, String(invoiceNo).length);
+        return String(invoiceNo).padStart(width, '0');
+    };
+
+    const getLocalNextInvoiceNo = useCallback(() => {
+        const used = new Set<number>();
+        transactions
+            .filter(t => t.type === 'INVOICE' && t.referenceId?.startsWith('INV'))
+            .forEach(t => {
+                const suffix = t.referenceId?.slice(3) || '';
+                if (/^\d+$/.test(suffix)) {
+                    const parsed = Number.parseInt(suffix, 10);
+                    if (Number.isFinite(parsed) && parsed > 0) {
+                        used.add(parsed);
+                    }
+                }
+            });
+
+        let candidate = 1;
+        while (used.has(candidate)) {
+            candidate += 1;
+        }
+
+        return formatInvoiceNumber(candidate);
+    }, [transactions]);
+
+    const fetchUsedInvoiceNumbersFromDb = useCallback(async (): Promise<Set<number>> => {
+        const { data, error } = await supabase
+            .from('transactions')
+            .select('id, reference_id')
+            .eq('type', 'INVOICE')
+            .ilike('reference_id', 'INV%');
+
+        if (error) {
+            throw error;
+        }
+
+        const used = new Set<number>();
+        (data || []).forEach((row: any) => {
+            const suffix = (row.reference_id || '').slice(3);
+            if (/^\d+$/.test(suffix)) {
+                const parsed = Number.parseInt(suffix, 10);
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    used.add(parsed);
+                }
+            }
+        });
+
+        return used;
+    }, []);
+
+    const fetchNextAvailableInvoiceNo = useCallback(async () => {
+        const used = await fetchUsedInvoiceNumbersFromDb();
+        let candidate = 1;
+        while (used.has(candidate)) {
+            candidate += 1;
+        }
+        return formatInvoiceNumber(candidate);
+    }, [fetchUsedInvoiceNumbersFromDb]);
+
+    const checkInvoiceNumberExists = useCallback(async (no: string) => {
+        const parsedNo = parseInvoiceNumberInput(no);
+        if (parsedNo === null) {
+            setInvoiceNoExists(false);
+            return false;
+        }
+
+        const used = await fetchUsedInvoiceNumbersFromDb();
+        const exists = used.has(parsedNo);
+
+        if (!exists) {
+            setInvoiceNoExists(false);
+            return false;
+        }
+
+        // If editing, allow current invoice number to pass.
+        if (editInvoiceId) {
+            const { data, error } = await supabase
+                .from('transactions')
+                .select('id')
+                .eq('type', 'INVOICE')
+                .eq('reference_id', `INV${formatInvoiceNumber(parsedNo)}`)
+                .limit(1);
+
+            if (!error && data && data.length === 1 && data[0].id === editInvoiceId) {
+                setInvoiceNoExists(false);
+                return false;
+            }
+        }
+
+        setInvoiceNoExists(true);
+        return true;
+    }, [editInvoiceId, fetchUsedInvoiceNumbersFromDb]);
+
+    const refreshNextInvoiceNumber = useCallback(async () => {
+        try {
+            const next = await fetchNextAvailableInvoiceNo();
+            setManualInvoiceNo(next);
+        } catch (err) {
+            console.warn('[Billing] Failed to fetch next invoice number from DB, using local fallback:', err);
+            setManualInvoiceNo(getLocalNextInvoiceNo());
+        }
+        setManualInvNoTouched(false);
+        setInvoiceNoExists(false);
+    }, [fetchNextAvailableInvoiceNo, getLocalNextInvoiceNo]);
 
     // Initialize Manual Invoice Number
     const isInvoiceInitialized = useRef(false);
-    const isSubmittingRef = useRef(false); // Guard against double-clicks
+    useEffect(() => {
+        // Reset when switching between new/edit invoice
+        if (editInvoiceId) {
+            isInvoiceInitialized.current = false;
+            setManualInvNoTouched(false);
+            return; // editing: number is loaded from the existing invoice
+        }
+        if (isInvoiceInitialized.current) return;
+
+        // Wait until DataContext has finished loading (isLoading = false)
+        // This ensures we read the true DB count, not a stale cache count
+        if (isLoading) return;
+        if (manualInvNoTouched) return;
+
+        let isActive = true;
+
+        (async () => {
+            await refreshNextInvoiceNumber();
+            if (isActive) {
+                isInvoiceInitialized.current = true;
+            }
+        })();
+
+        return () => {
+            isActive = false;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [transactions, editInvoiceId, isLoading, manualInvNoTouched, refreshNextInvoiceNumber]);
 
     useEffect(() => {
-        if (!isInvoiceInitialized.current && transactions.length > 0) {
-            if (!editInvoiceId) {
-                // Initialize new invoice number based on MAX existing
-                const nextNo = getNextInvoiceNumber(transactions);
-                setManualInvoiceNo(nextNo);
-            }
-            isInvoiceInitialized.current = true;
+        if (!manualInvNoTouched) return;
+        if (!manualInvoiceNo.trim()) {
+            setInvoiceNoExists(false);
+            return;
         }
-    }, [transactions, editInvoiceId]);
+
+        let isActive = true;
+        const timeout = setTimeout(async () => {
+            setInvoiceNoCheckPending(true);
+            try {
+                await checkInvoiceNumberExists(manualInvoiceNo);
+            } catch (err) {
+                console.warn('[Billing] Invoice duplicate check failed:', err);
+            } finally {
+                if (isActive) setInvoiceNoCheckPending(false);
+            }
+        }, 250);
+
+        return () => {
+            isActive = false;
+            clearTimeout(timeout);
+        };
+    }, [manualInvoiceNo, manualInvNoTouched, checkInvoiceNumberExists]);
+
+    // Load Company Settings
+    // Load Company Settings
+    useEffect(() => {
+        const loadCompanySettings = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('company_settings')
+                    .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
+                    .limit(1);
+
+                if (error) {
+                    console.error('Error loading company settings from DB:', error);
+                    // Fallback to default settings
+                    setCompanySettings(DEFAULT_COMPANY_SETTINGS);
+                } else if (data && data.length > 0) {
+                    const settings = data[0];
+                    setCompanySettings({
+                        id: settings.id,
+                        companyName: settings.company_name,
+                        addressLine1: settings.address_line1,
+                        addressLine2: settings.address_line2,
+                        city: settings.city,
+                        state: settings.state,
+                        pinCode: settings.pin_code,
+                        gstNumber: settings.gst_number,
+                        panNumber: settings.pan_number,
+                        phone: settings.phone,
+                        email: settings.email,
+                        bankName: settings.bank_name,
+                        bankBranch: settings.bank_branch,
+                        accountNumber: settings.account_number,
+                        ifscCode: settings.ifsc_code,
+                        accountHolderName: settings.account_holder_name,
+                        accountType: settings.account_type
+                    });
+                } else {
+                    console.warn('No company settings found in DB, using defaults');
+                    setCompanySettings(DEFAULT_COMPANY_SETTINGS);
+                }
+            } catch (err) {
+                console.error('Exception loading company settings:', err);
+                setCompanySettings(DEFAULT_COMPANY_SETTINGS);
+            }
+        };
+
+        loadCompanySettings();
+    }, []);
+
 
     const generatedInvoiceNumber = `INV${manualInvoiceNo}`;
 
@@ -326,6 +469,7 @@ export default function Billing() {
 
                     if (notes.manualInvoiceNo) {
                         setManualInvoiceNo(notes.manualInvoiceNo);
+                        setManualInvNoTouched(false);
                         isInvoiceInitialized.current = true;
                     }
                 } catch (e) {
@@ -659,30 +803,36 @@ export default function Billing() {
             showToast('Please select a dealer and add at least one item.', 'warning', 'dealer-select');
             return;
         }
-        if (invoiceNoExists) {
-            showToast('Invoice number already exists. Please use a unique number.', 'warning', 'manual-invoice-no-field');
+        const parsedManualNo = parseInvoiceNumberInput(manualInvoiceNo);
+        if (manualInvoiceNo.trim() && parsedManualNo === null) {
+            showToast('Invoice number must contain digits only.', 'warning', 'manual-invoice-no-field');
             return;
         }
 
-        // Multi-layered guard against double-submission
-        if (isSubmitting || isSubmittingRef.current) {
-            console.log('[Billing] Submit already in progress, skipping duplicate call');
-            return;
+        if (parsedManualNo !== null) {
+            setManualInvoiceNo(formatInvoiceNumber(parsedManualNo));
         }
 
         setIsSubmitting(true);
-        isSubmittingRef.current = true;
-        setDriveUploadStatus('idle');
-        setDriveError(null);
 
         try {
-            await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay for UX/stability
-            
-            let finalId = '';
+            if (manualInvoiceNo.trim()) {
+                const existsInDb = await checkInvoiceNumberExists(manualInvoiceNo);
+                if (existsInDb) {
+                    showToast('Invoice number already exists in database. Please use a unique number.', 'warning', 'manual-invoice-no-field');
+                    if (!editInvoiceId) {
+                        await refreshNextInvoiceNumber();
+                    }
+                    return;
+                }
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            let finalId = editInvoiceId || '';
             let finalRefId = '';
 
             if (editInvoiceId) {
-                const result = await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
+                const { id, refId } = await updateInvoice(editInvoiceId, invoiceItems, invoiceTotal, {
                     vehicleName,
                     vehicleNumber,
                     destination,
@@ -693,16 +843,45 @@ export default function Billing() {
                     invoiceDate: new Date(invoiceDate),
                     manualInvoiceNo: manualInvoiceNo.trim(),
                     notes: JSON.stringify({
-                        buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
-                        deliveryNote, supplierRef, otherRef, termsOfDelivery,
-                        manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST,
-                        invoiceItems
+                        buyerOrderNo,
+                        buyerOrderDate,
+                        dispatchDocNo,
+                        dispatchDate,
+                        deliveryNote,
+                        supplierRef,
+                        otherRef,
+                        termsOfDelivery,
+                        manualInvoiceNo,
+                        roundOff,
+                        globalCGST,
+                        globalSGST,
+                        globalIGST,
+                        invoiceItems: invoiceItems.map(item => ({
+                            productId: item.productId,
+                            productName: item.productName,
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            costPrice: item.costPrice || 0,
+                            cgst: item.cgst,
+                            sgst: item.sgst,
+                            igst: item.igst,
+                            cgstAmount: item.cgstAmount,
+                            sgstAmount: item.sgstAmount,
+                            igstAmount: item.igstAmount,
+                            discount: item.discount,
+                            discountAmount: item.discountAmount,
+                            total: item.total,
+                            gstAmount: item.gstAmount,
+                            hsnCode: item.hsnCode,
+                            unit: item.unit,
+                            gstRate: item.gstRate
+                        }))
                     })
                 });
-                finalId = result.id;
-                finalRefId = result.refId;
+                finalId = id;
+                finalRefId = refId;
             } else {
-                const result = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
+                const { id, refId } = await createInvoice(selectedDealer.id, invoiceItems, invoiceTotal, {
                     vehicleName,
                     vehicleNumber,
                     destination,
@@ -713,277 +892,256 @@ export default function Billing() {
                     invoiceDate: new Date(invoiceDate),
                     manualInvoiceNo: manualInvoiceNo.trim(),
                     notes: JSON.stringify({
-                        buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
-                        deliveryNote, supplierRef, otherRef, termsOfDelivery,
-                        manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST,
-                        invoiceItems
+                        buyerOrderNo,
+                        buyerOrderDate,
+                        dispatchDocNo,
+                        dispatchDate,
+                        deliveryNote,
+                        supplierRef,
+                        otherRef,
+                        termsOfDelivery,
+                        manualInvoiceNo,
+                        roundOff,
+                        globalCGST,
+                        globalSGST,
+                        globalIGST,
+                        invoiceItems: invoiceItems.map(item => ({
+                            productId: item.productId,
+                            productName: item.productName,
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            costPrice: item.costPrice || 0,
+                            cgst: item.cgst,
+                            sgst: item.sgst,
+                            igst: item.igst,
+                            cgstAmount: item.cgstAmount,
+                            sgstAmount: item.sgstAmount,
+                            igstAmount: item.igstAmount,
+                            discount: item.discount,
+                            discountAmount: item.discountAmount,
+                            total: item.total,
+                            gstAmount: item.gstAmount,
+                            hsnCode: item.hsnCode,
+                            unit: item.unit,
+                            gstRate: item.gstRate
+                        }))
                     })
                 });
-                finalId = result.id;
-                finalRefId = result.refId;
+                finalId = id;
+                finalRefId = refId;
             }
 
             setGeneratedRef(finalRefId);
             setCreatedInvoiceId(finalId);
 
-            // --- DATA LOCK FOR BACKGROUND PROCESSES ---
-            // We capture all state into local variables NOW to ensure PDF generation
-            // uses exactly what was saved, even if state variables change during cleanup.
-            const lockedDealer = { ...selectedDealer };
-            const lockedItems = [...invoiceItems];
-            const lockedTotal = invoiceTotal;
-            const lockedDate = new Date(invoiceDate);
-            const lockedRef = finalRefId;
-            const lockedNotes = JSON.stringify({
-                buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
-                    deliveryNote, supplierRef, otherRef, termsOfDelivery,
-                    manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST
-            });
+        // Real-time Sync to Google Sheets (disabled — month-wise Drive storage is used instead)
+        // syncInvoiceToSheets has been removed as ERP Invoices tab is no longer needed.
 
-            // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
-            if (companySettings && lockedDealer) {
-                (async () => {
-                    try {
-                        const { isGoogleDriveConnected } = await import('@/lib/googleDriveService');
-                        const isConnected = await isGoogleDriveConnected();
-                        if (isConnected !== true) {
-                            console.log('[Billing] Skipping Drive upload: Drive not connected or expired');
-                            setDriveUploadStatus('idle');
-                            return;
-                        }
+        // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
+        if (companySettings && selectedDealer) {
+            // Background process to avoid blocking UI success screen
+            (async () => {
+                try {
+                    const invoiceDataToSave = {
+                        id: (finalId || 'NEW'),
+                        customerId: selectedDealer.id,
+                        type: TransactionType.INVOICE,
+                        amount: invoiceTotal,
+                        date: new Date(invoiceDate),
+                        referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
+                        items: invoiceItems,
+                        vehicleName,
+                        vehicleNumber,
+                        destination,
+                        transportCharges: parseFloat(transportCharges) || 0,
+                        paymentTerms,
+                        discountPercent: parseFloat(globalDiscount) || 0,
+                        creditDays: parseInt(creditDays) || 30,
+                        notes: JSON.stringify({
+                            buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
+                            deliveryNote, supplierRef, otherRef, termsOfDelivery,
+                            manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST
+                        })
+                    };
 
-                        setDriveUploadStatus('uploading');
-                        const invoiceDataToSave = {
-                            id: finalId,
-                            customerId: lockedDealer.id,
-                            type: TransactionType.INVOICE,
-                            amount: lockedTotal,
-                            date: lockedDate,
-                            referenceId: lockedRef,
-                            items: lockedItems,
-                            vehicleName, vehicleNumber, destination,
-                            transportCharges: parseFloat(transportCharges) || 0,
-                            paymentTerms,
-                            discountPercent: parseFloat(globalDiscount) || 0,
-                            creditDays: parseInt(creditDays) || 30,
-                            notes: lockedNotes
-                        };
+                    const invoiceBase64 = await generateInvoicePDFBase64(
+                        invoiceDataToSave as any,
+                        selectedDealer,
+                        invoiceItems,
+                        companySettings
+                    );
 
-                        const invoiceBase64 = await generateInvoicePDFBase64(
-                            invoiceDataToSave as any,
-                            lockedDealer,
-                            lockedItems,
-                            companySettings
-                        );
+                    const driveFileName = buildInvoiceFileName(
+                        invoiceDataToSave.referenceId,
+                        selectedDealer.businessName,
+                        new Date(invoiceDate) // use invoice date → correct month folder
+                    );
 
-                        const driveFileName = buildInvoiceFileName(lockedRef, lockedDealer.businessName, lockedDate);
-                        const uploadResult = await uploadInvoicePDFByMonth(invoiceBase64, driveFileName, lockedDate);
-                        
-                        // Save the link back to Supabase
-                        if (uploadResult?.webViewLink) {
-                            await updateTransactionDriveLink(finalId, uploadResult.webViewLink);
-                            console.log('[Billing] Drive link saved:', uploadResult.webViewLink);
-                        }
-                        
-                        setDriveUploadStatus('success');
-                    } catch (driveErr) {
-                        console.error('[Billing] Automatic Drive upload failed:', toErrorPayload(driveErr));
-                        setDriveUploadStatus('error');
-                    }
-                })();
-            }
+                    console.log('[Billing] Starting automatic Drive upload:', driveFileName);
+                    // Upload to ERP Invoices / {Month YYYY} / filename.pdf
+                    await uploadInvoicePDFByMonth(
+                        invoiceBase64,
+                        driveFileName,
+                        new Date(invoiceDate)
+                    );
+                    console.log('[Billing] Automatic Drive upload success (month-wise)!');
+                } catch (driveErr) {
+                    console.error('[Billing] Automatic Drive upload failed:', driveErr);
+                }
+            })();
+        }
 
-            // Prepare preview data using locked variables
-            const invoiceDataForPreview = {
-                id: finalId,
-                customerId: lockedDealer.id,
-                type: TransactionType.INVOICE,
-                amount: lockedTotal,
-                date: lockedDate,
-                referenceId: lockedRef,
-                items: lockedItems,
-                vehicleName, vehicleNumber, destination,
-                transportCharges: parseFloat(transportCharges) || 0,
-                paymentTerms,
-                discountPercent: parseFloat(globalDiscount) || 0,
-                creditDays: parseInt(creditDays) || 30,
-                notes: lockedNotes
-            };
-
-            setPreviewData({ dealer: lockedDealer, invoiceData: invoiceDataForPreview });
             setShowSuccess(true);
-            setShowWhatsAppPreview(true);
-            clearDraft();
+            clearDraft(); // Clear draft only on success
 
+        // Prepare data for WhatsApp Preview instead of sending automatically
+            if (selectedDealer && selectedDealer.phone) {
+                const invoiceDataForPreview = {
+                    id: (finalId || ''),
+                    customerId: selectedDealer.id,
+                    type: TransactionType.INVOICE,
+                    amount: invoiceTotal,
+                    date: new Date(invoiceDate),
+                    referenceId: (finalRefId || (manualInvoiceNo ? `INV${manualInvoiceNo}` : 'TMP')),
+                    items: invoiceItems,
+                    vehicleName,
+                    vehicleNumber,
+                    destination,
+                    transportCharges: parseFloat(transportCharges) || 0,
+                    paymentTerms,
+                    discountPercent: parseFloat(globalDiscount) || 0,
+                    creditDays: parseInt(creditDays) || 30,
+                    notes: JSON.stringify({
+                        buyerOrderNo,
+                        buyerOrderDate,
+                        dispatchDocNo,
+                        dispatchDate,
+                        deliveryNote,
+                        supplierRef,
+                        otherRef,
+                        termsOfDelivery,
+                        manualInvoiceNo,
+                        roundOff,
+                        globalCGST,
+                        globalSGST,
+                        globalIGST
+                    })
+                };
+                setPreviewData({ dealer: selectedDealer, invoiceData: invoiceDataForPreview });
+                setShowWhatsAppPreview(true);
+            }
         } catch (err: any) {
-            console.error('[Billing] Submit failed:', err);
-            showToast(err.message || 'Failed to generate invoice', 'error');
+            console.error('[Billing] Failed to create/update invoice:', err);
+            showToast(err?.message || 'Failed to save invoice. Please try again.', 'error');
         } finally {
             setIsSubmitting(false);
-            isSubmittingRef.current = false;
         }
-    };
-
-
-    const [isHandlingSendRef, setIsHandlingSendRef] = useState(false);
-
-    const waitForDesktopWhatsAppReady = async (maxWaitMs: number = 30000): Promise<{ ready: boolean; status: string }> => {
-        if (!window.electron?.whatsapp?.getStatus) {
-            return { ready: true, status: 'READY' };
-        }
-
-        const start = Date.now();
-        let lastStatus = 'DISCONNECTED';
-        let reconnectTriggered = false;
-        const lastReadyAt = getLastWhatsAppReadyAt();
-        const hadRecentReady = lastReadyAt > 0 && (Date.now() - lastReadyAt) < 24 * 60 * 60 * 1000;
-
-        while (Date.now() - start < maxWaitMs) {
-            const status = await window.electron.whatsapp.getStatus();
-            lastStatus = status;
-
-            if (status === 'READY') {
-                markWhatsAppReadyNow();
-                return { ready: true, status };
-            }
-
-            // If user was recently connected and process restarted in odd state,
-            // attempt one automatic reconnect before failing.
-            if (
-                status === 'DISCONNECTED' &&
-                hadRecentReady &&
-                !reconnectTriggered &&
-                window.electron?.whatsapp?.reconnect
-            ) {
-                reconnectTriggered = true;
-                try {
-                    await window.electron.whatsapp.reconnect();
-                    showToast('Reconnecting WhatsApp automatically...', 'info');
-                } catch (reconnectErr) {
-                    console.warn('[WhatsApp] Auto-reconnect trigger failed:', reconnectErr);
-                }
-            }
-
-            if (['CONNECTING', 'AUTHENTICATED', 'RECONNECTING', 'DISCONNECTED', 'QR_READY'].includes(status)) {
-                await new Promise(r => setTimeout(r, 1200));
-                continue;
-            }
-
-            break;
-        }
-
-        return { ready: false, status: lastStatus };
     };
 
     const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
-        if (!companySettings || !dealer) {
-            console.warn('[WhatsApp] Missing settings or dealer', { companySettings: !!companySettings, dealer: !!dealer });
-            return;
-        }
-        
-        // Multi-layered guard against double-send
-        if (whatsappSending === 'sending' || isHandlingSendRef) {
-            console.log('[WhatsApp] Send already in progress, skipping duplicate call');
-            return;
-        }
+        if (!companySettings || !selectedDealer) return;
 
-        console.log('[WhatsApp] Initiating send for invoice:', invoiceData.referenceId);
-        setIsHandlingSendRef(true);
         setWhatsappSending('sending');
         setWhatsappError(null);
 
         try {
-            const isElectron = !!(window.electron?.whatsapp?.sendPDF);
-            console.log('[WhatsApp] Environment detected:', isElectron ? 'ELECTRON' : 'WEB/BROWSER');
-
-            if (isElectron && window.electron?.whatsapp?.getStatus) {
-                const readiness = await waitForDesktopWhatsAppReady(30000);
-                console.log('[WhatsApp] Electron WhatsApp readiness:', readiness);
-                if (!readiness.ready) {
-                    if (readiness.status === 'QR_READY') {
-                        throw new Error('WhatsApp needs QR confirmation. Please open Settings once, scan QR if shown, and retry.');
-                    }
-                    throw new Error(`WhatsApp is still initializing (${readiness.status}). Please retry in a few seconds.`);
+            if (window.electron?.whatsapp?.getStatus) {
+                const status = await window.electron.whatsapp.getStatus();
+                if (status !== 'READY') {
+                    throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
                 }
             }
 
             // 1. Generate Invoice PDF
-            console.log('[WhatsApp] Generating Invoice PDF...');
-            const invoiceBase64 = await generateInvoicePDFBase64(invoiceData, dealer, invoiceItems, companySettings);
+            const invoiceBase64 = await generateInvoicePDFBase64(invoiceData, selectedDealer, invoiceItems, companySettings);
 
             // 2. Generate Statement PDF
-            console.log('[WhatsApp] Generating Statement PDF...');
-            const filteredTxns = transactions.filter(t => t.customerId === dealer.id);
-            const alreadyIncluded = filteredTxns.some(t => 
-                (t.referenceId === invoiceData.referenceId && t.referenceId !== 'TMP') || 
+            // Ensure the newly created invoice is included in the statement calculation
+            const filteredTxns = transactions.filter(t => t.customerId === selectedDealer.id);
+            // Check if context already has this invoice to avoid duplication
+            const alreadyIncluded = filteredTxns.some(t =>
+                (t.referenceId === invoiceData.referenceId && t.referenceId !== 'TMP') ||
                 (t.id === invoiceData.id && t.id !== '')
             );
+
             const dealerTransactions = alreadyIncluded ? filteredTxns : [...filteredTxns, invoiceData];
             const { invoices: stmtInvoices, payments: stmtPayments } = calculateDealerStatement(dealerTransactions);
+
+            // Calculate summary for statement
             const totalInvoiced = stmtInvoices.reduce((sum, inv) => sum + inv.amount, 0);
             const totalPaid = stmtPayments.reduce((sum, p) => sum + p.amount, 0);
             const totalOutstanding = totalInvoiced - totalPaid;
-            
+            const summary = { totalInvoiced, totalPaid, totalOutstanding };
+
             const statementBase64 = await generateStatementPDFBase64(
-                dealer,
+                selectedDealer,
                 stmtInvoices,
                 stmtPayments,
                 companySettings,
-                { totalInvoiced, totalPaid, totalOutstanding }
+                summary
             );
 
-            // 3. Send via selected method
-            if (isElectron && window.electron?.whatsapp?.sendPDF) {
-                console.log('[WhatsApp] Sending via Electron sendPDF...');
-                // Send Invoice
+            // 3. Send Invoice
+            if (window.electron?.whatsapp?.sendPDF) {
                 await window.electron.whatsapp.sendPDF(
-                    dealer.phone,
+                    selectedDealer.phone,
                     invoiceBase64,
                     `Invoice_${invoiceData.referenceId}.pdf`,
-                    `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
+                    `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
                 );
-                
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                
-                // Send Statement
+            } else {
+                // WEB FALLBACK: Upload to Drive and share Link
+                try {
+                    setWhatsappSending('sending');
+                    const link = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
+                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${link}`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                    // Small delay to simulate sending
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (err: any) {
+                    console.error('Web WhatsApp share failed:', err);
+                    // Fallback to text only if drive fails
+                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}.`;
+                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                }
+            }
+
+            // Small delay between documents
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // 4. Send Statement
+            if (window.electron?.whatsapp?.sendPDF) {
                 await window.electron.whatsapp.sendPDF(
                     dealer.phone,
                     statementBase64,
                     `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`,
                     `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`
                 );
-                markWhatsAppReadyNow();
-                console.log('[WhatsApp] Electron send complete.');
             } else {
-                console.log('[WhatsApp] Sending via Web Fallback (Drive + WA Link)...');
-                const driveStatus = await isGoogleDriveConnected();
-                if (driveStatus !== true) {
-                    throw new Error('Google Drive is not connected for web WhatsApp send. Please connect Drive in Settings and try again.');
+                // WEB FALLBACK: Send Statement Link
+                try {
+                    const stmtLink = await uploadToWhatsAppFolder(statementBase64, `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`);
+                    const msg = `Hello ${dealer.businessName}, please find your account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}. \n\nView Statement: ${stmtLink}`;
+                    const waUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                    window.open(waUrl, '_blank');
+                } catch (e) {
+                    console.warn('Web statement share failed:', e);
                 }
-
-                // Invoice Web Path
-                const invoiceLink = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
-                const invoiceMsg = `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${invoiceLink}`;
-                window.open(`https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(invoiceMsg)}`, '_blank');
-                
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                // Statement Web Path
-                const stmtLink = await uploadToWhatsAppFolder(statementBase64, `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`);
-                const stmtMsg = `Hello ${dealer.businessName}, please find your account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}. \n\nView Statement: ${stmtLink}`;
-                window.open(`https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(stmtMsg)}`, '_blank');
-                console.log('[WhatsApp] Web Fallback triggers complete.');
+                setWhatsappSending('success');
             }
 
             setWhatsappSending('success');
-            await logToApplicationSheet('WhatsApp Invoice Sent', `Dealer: ${dealer.businessName}, Invoice: ${invoiceData.referenceId}, Amount: ₹${invoiceData.amount?.toLocaleString() || '0'}`);
+            setTimeout(() => setWhatsappSending('idle'), 5000);
+
+            // 5. Success
+            setWhatsappSending('success');
             setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
-            console.error('[WhatsApp] Send failed:', err);
+            console.error('WhatsApp send failed', err);
             setWhatsappSending('error');
             setWhatsappError(err.message || 'Failed to send WhatsApp message');
-        } finally {
-            setIsHandlingSendRef(false);
         }
     };
 
@@ -1209,8 +1367,6 @@ export default function Billing() {
         setDealerSearch('');
         setDriveUploadStatus('idle');
         setDriveError(null);
-        // Reset initialization ref so the next render recalculates the invoice number correctly
-        isInvoiceInitialized.current = false;
     };
 
     const handleNewInvoice = async () => {
@@ -1227,6 +1383,7 @@ export default function Billing() {
         }
         resetForm();
         clearDraft();
+        await refreshNextInvoiceNumber();
         // Focus search after reset
         setTimeout(() => dealerSearchInputRef.current?.focus(), 100);
     };
@@ -1324,9 +1481,9 @@ export default function Billing() {
                                             type="text"
                                             value={manualInvoiceNo}
                                             onChange={(e) => {
-                                                const val = e.target.value;
+                                                const val = e.target.value.replace(/\D/g, '');
+                                                setManualInvNoTouched(true);
                                                 setManualInvoiceNo(val);
-                                                checkInvoiceNumberExists(val);
                                             }}
                                             onFocus={(e) => e.target.select()}
                                             onKeyDown={(e) => {
@@ -1338,6 +1495,9 @@ export default function Billing() {
                                             placeholder="Auto"
                                             className={`w-24 p-1 bg-transparent font-bold outline-none ${invoiceNoExists ? 'text-red-500' : 'text-slate-800'}`}
                                         />
+                                        {invoiceNoCheckPending && (
+                                            <span className="text-[10px] text-slate-400">Checking...</span>
+                                        )}
                                         {invoiceNoExists && (
                                             <span className="absolute -bottom-4 left-0 text-[10px] text-red-500 font-medium whitespace-nowrap">Number already exists!</span>
                                         )}
@@ -2165,49 +2325,34 @@ export default function Billing() {
             {
                 showSuccess && selectedDealer && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-300 print:hidden">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300 relative">
-                            {/* Close Button Trigger */}
-                            <button
-                                onClick={() => {
-                                    resetForm();
-                                    router.push('/billing');
-                                }}
-                                className="absolute top-4 right-4 text-white/60 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all z-10"
-                                title="Close"
-                            >
-                                <X size={20} />
-                            </button>
-
-                            <div className="bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center relative overflow-hidden">
-                                {/* Decorative background element */}
-                                <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
-                                
-                                <div className="w-20 h-20 bg-white shadow-xl rounded-full mx-auto flex items-center justify-center mb-4 animate-in zoom-in duration-500 delay-150">
-                                    <CheckCircle className="text-emerald-600" size={44} />
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
+                            <div className="bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center">
+                                <div className="w-20 h-20 bg-white rounded-full mx-auto flex items-center justify-center mb-4 animate-in zoom-in duration-500">
+                                    <CheckCircle className="text-emerald-600" size={48} />
                                 </div>
-                                <h2 className="text-2xl font-black text-white mb-1 tracking-tight">Invoice Generated!</h2>
-                                <p className="text-emerald-50 text-sm font-medium opacity-90">Invoice {generatedRef} created successfully</p>
+                                <h2 className="text-2xl font-bold text-white mb-2">Invoice Generated!</h2>
+                                <p className="text-emerald-50">Invoice {generatedRef} created successfully</p>
                             </div>
 
                             <div className="p-6 space-y-4">
-                                <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-100/50">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Dealer Business Name</p>
-                                    <p className="font-bold text-slate-800 text-lg leading-tight">{selectedDealer.businessName}</p>
+                                <div className="bg-slate-50 p-4 rounded-lg">
+                                    <p className="text-sm text-slate-500 mb-1">Dealer</p>
+                                    <p className="font-bold text-slate-800">{selectedDealer.businessName}</p>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-100/50">
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 text-center">Total Amount</p>
-                                        <p className="font-black text-emerald-600 text-center text-lg">₹{invoiceTotal.toFixed(2)}</p>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-slate-50 p-4 rounded-lg">
+                                        <p className="text-sm text-slate-500 mb-1">Amount</p>
+                                        <p className="font-bold text-slate-800">₹{invoiceTotal.toFixed(2)}</p>
                                     </div>
-                                    <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-100/50">
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 text-center">No. of Items</p>
-                                        <p className="font-black text-slate-800 text-center text-lg">{invoiceItems.length}</p>
+                                    <div className="bg-slate-50 p-4 rounded-lg">
+                                        <p className="text-sm text-slate-500 mb-1">Items</p>
+                                        <p className="font-bold text-slate-800">{invoiceItems.length}</p>
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col gap-3 pt-3">
-                                    <div className="grid grid-cols-3 gap-3">
+                                <div className="flex flex-col gap-3 pt-4">
+                                    <div className="flex gap-3">
                                         <button
                                             onClick={() => {
                                                 if (invoiceTotal <= 0.01) {
@@ -2216,37 +2361,43 @@ export default function Billing() {
                                                 }
                                                 handlePrint();
                                             }}
-                                            className="py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-all shadow-lg shadow-slate-200 flex flex-col items-center gap-1 hover:-translate-y-1 active:scale-95 group"
+                                            className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
                                         >
-                                            <Printer size={18} className="opacity-80 group-hover:opacity-100 transition-opacity" />
-                                            <span className="text-[10px] uppercase tracking-tighter">Print</span>
+                                            <Printer size={20} />
+                                            Print Invoice
                                         </button>
                                         <button
                                             onClick={() => {
                                                 resetForm();
                                                 router.push('/billing');
                                             }}
-                                            className="py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex flex-col items-center gap-1 hover:-translate-y-1 active:scale-95 group"
+                                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
                                         >
-                                            <Plus size={18} className="opacity-80 group-hover:opacity-100 transition-opacity" />
-                                            <span className="text-[10px] uppercase tracking-tighter">New Bill</span>
+                                            <Plus size={20} />
+                                            New Invoice
                                         </button>
                                         <button
                                             onClick={() => {
                                                 const idToEdit = createdInvoiceId || editInvoiceId;
                                                 if (idToEdit) {
+                                                    // Set URL param to allow refresh persistence
                                                     router.push(`/billing?edit=${idToEdit}`);
                                                 }
+                                                // If just closing modal, ensure we have the ID set in state
+                                                // But usually handling URL param change in useEffect is better. 
+                                                // Since we are already on the page with data, just hiding success might be checking url?
+                                                // Actually, editInvoiceId comes from searchParams. 
+                                                // So pushing router is the correct way to trigger 'edit mode'.
                                                 setShowSuccess(false);
                                             }}
-                                            className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 flex flex-col items-center gap-1 hover:-translate-y-1 active:scale-95 group"
+                                            className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                                         >
-                                            <Edit size={18} className="opacity-80 group-hover:opacity-100 transition-opacity" />
-                                            <span className="text-[10px] uppercase tracking-tighter">Edit Bill</span>
+                                            <Edit size={20} />
+                                            Edit
                                         </button>
                                     </div>
 
-                                    {/* WhatsApp Action */}
+                                    {/* WhatsApp Action - Trigger Preview */}
                                     <button
                                         onClick={() => {
                                             if (invoiceTotal <= 0.01) {
@@ -2288,11 +2439,11 @@ export default function Billing() {
                                             setShowWhatsAppPreview(true);
                                         }}
                                         disabled={whatsappSending === 'sending'}
-                                        className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all ${whatsappSending === 'success'
-                                            ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200 scale-100'
+                                        className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all border-2 ${whatsappSending === 'success'
+                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-600'
                                             : whatsappSending === 'error'
-                                                ? 'bg-red-50 text-red-600 border border-red-100'
-                                                : 'bg-white border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-500 hover:text-white shadow-xl shadow-emerald-50 active:scale-95'
+                                                ? 'bg-red-50 border-red-500 text-red-600'
+                                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                                             }`}
                                     >
                                         {whatsappSending === 'sending' ? (
@@ -2300,32 +2451,26 @@ export default function Billing() {
                                         ) : whatsappSending === 'success' ? (
                                             <Check size={20} />
                                         ) : (
-                                            <MessageSquare size={20} />
+                                            <MessageSquare size={20} className="text-emerald-500" />
                                         )}
-                                        <span className="text-sm">
-                                            {whatsappSending === 'sending' ? 'Sending WhatsApp...' :
-                                             whatsappSending === 'success' ? 'Invoice Sent to WhatsApp!' :
-                                             whatsappSending === 'error' ? 'Retry Sending WhatsApp' : 'Send via WhatsApp'}
-                                        </span>
+                                        {whatsappSending === 'sending' ? 'Sending WhatsApp...' :
+                                            whatsappSending === 'success' ? 'Sent to WhatsApp!' :
+                                                whatsappSending === 'error' ? 'Retry WhatsApp Send' : 'Send via WhatsApp'}
                                     </button>
-
                                     {whatsappError && (
-                                        <p className="text-[10px] text-red-500 text-center font-bold tracking-tight bg-red-50 py-1 rounded-md">{whatsappError}</p>
+                                        <p className="text-[10px] text-red-500 text-center">{whatsappError}</p>
                                     )}
-
-                                    {/* Google Drive Status */}
+                                    {/* Google Drive Upload Status */}
                                     {driveUploadStatus !== 'idle' && (
-                                        <div className={`mt-1 py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 ${driveUploadStatus === 'uploading' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
-                                            driveUploadStatus === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                                                'bg-red-50 text-red-600 border border-red-100'
+                                        <div className={`mt-2 py-2 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-2 ${driveUploadStatus === 'uploading' ? 'bg-blue-50 text-blue-600 border border-blue-200' :
+                                            driveUploadStatus === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' :
+                                                'bg-red-50 text-red-600 border border-red-200'
                                             }`}>
-                                            {driveUploadStatus === 'uploading' && <Loader2 size={12} className="animate-spin" />}
-                                            {driveUploadStatus === 'success' && <Check size={12} />}
-                                            <span className="text-[11px]">
-                                                {driveUploadStatus === 'uploading' ? 'Backing up to Google Drive...' :
-                                                 driveUploadStatus === 'success' ? 'Invoice backed up to Google Drive' :
-                                                 'Drive backup failed'}
-                                            </span>
+                                            {driveUploadStatus === 'uploading' && <Loader2 size={14} className="animate-spin" />}
+                                            {driveUploadStatus === 'success' && <Check size={14} />}
+                                            {driveUploadStatus === 'uploading' ? 'Saving to Google Drive...' :
+                                                driveUploadStatus === 'success' ? '✓ Invoice saved to Google Drive' :
+                                                    `Drive upload failed: ${driveError}`}
                                         </div>
                                     )}
                                 </div>
@@ -2454,18 +2599,12 @@ export default function Billing() {
                             </button>
                             <button
                                 onClick={async () => {
-                                    if (whatsappSending === 'sending') return;
-                                    await handleSendWhatsApp(previewData.dealer, previewData.invoiceData);
                                     setShowWhatsAppPreview(false);
+                                    await handleSendWhatsApp(previewData.dealer, previewData.invoiceData);
                                 }}
-                                disabled={whatsappSending === 'sending'}
-                                className={`px-8 py-2.5 bg-emerald-600 text-white font-bold rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-emerald-200 ${whatsappSending === 'sending' ? 'opacity-70 cursor-not-allowed' : 'hover:bg-emerald-700'}`}
+                                className="px-8 py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-lg shadow-emerald-200"
                             >
-                                {whatsappSending === 'sending' ? (
-                                    <Loader2 size={20} className="animate-spin" />
-                                ) : (
-                                    <MessageSquare size={20} />
-                                )}
+                                <MessageSquare size={20} />
                                 {whatsappSending === 'sending' ? 'Sending...' : 'Confirm & Send WhatsApp'}
                             </button>
                         </div>
@@ -2540,30 +2679,7 @@ export default function Billing() {
                             <p className="px-5 text-xs text-red-500 pb-2">{printError}</p>
                         )}
 
-                        {/* Print Options */}
-                        <div className="px-4 pb-2">
-                             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-slate-600">
-                                    <FileText size={16} />
-                                    <span className="text-sm font-medium">Number of Copies</span>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <button 
-                                        onClick={() => setPrintCopies(Math.max(1, printCopies - 1))}
-                                        className="w-8 h-8 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
-                                    >
-                                        -
-                                    </button>
-                                    <span className="w-4 text-center font-bold text-slate-800">{printCopies}</span>
-                                    <button 
-                                        onClick={() => setPrintCopies(Math.min(10, printCopies + 1))}
-                                        className="w-8 h-8 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
-                                    >
-                                        +
-                                    </button>
-                                </div>
-                             </div>
-                        </div>
+                        {/* Actions */}
                         <div className="px-4 pb-4 space-y-2">
                             {/* Print Now — native silent print */}
                             <button
@@ -2578,22 +2694,12 @@ export default function Billing() {
                                     setPrintingStatus('printing');
                                     setPrintError(null);
                                     try {
-                                        // Loop for multiple copies
-                                        for (let i = 0; i < printCopies; i++) {
-                                            console.log(`[Printer] Printing copy ${i + 1} of ${printCopies}...`);
-                                            await window.electron.printer.print(selectedPrinter);
-                                            // Brief pause between jobs to ensure spooler handles them correctly
-                                            if (printCopies > 1 && i < printCopies - 1) {
-                                                await new Promise(r => setTimeout(r, 500));
-                                            }
-                                        }
-                                        
+                                        await window.electron.printer.print(selectedPrinter);
                                         setPrintingStatus('done');
                                         setTimeout(() => {
                                             setShowPrinterDialog(false);
                                             setShowPrintPreview(false);
                                             setPrintingStatus('idle');
-                                            setPrintCopies(1); // Reset copies
                                         }, 800);
                                     } catch (err: any) {
                                         setPrintingStatus('error');

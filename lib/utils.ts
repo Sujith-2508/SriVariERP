@@ -1,52 +1,35 @@
 
 import { Transaction, TransactionType, InvoiceItem, Product } from '@/types';
 
+const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
-/**
- * Calculates the next sequential invoice number by finding the maximum existing number.
- * Scans both referenceId (INVXXX) and manualInvoiceNo in notes.
- */
-export function getNextInvoiceNumber(transactions: Transaction[]): string {
-    const invoiceNos = transactions
-        .filter(t => t.type === TransactionType.INVOICE)
-        .map(t => {
-            // 1. Check referenceId (e.g. INV123)
-            const refMatch = t.referenceId?.match(/\d+/);
-            const refNo = refMatch ? parseInt(refMatch[0], 10) : 0;
+function asFiniteNumber(value: unknown, fallback = 0): number {
+    const num = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(num) ? num : fallback;
+}
 
-            // 2. Check manualInvoiceNo in notes (JSON)
-            let notesNo = 0;
-            if (t.notes) {
-                try {
-                    // Try exact match in JSON string first for speed
-                    const manualMatch = t.notes.match(/"manualInvoiceNo"\s*:\s*"(\d+)"/);
-                    if (manualMatch) {
-                        notesNo = parseInt(manualMatch[1], 10);
-                    } else {
-                        // Fallback to full parse
-                        const parsed = JSON.parse(t.notes);
-                        if (parsed.manualInvoiceNo) {
-                            notesNo = parseInt(parsed.manualInvoiceNo, 10);
-                        }
-                    }
-                } catch { /* ignore parse errors */ }
-            }
+function roundCurrency(value: number): number {
+    return Math.round(value * 100) / 100;
+}
 
-            return Math.max(refNo, notesNo);
-        });
+function parseSafeDate(value: unknown, fallback: Date): Date {
+    const parsed = value instanceof Date ? new Date(value.getTime()) : new Date(value as any);
+    return Number.isNaN(parsed.getTime()) ? new Date(fallback.getTime()) : parsed;
+}
 
-    const maxNo = invoiceNos.length > 0 ? Math.max(...invoiceNos) : 0;
-    return (maxNo + 1).toString().padStart(3, '0');
+function normalizeReferenceId(value: unknown): string {
+    const ref = typeof value === 'string' ? value.trim() : '';
+    return ref || 'N/A';
 }
 
 /**
  * Returns today's date as a YYYY-MM-DD string in IST (Asia/Kolkata, UTC+5:30).
-
  * Use this everywhere you need "today's date" to avoid UTC date drift.
  * e.g. at 11:45 PM IST, new Date().toISOString() gives the PREVIOUS day (wrong).
  */
 export function getISTDateString(date: Date = new Date()): string {
-    return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const safeDate = parseSafeDate(date, new Date());
+    return safeDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     // en-CA locale formats as YYYY-MM-DD which HTML date inputs accept directly
 }
 
@@ -82,57 +65,65 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
     // 1. Separate Invoices and Payments
     const invoices: InvoiceStatement[] = [];
     const payments: PaymentStatement[] = [];
+    const today = new Date();
+    const normalizedOpeningBalance = asFiniteNumber(openingBalance, 0);
 
-    // Sort transactions by actual event time (createdAt first, date fallback).
-    // This prevents date-only invoices (00:00) from incorrectly appearing before receipts created later.
+    // Sort transactions by date ascending to apply FIFO correctly
     const sortedTxns = [...transactions].sort((a, b) => {
-        // Special case: BAL B/F always first
-        if (a.referenceId === 'BAL B/F') return -1;
-        if (b.referenceId === 'BAL B/F') return 1;
-
-        const eventA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
-        const eventB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
-        if (eventA !== eventB) return eventA - eventB;
-
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
+        const fallbackA = parseSafeDate(a.createdAt, new Date(0));
+        const fallbackB = parseSafeDate(b.createdAt, new Date(0));
+        const dateA = parseSafeDate(a.date, fallbackA).getTime();
+        const dateB = parseSafeDate(b.date, fallbackB).getTime();
         if (dateA !== dateB) return dateA - dateB;
 
-        const refA = a.referenceId || '';
-        const refB = b.referenceId || '';
-        return refA.localeCompare(refB);
+        // Special case: BAL B/F always first among same-day transactions
+        const refA = normalizeReferenceId(a.referenceId);
+        const refB = normalizeReferenceId(b.referenceId);
+        if (refA === 'BAL B/F') return -1;
+        if (refB === 'BAL B/F') return 1;
+
+        // Fallback to creation time for same-day transactions
+        const createdA = parseSafeDate(a.createdAt, new Date(0)).getTime();
+        const createdB = parseSafeDate(b.createdAt, new Date(0)).getTime();
+        return createdA - createdB;
     });
 
-    const today = new Date();
-
     sortedTxns.forEach(txn => {
+        const txnDate = parseSafeDate(txn.date, today);
+        const txnAmount = asFiniteNumber(txn.amount, 0);
+        if (txnAmount < 0) return;
+
         if (txn.type === TransactionType.INVOICE) {
-            const dueDate = txn.dueDate ? new Date(txn.dueDate) : null;
+            const dueDate = txn.dueDate ? parseSafeDate(txn.dueDate, txnDate) : null;
             // Calculate days pending
-            const daysPending = Math.ceil((today.getTime() - new Date(txn.date).getTime()) / (1000 * 60 * 60 * 24));
+            const daysPending = Math.max(0, Math.ceil((today.getTime() - txnDate.getTime()) / DAY_IN_MS));
+            const normalizedAmount = roundCurrency(txnAmount);
+            const normalizedCreditDaysRaw = asFiniteNumber(txn.creditDays, 30);
+            const normalizedCreditDays = normalizedCreditDaysRaw > 0 ? Math.floor(normalizedCreditDaysRaw) : 30;
 
             invoices.push({
                 id: txn.id,
-                date: new Date(txn.date),
-                referenceId: txn.referenceId || 'N/A',
-                amount: txn.amount,
+                date: txnDate,
+                referenceId: normalizeReferenceId(txn.referenceId),
+                amount: normalizedAmount,
                 paid: 0,
-                balance: txn.amount,
+                balance: normalizedAmount,
                 daysPending: daysPending,
-                creditDays: txn.creditDays || 30,
+                creditDays: normalizedCreditDays,
                 dueDate: dueDate,
-                isOverdue: dueDate ? today > dueDate : false,
+                isOverdue: dueDate ? (today > dueDate && normalizedAmount > 0) : false,
                 paidDate: null,
                 daysToPay: null,
                 originalTransaction: txn
             });
         } else if (txn.type === TransactionType.PAYMENT) {
+            const normalizedAmount = roundCurrency(txnAmount);
             payments.push({
                 id: txn.id,
-                date: new Date(txn.date),
-                referenceId: txn.referenceId || 'N/A',
-                amount: txn.amount,
-                remaining: txn.amount,
+                date: txnDate,
+                referenceId: normalizeReferenceId(txn.referenceId),
+                amount: normalizedAmount,
+                remaining: normalizedAmount,
                 notes: txn.notes,
                 agentName: txn.agentName,
                 originalTransaction: txn
@@ -143,7 +134,7 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
     // 2. Apply FIFO Logic
     // Iterate through payments and apply to oldest invoices first
     payments.forEach(payment => {
-        let remainingPayment = payment.remaining;
+        let remainingPayment = roundCurrency(Math.max(0, payment.remaining));
 
         for (const invoice of invoices) {
             if (remainingPayment <= 0.001) break; // Use epsilon for float comparison
@@ -153,26 +144,26 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
             let amountToApply = Math.min(remainingPayment, invoice.balance);
 
             // Fix precision
-            amountToApply = Math.round(amountToApply * 100) / 100;
+            amountToApply = roundCurrency(amountToApply);
 
             invoice.paid += amountToApply;
             invoice.balance -= amountToApply;
             remainingPayment -= amountToApply;
 
             // Fix precision after subtraction
-            invoice.paid = Math.round(invoice.paid * 100) / 100;
-            invoice.balance = Math.round(invoice.balance * 100) / 100;
-            remainingPayment = Math.round(remainingPayment * 100) / 100;
+            invoice.paid = roundCurrency(invoice.paid);
+            invoice.balance = roundCurrency(invoice.balance);
+            remainingPayment = roundCurrency(remainingPayment);
 
             // If invoice is fully paid by this payment (allowing for small float error)
             if (invoice.balance <= 0.01 && invoice.paidDate === null) {
                 invoice.balance = 0; // Force to 0 if very close
                 invoice.paidDate = payment.date;
-                invoice.daysToPay = Math.ceil((payment.date.getTime() - invoice.date.getTime()) / (1000 * 60 * 60 * 24));
+                invoice.daysToPay = Math.max(0, Math.ceil((payment.date.getTime() - invoice.date.getTime()) / DAY_IN_MS));
                 invoice.isOverdue = false;
             }
         }
-        payment.remaining = remainingPayment;
+        payment.remaining = Math.max(0, remainingPayment);
     });
 
     // 3. Return structured data with summary precision fixed
@@ -184,18 +175,18 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
 
     // Total outstanding is Net Balance: Opening Balance + Total Invoiced - Total Paid
     // Positive if dealer owes us, negative if we owe dealer (advance)
-    const totalOutstanding = (openingBalance) + totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
+    const totalOutstanding = normalizedOpeningBalance + totalInvoiced - (totalPaidOnInvoices + totalUnapplied);
 
     return {
         invoices,
         payments,
         summary: {
-            openingBalance: Math.round(openingBalance * 100) / 100,
+            openingBalance: roundCurrency(normalizedOpeningBalance),
             openingBalanceDate,
-            totalInvoiced: Math.round(totalInvoiced * 100) / 100,
-            totalPaid: Math.round((totalPaidOnInvoices + totalUnapplied) * 100) / 100,
-            totalOutstanding: Math.round(totalOutstanding * 100) / 100,
-            totalUnapplied: Math.round(totalUnapplied * 100) / 100,
+            totalInvoiced: roundCurrency(totalInvoiced),
+            totalPaid: roundCurrency(totalPaidOnInvoices + totalUnapplied),
+            totalOutstanding: roundCurrency(totalOutstanding),
+            totalUnapplied: roundCurrency(totalUnapplied),
             overdueCount: invoices.filter(inv => inv.isOverdue && inv.balance > 0).length
         }
     };
@@ -226,34 +217,36 @@ export interface DealerProfitSummary {
 }
 
 export function calculateCOGS(items: InvoiceItem[], products: Product[]): number {
-    if (!items || items.length === 0) {
-        console.log('[COGS] No items provided');
+    if (!Array.isArray(items) || items.length === 0) {
         return 0;
     }
 
-    console.log(`[COGS] Calculating for ${items.length} items with ${products.length} products`);
+    const safeProducts = Array.isArray(products) ? products : [];
     let totalCOGS = 0;
     items.forEach(item => {
+        const quantity = Math.max(0, asFiniteNumber(item.quantity, 0));
+        if (quantity <= 0) return;
+
         // PRIMARY: Use costPrice stored on the item itself (captured at billing time)
         // FALLBACK: Look up the product in the catalog by ID, then by name
         let costPrice = 0;
-        if (item.costPrice !== undefined && item.costPrice > 0) {
-            costPrice = Number(item.costPrice);
+        const itemCostPrice = asFiniteNumber(item.costPrice, 0);
+        if (itemCostPrice > 0) {
+            costPrice = itemCostPrice;
         } else {
-            const product = products.find(p =>
+            const normalizedProductName = (item.productName || '').trim().toLowerCase();
+            const product = safeProducts.find(p =>
                 p.id === item.productId ||
                 p.productId === item.productId ||
-                p.name?.toLowerCase() === item.productName?.toLowerCase()
+                p.name?.trim().toLowerCase() === normalizedProductName
             );
-            costPrice = Number(product?.costPrice) || 0;
+            costPrice = Math.max(0, asFiniteNumber(product?.costPrice, 0));
         }
-        const itemCOGS = costPrice * item.quantity;
-        console.log(`[COGS] Item: ${item.productName}, Qty: ${item.quantity}, Cost: ${costPrice}, COGS: ${itemCOGS}`);
+        const itemCOGS = roundCurrency(costPrice * quantity);
         totalCOGS += itemCOGS;
     });
 
-    console.log(`[COGS] Total COGS: ${totalCOGS}`);
-    return totalCOGS;
+    return roundCurrency(totalCOGS);
 }
 
 
@@ -276,38 +269,40 @@ export function calculateInvoiceProfit(
         } catch { return false; }
     })();
 
-    if (isChequeReturn || invoice.referenceId === 'BAL B/F') {
+    if (isChequeReturn) {
         return { revenue: 0, cogs: 0, serviceCharges: 0, agentExpenses: 0, grossProfit: 0, dealerDiscount: 0, netProfit: 0, profitPercentage: 0 };
     }
 
-    const revenue = invoice.amount;
+    const revenue = Math.max(0, asFiniteNumber(invoice.amount, 0));
     // Prefer stored COGS if available, fallback to recalculation
-    const cogs = (invoice.cogs && invoice.cogs > 0) ? invoice.cogs : calculateCOGS(invoice.items || [], products);
-    const serviceCharges = invoice.transportCharges || 0;
-    const dealerDiscountPercent = invoice.discountPercent || 0;
+    const invoiceCogs = asFiniteNumber(invoice.cogs, 0);
+    const cogs = invoiceCogs > 0 ? invoiceCogs : calculateCOGS(invoice.items || [], products);
+    const serviceCharges = Math.max(0, asFiniteNumber(invoice.transportCharges, 0));
+    const normalizedAgentExpenses = Math.max(0, asFiniteNumber(agentExpenses, 0));
+    const dealerDiscountPercent = Math.min(100, Math.max(0, asFiniteNumber(invoice.discountPercent, 0)));
 
     // Calculate gross profit before discount
     // Note: serviceCharges (transport) are treated as profit since company uses its own transport (SV Transport)
-    const grossProfit = revenue - cogs - agentExpenses;
+    const grossProfit = roundCurrency(revenue - cogs - normalizedAgentExpenses);
 
     // Calculate dealer discount amount
-    const dealerDiscount = (grossProfit * dealerDiscountPercent) / 100;
+    const dealerDiscount = roundCurrency((grossProfit * dealerDiscountPercent) / 100);
 
     // Net profit after all expenses and discounts
-    const netProfit = grossProfit - dealerDiscount;
+    const netProfit = roundCurrency(grossProfit - dealerDiscount);
 
     // Profit percentage
     const profitPercentage = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
     return {
         revenue,
-        cogs,
+        cogs: roundCurrency(cogs),
         serviceCharges,
-        agentExpenses,
+        agentExpenses: normalizedAgentExpenses,
         grossProfit,
         dealerDiscount,
         netProfit,
-        profitPercentage
+        profitPercentage: roundCurrency(profitPercentage)
     };
 }
 
@@ -318,7 +313,7 @@ export function getDealerProfitSummary(
     transactions: Transaction[],
     products: Product[]
 ): DealerProfitSummary {
-    const invoices = transactions.filter(t => t.type === TransactionType.INVOICE && t.referenceId !== 'BAL B/F');
+    const invoices = transactions.filter(t => t.type === TransactionType.INVOICE);
 
     let totalRevenue = 0;
     let totalProfit = 0;
@@ -326,20 +321,20 @@ export function getDealerProfitSummary(
 
     invoices.forEach(invoice => {
         const profit = calculateInvoiceProfit(invoice, products);
-        totalRevenue += profit.revenue;
-        totalProfit += profit.netProfit;
-        totalDiscounts += profit.dealerDiscount;
+        totalRevenue += asFiniteNumber(profit.revenue, 0);
+        totalProfit += asFiniteNumber(profit.netProfit, 0);
+        totalDiscounts += asFiniteNumber(profit.dealerDiscount, 0);
     });
 
     const overallProfitPercentage = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
     const averageProfitPerInvoice = invoices.length > 0 ? totalProfit / invoices.length : 0;
 
     return {
-        totalRevenue,
-        totalProfit,
-        totalDiscounts,
-        overallProfitPercentage,
-        averageProfitPerInvoice,
+        totalRevenue: roundCurrency(totalRevenue),
+        totalProfit: roundCurrency(totalProfit),
+        totalDiscounts: roundCurrency(totalDiscounts),
+        overallProfitPercentage: roundCurrency(overallProfitPercentage),
+        averageProfitPerInvoice: roundCurrency(averageProfitPerInvoice),
         invoiceCount: invoices.length
     };
 }
@@ -357,11 +352,12 @@ export function getProfitColor(profitPercentage: number): string {
  * Format currency for display
  */
 export function formatCurrency(amount: number): string {
+    const safeAmount = asFiniteNumber(amount, 0);
     return new Intl.NumberFormat('en-IN', {
         style: 'currency',
         currency: 'INR',
         minimumFractionDigits: 2
-    }).format(amount);
+    }).format(safeAmount);
 }
 
 import { type ClassValue, clsx } from "clsx"

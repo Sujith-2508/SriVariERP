@@ -18,6 +18,7 @@ import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
 import { useData } from '@/contexts/DataContext';
 import { getISTDateString } from '@/lib/utils';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 
 type ExpenseExportOption = 'complete' | 'financial_year' | 'by_month' | 'custom_range';
 
@@ -25,6 +26,7 @@ export default function CompanyExpenseManagement() {
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const { companySettings } = useData();
+    const effectiveCompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [showExportModal, setShowExportModal] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
@@ -179,7 +181,7 @@ export default function CompanyExpenseManagement() {
                 showToast('No expenses found for the selected period', 'warning');
                 return;
             }
-            generateExpenseReportPDF(data as any[], companySettings, label);
+            generateExpenseReportPDF(data as any[], effectiveCompanySettings, label);
             setShowExportModal(false);
         } finally {
             setIsExporting(false);

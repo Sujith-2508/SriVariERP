@@ -7,7 +7,15 @@
   "main": "main.js",
   "scripts": {
     "dev": "next dev",
+    "lint": "tsc --noEmit --pretty false --incremental false",
+    "typecheck": "tsc --noEmit --incremental false",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "npx playwright test",
+    "verify:dev": "npm run lint && npm run typecheck && npm run test:unit && npm run test:integration && npm run build:clean",
     "build": "next build",
+    "build:clean": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true})\" && next build",
     "start": "next start",
     "export": "next build",
     "electron": "electron .",
@@ -16,9 +24,7 @@
     "build:win": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win",
     "build:mac": "cross-env ELECTRON_BUILD=1 next build && electron-builder --mac",
     "build:all": "cross-env ELECTRON_BUILD=1 next build && electron-builder --win --mac",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "npx playwright test"
+    "test:watch": "vitest"
   },
   "build": {
     "appId": "com.srivari.erp",

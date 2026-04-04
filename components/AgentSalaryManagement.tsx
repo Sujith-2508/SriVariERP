@@ -15,6 +15,7 @@ import { generateSalaryReportPDF } from '@/lib/pdfGenerator';
 import { Calendar, DollarSign, Plus, Edit2, Check, X, Download, CalendarDays, CalendarRange, Pencil, LayoutGrid } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useData } from '@/contexts/DataContext';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 
 type ExportOption = 'complete' | 'financial_year' | 'by_month' | 'custom_range';
 
@@ -24,6 +25,7 @@ interface AgentSalaryManagementProps {
 
 export default function AgentSalaryManagement({ agents }: AgentSalaryManagementProps) {
     const { companySettings } = useData();
+    const effectiveCompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [salaries, setSalaries] = useState<AgentSalaryData[]>([]);
@@ -184,7 +186,7 @@ export default function AgentSalaryManagement({ agents }: AgentSalaryManagementP
                 opts = { agentId: agentIdFilter, year: exportFromYear };
             }
 
-            generateSalaryReportPDF(agentList, data as any[], companySettings, opts);
+            generateSalaryReportPDF(agentList, data as any[], effectiveCompanySettings, opts);
             setShowExportModal(false);
         } finally {
             setIsExporting(false);

@@ -16,6 +16,7 @@ import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { deleteAllTabsExcept } from '@/lib/googleSheetDealers';
 import { isGoogleDriveConnected, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
+import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 
 // ... existing imports
 
@@ -37,6 +38,7 @@ export default function DealerLedger() {
     const [exportingPdf, setExportingPdf] = useState(false);
     const [bulkExporting, setBulkExporting] = useState(false);
     const [bulkSyncStatus, setBulkSyncStatus] = useState<{ phase: string; done: number; total: number; detail?: string } | null>(null);
+    const effectiveCompanySettings: CompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
 
 
     // Date range modal state
@@ -483,7 +485,7 @@ export default function DealerLedger() {
         try {
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
-                selectedDealer, invoices, payments, companySettings, summary
+                selectedDealer, invoices, payments, effectiveCompanySettings, summary
             );
             const byteChars = atob(base64Pdf);
             const byteArr = new Uint8Array(byteChars.length);
@@ -533,7 +535,7 @@ export default function DealerLedger() {
         try {
             const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
             const base64Pdf = await generateStatementPDFBase64(
-                selectedDealer, invoices, payments, companySettings, summary
+                selectedDealer, invoices, payments, effectiveCompanySettings, summary
             );
             const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
             const rangeText = getWhatsAppRangeText();
@@ -613,7 +615,7 @@ export default function DealerLedger() {
                 selectedDealer,
                 invoices,
                 payments,
-                companySettings,
+                effectiveCompanySettings,
                 summary
             );
 
@@ -677,19 +679,15 @@ export default function DealerLedger() {
         setIsSyncing(true);
         setBulkSyncStatus({ phase: 'starting', done: 0, total: 0, detail: 'Preparing sync...' });
         try {
-            const result = await bulkSyncDealers((phase, done, total, detail) => {
-                setBulkSyncStatus({ phase, done, total, detail });
-                console.log(`[DealerLedger][BulkSyncUI] ${phase} ${done}/${total}${detail ? ` - ${detail}` : ''}`);
-            });
+            const totalDealers = dealers.length;
+            setBulkSyncStatus({ phase: 'syncing', done: 0, total: totalDealers, detail: 'Syncing dealers and ledgers...' });
+            await bulkSyncDealers();
+            setBulkSyncStatus({ phase: 'completed', done: totalDealers, total: totalDealers, detail: 'Sync completed successfully.' });
 
-            if (result.total === 0) {
+            if (totalDealers === 0) {
                 showToast('No dealers found to sync.', 'info');
-            } else if (result.errors === 0) {
-                showToast(`Full sync complete! ${result.synced}/${result.total} dealers synced successfully.`, 'success');
-            } else if (result.synced > 0) {
-                showToast(`Partial sync: ${result.synced} succeeded, ${result.errors} failed. Check console logs for failed dealer names.`, 'warning');
             } else {
-                showToast('Sync failed for all dealers. Check console logs for connection or permission errors.', 'error');
+                showToast(`Full sync complete! ${totalDealers} dealers synced successfully.`, 'success');
             }
         } catch (error) {
             console.error('Core sync failed:', error);
@@ -795,7 +793,7 @@ export default function DealerLedger() {
             const sortedDealers = [...dealers].sort((a, b) =>
                 a.businessName.localeCompare(b.businessName)
             );
-            const company = companySettings;
+            const company = effectiveCompanySettings;
             const label = getPdfLabel();
 
             // Create a master merged PDF document

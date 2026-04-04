@@ -5,11 +5,9 @@ import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, Paym
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
-import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet, logToApplicationSheet } from '@/lib/googleSheetWriter';
+import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
-import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { useToast } from './ToastContext';
-import { forceSyncPurchases } from '@/lib/purchaseService';
 
 interface InvoiceData {
     vehicleName?: string;
@@ -22,7 +20,6 @@ interface InvoiceData {
     notes?: string;
     invoiceDate?: Date;
     manualInvoiceNo?: string;
-    driveLink?: string;
 }
 
 interface DataContextType {
@@ -41,7 +38,6 @@ interface DataContextType {
     // Methods
     createInvoice: (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
     updateInvoice: (invoiceId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => Promise<{ id: string, refId: string }>;
-    updateTransactionDriveLink: (id: string, link: string) => Promise<void>;
     recordPayment: (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => Promise<string>;
     updateStock: (productId: string, quantity: number) => Promise<void>;
     addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
@@ -54,13 +50,14 @@ interface DataContextType {
     getDealerTransactions: (dealerId: string, customTxns?: Transaction[]) => Transaction[];
     getInvoicePaymentHistory: (invoiceId: string) => PaymentAllocation[];
     refreshData: () => Promise<void>;
-    bulkSyncDealers: (onProgress?: (phase: string, done: number, total: number, detail?: string) => void) => Promise<{ synced: number; errors: number; total: number }>;
+    bulkSyncDealers: () => Promise<void>;
     syncAllDealerTabs: () => Promise<{ created: number; skipped: number }>;
     importDealersFromSheet: () => Promise<{ added: number; updated: number }>;
     importDealersFromTally: () => Promise<{ added: number; updated: number }>;
     deleteDealerWithSheet: (id: string, sheetName: string, deleteTab: boolean) => Promise<void>;
     syncDealerLedgerToSheet: (dealerId: string) => Promise<void>;
     bulkSyncAllDealerLedgers: (onProgress?: (done: number, total: number, name: string) => void) => Promise<{ synced: number; errors: number }>;
+    rollOverDealerYear: (dealerId: string, closingDateStr: string, openingDateStr: string) => Promise<boolean>;
     // Agent methods
     addAgent: (agent: Omit<Agent, 'id'>) => Promise<string>;
     updateAgent: (agent: Agent) => Promise<void>;
@@ -70,7 +67,7 @@ interface DataContextType {
     addCustomer: (customer: Omit<Dealer, 'id'>) => Promise<string>;
     deleteCustomer: (id: string) => Promise<void>;
     getCustomerTransactions: (customerId: string) => Transaction[];
-    companySettings: CompanySettings;
+    companySettings: CompanySettings | null;
     lastBackgroundSync: Date | null;
 }
 
@@ -106,19 +103,6 @@ const transformDealer = (row: any): Dealer => ({
     lastTransactionDate: row.last_transaction_date ? new Date(row.last_transaction_date) : undefined,
 });
 
-const getDriveLinkFromNotes = (notesRaw: any): string | undefined => {
-    try {
-        if (!notesRaw || typeof notesRaw !== 'string') return undefined;
-        const parsed = JSON.parse(notesRaw);
-        if (parsed && typeof parsed === 'object' && typeof parsed.driveLink === 'string' && parsed.driveLink.trim()) {
-            return parsed.driveLink.trim();
-        }
-    } catch {
-        // Ignore non-JSON notes
-    }
-    return undefined;
-};
-
 const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []): Transaction => {
     const transactionId = row.id;
     const type = row.type as TransactionType;
@@ -147,7 +131,6 @@ const transformTransaction = (row: any, allAllocations: PaymentAllocation[] = []
         destination: row.destination,
         paymentTerms: row.payment_terms,
         discountPercent: row.discount_percent ? Number(row.discount_percent) : undefined,
-        driveLink: row.drive_link || getDriveLinkFromNotes(row.notes),
         items: row.invoice_items && row.invoice_items.length > 0
             ? row.invoice_items.map(transformInvoiceItem)
             : (() => {
@@ -222,7 +205,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [error, setError] = useState<string | null>(null);
     const [trackingData, setTrackingData] = useState<AgentTrackingData[]>([]);
     const [loadingTracking, setLoadingTracking] = useState(false);
-    const [companySettings, setCompanySettings] = useState<CompanySettings>(DEFAULT_COMPANY_SETTINGS);
+    const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
 
     // Sequential counters
     const [invoiceCount, setInvoiceCount] = useState(1);
@@ -248,14 +231,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [isLoading]);
 
     // Fetch all data - Products from Google Sheet, others from Supabase
-    const fetchData = useCallback(async (force: boolean = false) => {
+    const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
 
         try {
             // Fetch products from Google Sheet via API (primary)
             try {
-                const { products: sheetProducts } = await readProductsFromSheet(force);
+                const { products: sheetProducts } = await readProductsFromSheet();
                 if (sheetProducts.length > 0) {
                     setProducts(sheetProducts);
                     setProductCount(sheetProducts.length + 1);
@@ -289,18 +272,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
             }
 
-            // Fetch company settings - Explicitly select columns to avoid schema mismatch
-            const { data: companyData, error: companyError } = await supabase
+            // Fetch company settings - Explicitly select columns to avoid schema mismatch with account_type
+            const { data: companyData } = await supabase
                 .from('company_settings')
                 .select('id, company_name, address_line1, address_line2, city, state, pin_code, gst_number, pan_number, phone, email, bank_name, bank_branch, account_number, ifsc_code, account_holder_name, account_type')
-                .order('updated_at', { ascending: false })
-                .limit(1)
                 .single();
-
-            if (companyError && companyError.code !== 'PGRST116') {
-                console.error('[DataContext] Error fetching company settings:', companyError);
-            }
-
             if (companyData) {
                 setCompanySettings({
                     id: companyData.id,
@@ -321,8 +297,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     accountHolderName: companyData.account_holder_name,
                     accountType: companyData.account_type
                 });
-            } else {
-                setCompanySettings(DEFAULT_COMPANY_SETTINGS);
             }
 
             // Fetch dealers from Supabase
@@ -338,11 +312,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             // Fetch transactions and items in parallel but separately to avoid join hangs
             const [transactionsResult, itemsResult] = await Promise.all([
-                supabase
-                    .from('transactions')
-                    .select('*')
-                    .order('date', { ascending: false })
-                    .order('created_at', { ascending: false }),
+                supabase.from('transactions').select('*').order('date', { ascending: false }),
                 supabase.from('invoice_items').select('*')
             ]);
 
@@ -420,15 +390,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setReceiptCount(payments.length + 1);
 
         } catch (err: any) {
-            const errorDetails = {
-                message: err?.message || err || 'Unknown error',
-                name: err?.name,
-                code: err?.code,
-                status: err?.status,
-                details: err?.details,
-                hint: err?.hint,
-            };
-            console.error('[DataContext] FETCH FAILURE:', JSON.stringify(errorDetails, null, 2));
+            console.error('Error fetching data (full details):', {
+                message: err?.message || 'No message',
+                details: err?.details || 'No details',
+                hint: err?.hint || 'No hint',
+                code: err?.code || 'No code',
+                stack: err?.stack || 'No stack'
+            });
             setError(err?.message || 'Failed to fetch data');
         } finally {
             setIsLoading(false);
@@ -436,7 +404,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const refreshData = async () => {
-        await fetchData(true); // Forced refresh hits the API
+        await fetchData();
         await loadTrackingData();
     };
 
@@ -461,13 +429,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     useEffect(() => {
         fetchData();
         loadTrackingData();
-
-        // Log application startup only once per session to keep logs minimal
-        const sessionLogKey = 'erp_session_logged';
-        if (!sessionStorage.getItem(sessionLogKey)) {
-            logToApplicationSheet('Application Started', 'User opened the ERP application session');
-            sessionStorage.setItem(sessionLogKey, 'true');
-        }
 
         // Listen for local storage product updates from purchase service
         const handleStorageUpdate = () => {
@@ -536,13 +497,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         const dealer = transformDealer(dealerData);
                         setDealers(prev => prev.map(d => d.id === dealer.id ? dealer : d));
 
-                        // 3. Sync to Google Sheet (no running balance - computed in UI)
+                        // 3. Sync to Google Sheet
                         console.log('[DataContext] REAL-TIME syncing mobile payment to Sheet:', data.reference_id);
                         const transformedTxn = transformTransaction(data);
                         syncTransactionToDealerSheet(dealer.businessName, transformedTxn).catch(e =>
                             console.warn('[DataContext] Real-time sheet sync failed:', e)
                         );
-                        logToApplicationSheet('Mobile Transaction Synced', `Real-time sync: ${data.reference_id} from ${dealer.businessName}`, data.amount);
                     }
                 } catch (e) {
                     console.error('[DataContext] Error handling real-time transaction sync:', e);
@@ -550,55 +510,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         });
 
-        // NOTE: Window focus re-fetches removed — they caused most 429 quota exhaustion.
-        // Data is kept fresh via the 5-min read cache in sheetsQueue.
+        // NEW: Handle window focus to catch any transactions missed while the app was backgrounded/paused
+        const handleFocus = () => {
+            console.log('[DataContext] Window focused: Refreshing for latest mobile syncs');
+            refreshData();
+        };
+        window.addEventListener('focus', handleFocus);
 
         return () => {
             window.removeEventListener('storage_products_updated', handleStorageUpdate);
+            window.removeEventListener('focus', handleFocus);
             statusSub.unsubscribe();
             locationSub.unsubscribe();
             transactionSub.unsubscribe();
         };
     }, []); // Removed fetchData/loadTrackingData from deps to prevent infinite loops if they change
-
-    // ── Auto-sync suppliers (payables data) once per session ──────────────────
-    // Supplier data lives in localStorage['sve_suppliers'] and is only populated
-    // by forceSyncPurchases(). Without this auto-trigger, Payables always shows
-    // ₹0 until the user manually presses "Force Sync" in the Purchases page.
-    useEffect(() => {
-        const SUPPLIER_SYNC_KEY  = 'erp_supplier_synced';
-        const SUPPLIER_CACHE_KEY = 'erp_supplier_sync_ts';
-        const CACHE_MAX_AGE_MS   = 30 * 60_000; // 30 minutes — re-sync at most once per 30 min
-
-        // Check if we synced recently (persists across sessions via localStorage)
-        const lastSync = parseInt(localStorage.getItem(SUPPLIER_CACHE_KEY) || '0', 10);
-        const cacheStale = Date.now() - lastSync > CACHE_MAX_AGE_MS;
-
-        // Also check session guard (prevents double-trigger if component remounts)
-        if (sessionStorage.getItem(SUPPLIER_SYNC_KEY) && !cacheStale) {
-            console.log('[DataContext] Supplier data is fresh, skipping auto-sync');
-            return;
-        }
-
-        sessionStorage.setItem(SUPPLIER_SYNC_KEY, 'true');
-
-        // Delay by 15 s so the initial app load settles first
-        // (product reads + dealer reads grab quota; give them room)
-        const timer = setTimeout(async () => {
-            try {
-                console.log('[DataContext] Auto-syncing supplier data (payables)...');
-                const ok = await forceSyncPurchases();
-                if (ok) {
-                    localStorage.setItem(SUPPLIER_CACHE_KEY, String(Date.now()));
-                    console.log('[DataContext] Supplier auto-sync complete ✓');
-                }
-            } catch (e) {
-                console.warn('[DataContext] Supplier auto-sync failed (non-critical):', e);
-            }
-        }, 15_000);
-
-        return () => clearTimeout(timer);
-    }, []);
 
     const updateStock = async (productId: string, quantity: number) => {
         const currentProducts = getLocalProducts();
@@ -620,7 +546,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             updateProductInSheet(prod.rowIndex || 0, prod).catch(e =>
                 console.warn('[DataContext] Stock sync to Google Sheet failed (non-critical):', e)
             );
-            logToApplicationSheet('Stock Updated', `Product ${prod.name} decreased by ${quantity} (Sales/Billing). Final stock: ${prod.stock}`, prod.price);
         }
     };
 
@@ -636,13 +561,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProductCount(prev => prev + 1);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet (queued — no extra re-read needed)
+        // Sync to Google Sheet, then re-read to get authoritative data (with rowIndex)
         try {
             await addProductToSheet(newProduct);
-            logToApplicationSheet('Product Created', `Added ${newProduct.name} (Category: ${newProduct.category})`, newProduct.price);
-            // UI already reflects the new product from local state
+            const { products: sheetProducts } = await readProductsFromSheet();
+            if (sheetProducts.length > 0) {
+                setProducts(sheetProducts);
+                setProductCount(sheetProducts.length + 1);
+                saveLocalProducts(sheetProducts);
+            }
         } catch (e) {
-            console.warn('[DataContext] Could not queue product add to Google Sheet:', e);
+            console.warn('[DataContext] Could not sync product add to Google Sheet:', e);
         }
     };
 
@@ -657,15 +586,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet (queued — no extra re-read needed)
+        // Sync to Google Sheet (search by name if rowIndex missing), then re-read
         try {
             const productIndex = products.findIndex(p => p.id === updatedProduct.id);
             const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
             await updateProductInSheet(rowIndex, updatedProduct);
-            logToApplicationSheet('Product Updated', `Updated product details for ${updatedProduct.name}`, updatedProduct.price);
-            // UI already reflects the update from local state
+            const { products: sheetProducts } = await readProductsFromSheet();
+            if (sheetProducts.length > 0) {
+                setProducts(sheetProducts);
+                saveLocalProducts(sheetProducts);
+            }
         } catch (e) {
-            console.warn('[DataContext] Could not queue product update to Google Sheet:', e);
+            console.warn('[DataContext] Could not sync product update to Google Sheet:', e);
         }
     };
 
@@ -679,16 +611,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync deletion to Google Sheet (queued)
+        // Sync deletion to Google Sheet (physically removes the row), then re-read
         try {
             const rowIndex = (product as any)?.rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
             if (rowIndex > 0 || product?.name) {
                 await deleteProductFromSheet(rowIndex, product?.name);
             }
-            logToApplicationSheet('Product Deleted', `Removed product: ${product?.name || id}`);
-            // UI already reflects deletion from local state
+            const { products: sheetProducts } = await readProductsFromSheet();
+            if (sheetProducts.length > 0) {
+                setProducts(sheetProducts);
+                setProductCount(sheetProducts.length + 1);
+                saveLocalProducts(sheetProducts);
+            }
         } catch (e) {
-            console.warn('[DataContext] Could not queue product delete to Google Sheet:', e);
+            console.warn('[DataContext] Could not sync product delete to Google Sheet:', e);
         }
     };
 
@@ -760,7 +696,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         }
 
-        logToApplicationSheet('Dealer Created', `Business: ${newDealer.businessName}, City: ${newDealer.city}`, (newDealer as any).openingBalance || 0);
         return newDealer.id;
     };
 
@@ -848,7 +783,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             await syncDealerToSheet(updatedDealer, companySettings);
             console.log(`[DataContext] Successfully updated dealer ${updatedDealer.businessName} in Google Sheets`);
-            logToApplicationSheet('Dealer Updated', `Updated core info for ${updatedDealer.businessName}`, updatedDealer.balance);
         } catch (e) {
             console.error('[DataContext] Dealer update sync to Google Sheet failed:', e);
         }
@@ -920,7 +854,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             removeDealerFromSheet(id, dealerToDelete.businessName).catch(e =>
                 console.warn('[DataContext] Dealer removal sync to Google Sheet failed:', e)
             );
-            logToApplicationSheet('Dealer Deleted', `Business: ${dealerToDelete.businessName}, ID: ${id}`);
         }
     };
 
@@ -974,32 +907,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncDealerLedgerToSheet(dealerId).catch(e =>
             console.warn('[DataContext] Failed to re-sync dealer ledger after transaction deletion:', e)
         );
-        logToApplicationSheet('Transaction Deleted', `Ref: ${txn.referenceId}, Type: ${txn.type}, Dealer: ${dealer.businessName}`, txn.amount);
     };
 
     const getDealerTransactions = (dealerId: string, customTxns?: Transaction[]): Transaction[] => {
         const txnsToUse = customTxns || transactions;
-        const deduped = txnsToUse
+        return txnsToUse
             .filter(t => t.customerId === dealerId)
-            .filter((txn, index, arr) => arr.findIndex(other => other.id === txn.id) === index);
-
-        return deduped
             .sort((a, b) => {
-                // Opening balance row must stay at the top.
-                if (a.referenceId === 'BAL B/F') return -1;
-                if (b.referenceId === 'BAL B/F') return 1;
-
-                const eventA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
-                const eventB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
-                if (eventA !== eventB) return eventA - eventB;
-
                 const dateA = new Date(a.date).getTime();
                 const dateB = new Date(b.date).getTime();
+
+                // Primary sort: by date (ascending)
                 if (dateA !== dateB) return dateA - dateB;
 
-                const refA = a.referenceId || '';
-                const refB = b.referenceId || '';
-                return refA.localeCompare(refB);
+                // Secondary sort: by precise generation time (createdAt)
+                const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return createdA - createdB;
             });
     };
 
@@ -1008,63 +932,82 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return invoice?.paymentAllocations || [];
     };
 
-    const normalizeInvoiceReference = (manualInvoiceNo: string): string => {
-        const cleaned = String(manualInvoiceNo || '').trim().toUpperCase();
-        if (!cleaned) return '';
-        return cleaned.startsWith('INV') ? cleaned : `INV${cleaned}`;
+    const parseInvoiceReferenceNumber = (referenceId?: string | null): number | null => {
+        if (!referenceId || !referenceId.startsWith('INV')) return null;
+        const suffix = referenceId.slice(3).trim();
+        if (!/^\d+$/.test(suffix)) return null;
+        const parsed = Number.parseInt(suffix, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     };
 
-    const invoiceReferenceExists = async (referenceId: string, excludeTransactionId?: string): Promise<boolean> => {
-        const { data, error } = await supabase
-            .from('transactions')
-            .select('id')
-            .eq('type', 'INVOICE')
-            .eq('reference_id', referenceId)
-            .limit(2);
+    const formatInvoiceReference = (invoiceNo: number): string => {
+        const width = Math.max(3, String(invoiceNo).length);
+        return `INV${String(invoiceNo).padStart(width, '0')}`;
+    };
 
-        if (error) {
-            console.error('[DataContext] Failed to validate invoice number uniqueness:', error);
-            throw new Error(`Unable to validate invoice number ${referenceId}`);
+    const fetchUsedInvoiceNumbersFromDb = async (excludeTransactionId?: string): Promise<Set<number>> => {
+        let query = supabase
+            .from('transactions')
+            .select('id, reference_id')
+            .eq('type', 'INVOICE')
+            .ilike('reference_id', 'INV%');
+
+        if (excludeTransactionId) {
+            query = query.neq('id', excludeTransactionId);
         }
 
-        if (!data || data.length === 0) return false;
-        if (!excludeTransactionId) return true;
-        return data.some(row => row.id !== excludeTransactionId);
+        const { data, error } = await query;
+        if (error) {
+            throw new Error(`Failed to validate invoice number: ${error.message}`);
+        }
+
+        const used = new Set<number>();
+        for (const row of data || []) {
+            const parsed = parseInvoiceReferenceNumber(row.reference_id);
+            if (parsed !== null) used.add(parsed);
+        }
+
+        return used;
+    };
+
+    const getFirstAvailableInvoiceNumber = (used: Set<number>): number => {
+        let candidate = 1;
+        while (used.has(candidate)) {
+            candidate += 1;
+        }
+        return candidate;
+    };
+
+    const resolveInvoiceReferenceForSave = async (
+        manualInvoiceNo?: string,
+        excludeTransactionId?: string
+    ): Promise<string> => {
+        const used = await fetchUsedInvoiceNumbersFromDb(excludeTransactionId);
+        const trimmed = manualInvoiceNo?.trim() || '';
+
+        if (trimmed) {
+            if (!/^\d+$/.test(trimmed)) {
+                throw new Error('Invoice number must contain only digits.');
+            }
+
+            const parsedManual = Number.parseInt(trimmed, 10);
+            if (!Number.isFinite(parsedManual) || parsedManual <= 0) {
+                throw new Error('Invoice number must be greater than zero.');
+            }
+
+            if (used.has(parsedManual)) {
+                throw new Error(`Invoice number ${formatInvoiceReference(parsedManual)} is already used.`);
+            }
+
+            return formatInvoiceReference(parsedManual);
+        }
+
+        const next = getFirstAvailableInvoiceNumber(used);
+        return formatInvoiceReference(next);
     };
 
     const createInvoice = async (dealerId: string, items: InvoiceItem[], totalAmount: number, invoiceData?: InvoiceData) => {
-        let invoiceNumber = '';
-        if (invoiceData?.manualInvoiceNo) {
-            invoiceNumber = normalizeInvoiceReference(invoiceData.manualInvoiceNo);
-            if (!invoiceNumber) {
-                throw new Error('Please enter a valid invoice number');
-            }
-
-            const duplicateManual = await invoiceReferenceExists(invoiceNumber);
-            if (duplicateManual) {
-                throw new Error(`Invoice number ${invoiceNumber} already exists. Please use a different number.`);
-            }
-        } else {
-            // Robust auto-generation: Find the highest existing numeric INV suffix
-            const invoiceSuffixes = transactions
-                .filter(t => t.type === 'INVOICE' && t.referenceId?.startsWith('INV'))
-                .map(t => {
-                    const suffix = t.referenceId?.replace('INV', '');
-                    return suffix && /^\d+$/.test(suffix) ? parseInt(suffix) : 0;
-                })
-                .filter(n => n > 0);
-
-            const maxSuffix = invoiceSuffixes.length > 0 ? Math.max(...invoiceSuffixes) : 0;
-            let nextNo = Math.max(maxSuffix + 1, invoiceCount + 1);
-            invoiceNumber = `INV${String(nextNo).padStart(3, '0')}`;
-
-            // Avoid stale-state collisions by probing DB until we find a free ref.
-            // This is a guard; DB-level unique constraint is still recommended.
-            while (await invoiceReferenceExists(invoiceNumber)) {
-                nextNo += 1;
-                invoiceNumber = `INV${String(nextNo).padStart(3, '0')}`;
-            }
-        }
+        const invoiceNumber = await resolveInvoiceReferenceForSave(invoiceData?.manualInvoiceNo);
 
         const invoiceDate = invoiceData?.invoiceDate || new Date();
 
@@ -1132,9 +1075,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (txnError) {
             console.error('[DataContext] Error creating invoice:', txnError.message, txnError.details);
-            if ((txnError as any)?.code === '23505') {
-                throw new Error(`Invoice number ${invoiceNumber} already exists. Please use a different number.`);
-            }
             throw new Error(`Failed to create invoice: ${txnError.message}`);
         }
 
@@ -1207,18 +1147,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const allDealerTxns = [...transactions, newTxn]
                 .filter(t => t.customerId === dealerId)
                 .sort((a, b) => {
-                    const eventA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
-                    const eventB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
-                    if (eventA !== eventB) return eventA - eventB;
                     const dateA = new Date(a.date).getTime();
                     const dateB = new Date(b.date).getTime();
-                    return dateA - dateB;
+                    if (dateA !== dateB) return dateA - dateB;
+                    // Strict chronological sorting per user request
+                    const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                    const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                    return createdA - createdB;
                 });
-            // runningBal computed but not used in sheet - balance computed from opening + invoices - receipts
             syncTransactionToDealerSheet(dealer.businessName, newTxn).catch(e =>
                 console.warn('[DataContext] Failed to sync invoice to dealer sheet:', e)
             );
-            logToApplicationSheet('Invoice Created', `Invoice ${invoiceNumber} for ${dealer.businessName}`, totalAmount);
         }
 
         return { id: txnData.id, refId: invoiceNumber };
@@ -1229,17 +1168,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const existingTxn = transactions.find(t => t.id === invoiceId);
         if (!existingTxn) throw new Error("Invoice not found");
 
-        const normalizedManualRef = invoiceData?.manualInvoiceNo
-            ? normalizeInvoiceReference(invoiceData.manualInvoiceNo)
-            : undefined;
-
-        const finalReferenceId = normalizedManualRef || existingTxn.referenceId;
-        if (normalizedManualRef) {
-            const duplicateManual = await invoiceReferenceExists(normalizedManualRef, invoiceId);
-            if (duplicateManual) {
-                throw new Error(`Invoice number ${normalizedManualRef} already exists. Please use a different number.`);
-            }
-        }
+        const nextReferenceId = invoiceData?.manualInvoiceNo
+            ? await resolveInvoiceReferenceForSave(invoiceData.manualInvoiceNo, invoiceId)
+            : (existingTxn.referenceId || await resolveInvoiceReferenceForSave(undefined, invoiceId));
 
         // Get old items from notes JSON or context for stock restoration
         let oldItems: InvoiceItem[] = existingTxn.items || [];
@@ -1284,7 +1215,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .from('transactions')
             .update({
                 amount: totalAmount,
-                reference_id: finalReferenceId,
+                reference_id: nextReferenceId,
                 credit_days: creditDays,
                 due_date: dueDate.toISOString(),
                 vehicle_name: invoiceData?.vehicleName,
@@ -1303,9 +1234,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (updateError) {
             console.error('[DataContext] Error updating invoice transaction:', updateError.message);
-            if ((updateError as any)?.code === '23505') {
-                throw new Error(`Invoice number ${finalReferenceId} already exists. Please use a different number.`);
-            }
             throw new Error(`Failed to update invoice: ${updateError.message}`);
         }
 
@@ -1340,7 +1268,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return {
                     ...t,
                     amount: totalAmount,
-                    referenceId: finalReferenceId,
+                    referenceId: nextReferenceId,
                     creditDays: creditDays,
                     dueDate: dueDate,
                     vehicleName: invoiceData?.vehicleName,
@@ -1349,15 +1277,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     transportCharges: invoiceData?.transportCharges,
                     paymentTerms: invoiceData?.paymentTerms,
                     discountPercent: invoiceData?.discountPercent,
-                    driveLink: invoiceData?.driveLink || t.driveLink,
                     items: items
                 };
             }
             return t;
         }));
 
-        logToApplicationSheet('Invoice Updated', `Updated invoice ${existingTxn.referenceId} for ${dealer?.businessName || 'Unknown Dealer'}`, totalAmount);
-        return { id: invoiceId, refId: finalReferenceId || 'UPDATED' };
+        return { id: invoiceId, refId: nextReferenceId };
     };
 
     const recordPayment = async (dealerId: string, amount: number, method: string, agentName?: string, reference?: string) => {
@@ -1379,51 +1305,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw rpcError;
         }
 
-        if (!rpcData || rpcData.success === false || !rpcData.receipt_id || !rpcData.receipt_ref) {
-            console.error('[DataContext] Payment RPC returned invalid payload:', rpcData);
-            throw new Error((rpcData && rpcData.error) || 'Payment failed: receipt was not generated in DB');
-        }
-
         const receiptNumber = rpcData.receipt_ref;
 
         // Fetch the newly created transaction to update local state
         const { data: txnRow, error: fetchError } = await supabase
             .from('transactions')
-            .select('*')
+            .select('*, payment_allocations(*)')
             .eq('id', rpcData.receipt_id)
-            .eq('type', 'PAYMENT')
             .single();
 
-        let createdPaymentTxn = txnRow;
-        if (fetchError || !createdPaymentTxn) {
-            console.error('Error fetching created transaction by id:', fetchError);
-
-            const { data: fallbackTxn, error: fallbackError } = await supabase
-                .from('transactions')
-                .select('*')
-                .eq('customer_id', dealerId)
-                .eq('type', 'PAYMENT')
-                .eq('reference_id', receiptNumber)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-            if (fallbackError || !fallbackTxn) {
-                console.error('[DataContext] Could not verify saved receipt transaction in DB:', fallbackError);
-                await fetchData();
-                throw new Error('Payment may be recorded, but receipt could not be verified in DB. Please refresh and check Transactions table (type = PAYMENT).');
-            }
-
-            createdPaymentTxn = fallbackTxn;
-        }
-
-        const { data: allocationRows, error: allocationError } = await supabase
-            .from('payment_allocations')
-            .select('*')
-            .eq('receipt_id', createdPaymentTxn.id);
-
-        if (allocationError) {
-            console.warn('[DataContext] Could not fetch payment allocations for receipt:', allocationError);
+        if (fetchError) {
+            console.error('Error fetching created transaction:', fetchError);
+            // Even if fetch fails, the DB is updated, so we should refresh
+            await fetchData();
+            return receiptNumber;
         }
 
         // Update local dealer balance
@@ -1439,7 +1334,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }));
 
         // Update local transactions state
-        const newTxn = transformTransaction(createdPaymentTxn, (allocationRows || []).map(transformAllocation));
+        const newTxn = transformTransaction(txnRow);
+        newTxn.paymentAllocations = txnRow.payment_allocations;
         setTransactions(prev => [newTxn, ...prev]);
 
         if (!reference) {
@@ -1452,100 +1348,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const allDealerTxns = [...transactions, newTxn]
                 .filter(t => t.customerId === dealerId)
                 .sort((a, b) => {
-                    const eventA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
-                    const eventB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
-                    if (eventA !== eventB) return eventA - eventB;
                     const dateA = new Date(a.date).getTime();
                     const dateB = new Date(b.date).getTime();
-                    return dateA - dateB;
+                    if (dateA !== dateB) return dateA - dateB;
+                    // Strict chronological sorting per user request
+                    const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                    const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                    return createdA - createdB;
                 });
-            // runningBal computed but not used in sheet - balance computed from opening + invoices - receipts
             syncTransactionToDealerSheet(dealer.businessName, newTxn).catch(e =>
                 console.warn('[DataContext] Failed to sync payment to dealer sheet:', e)
             );
-            logToApplicationSheet('Payment Received', `Receipt ${receiptNumber} via ${method} from ${dealer.businessName}`, amount);
         }
 
         return receiptNumber;
-    };
-
-    const updateTransactionDriveLink = async (id: string, link: string) => {
-        const { error } = await supabase
-            .from('transactions')
-            .update({ drive_link: link })
-            .eq('id', id);
-
-        if (error) {
-            const primaryError: any = error;
-            const primaryErrObj = {
-                code: primaryError?.code,
-                message: primaryError?.message,
-                details: primaryError?.details,
-                hint: primaryError?.hint,
-                raw: primaryError,
-            };
-
-            const primaryText = [primaryError?.message, primaryError?.details, primaryError?.hint]
-                .filter(Boolean)
-                .join(' | ')
-                .toLowerCase();
-
-            const missingDriveColumn =
-                primaryError?.code === '42703' ||
-                (primaryText.includes('drive_link') && (primaryText.includes('schema cache') || primaryText.includes('column')));
-
-            if (missingDriveColumn) {
-                console.warn('[DataContext] drive_link column not available. Saving link to notes JSON fallback.', primaryErrObj);
-            } else {
-                console.warn('[DataContext] Primary drive_link update failed. Attempting notes JSON fallback.', primaryErrObj);
-            }
-
-            // Always attempt notes fallback if primary column update fails.
-            const existingTxn = transactions.find(t => t.id === id);
-            let mergedNotesObj: any = {};
-            if (existingTxn?.notes) {
-                try {
-                    const parsed = JSON.parse(existingTxn.notes);
-                    if (parsed && typeof parsed === 'object') {
-                        mergedNotesObj = parsed;
-                    } else {
-                        mergedNotesObj = { note: existingTxn.notes };
-                    }
-                } catch {
-                    mergedNotesObj = { note: existingTxn.notes };
-                }
-            }
-
-            mergedNotesObj.driveLink = link;
-            mergedNotesObj.driveLinkUpdatedAt = new Date().toISOString();
-            const mergedNotes = JSON.stringify(mergedNotesObj);
-
-            const { error: notesError } = await supabase
-                .from('transactions')
-                .update({ notes: mergedNotes })
-                .eq('id', id);
-
-            if (notesError) {
-                const fallbackErrObj = {
-                    code: (notesError as any)?.code,
-                    message: (notesError as any)?.message,
-                    details: (notesError as any)?.details,
-                    hint: (notesError as any)?.hint,
-                    raw: notesError,
-                };
-                console.error('[DataContext] Failed to persist drive link in both primary and fallback writes:', {
-                    id,
-                    primary: primaryErrObj,
-                    fallback: fallbackErrObj,
-                });
-                throw new Error((notesError as any)?.message || (primaryError as any)?.message || 'Failed to save drive link');
-            }
-
-            setTransactions(prev => prev.map(t => t.id === id ? { ...t, driveLink: link, notes: mergedNotes } : t));
-            return;
-        }
-
-        setTransactions(prev => prev.map(t => t.id === id ? { ...t, driveLink: link } : t));
     };
 
     // Agent CRUD methods
@@ -1581,7 +1397,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ...prev
         ]);
 
-        logToApplicationSheet('Agent Created', `Agent: ${newAgent.name}, ID: ${newAgent.agentId || newAgent.id}`);
         return newAgent.id;
     };
 
@@ -1613,7 +1428,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         setAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
-        logToApplicationSheet('Agent Updated', `Updated details for agent ${updatedAgent.name}`);
     };
 
     const deleteAgent = async (id: string) => {
@@ -1665,7 +1479,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Also remove from tracking data so they disappear from map immediately
         setTrackingData(prev => prev.filter(t => t.agent.id !== id));
-        logToApplicationSheet('Agent Deleted', `Removed agent ${agentToDelete.name} (Soft Deleted)`);
     };
 
     // Backward compatible aliases
@@ -1674,46 +1487,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const deleteCustomer = deleteDealer;
     const getCustomerTransactions = getDealerTransactions;
 
-    const bulkSyncDealers = async (onProgress?: (phase: string, done: number, total: number, detail?: string) => void): Promise<{ synced: number; errors: number; total: number }> => {
-        const startedAt = Date.now();
-        const emitProgress = (phase: string, done: number, total: number, detail?: string) => {
-            onProgress?.(phase, done, total, detail);
-            console.log(`[DataContext][BulkSync][${phase}] ${done}/${total}${detail ? ` - ${detail}` : ''}`);
-        };
-
-        emitProgress('starting', 0, 0, 'Preparing full dealer sync');
-
+    const bulkSyncDealers = async () => {
         // Ensure we have the absolute latest data from DB before syncing to Sheet
         await fetchData();
 
         // Re-fetch dealers raw to ensure we get the absolute latest if state is slightly behind
         const { data: res, error: dealersError } = await supabase.from('dealers').select('*');
-        if (dealersError) {
-            emitProgress('error', 0, 0, `Failed to fetch dealers: ${dealersError.message || dealersError.code || 'unknown error'}`);
-            throw dealersError;
-        }
-
-        if (!res || res.length === 0) {
-            emitProgress('completed', 0, 0, 'No dealers found to sync');
-            return { synced: 0, errors: 0, total: 0 };
-        }
+        if (dealersError || !res || res.length === 0) return;
 
         const currentDealers = res.map(transformDealer);
         console.log(`[DataContext] Starting Force Re-Sync for ${currentDealers.length} dealers to Google Sheets...`);
-        emitProgress('master-index', 0, currentDealers.length, 'Syncing dealer index sheet');
 
         // 1. Re-sync Master Index (Refined Dealers list) first
         await bulkSyncDealersToSheet(currentDealers);
-        emitProgress('master-index', currentDealers.length, currentDealers.length, 'Dealer index sheet synced');
 
         // 2. Comprehensive Ledger Sync (one-by-one to avoid rate limits)
-        let synced = 0;
-        let errors = 0;
         for (const dealer of currentDealers) {
-            const dealerStart = Date.now();
             try {
-                emitProgress('dealer-ledgers', synced + errors, currentDealers.length, `Syncing ${dealer.businessName}`);
-
                 // syncDealerLedgerToSheet handles clearing the tab and re-appending all txns
                 await syncDealerLedgerToSheet(dealer.id);
 
@@ -1728,27 +1518,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     .from('dealers')
                     .update({ synced_to_sheet: true })
                     .eq('id', dealer.id);
-
-                synced++;
-                emitProgress(
-                    'dealer-ledgers',
-                    synced + errors,
-                    currentDealers.length,
-                    `${dealer.businessName} synced in ${((Date.now() - dealerStart) / 1000).toFixed(1)}s`
-                );
             } catch (err) {
                 console.error(`[DataContext] Bulk re-sync failed for ${dealer.businessName}:`, err);
-                errors++;
-                emitProgress('dealer-ledgers', synced + errors, currentDealers.length, `${dealer.businessName} failed`);
             }
         }
 
-        emitProgress('final-refresh', synced + errors, currentDealers.length, 'Refreshing local data after sync');
         await fetchData(); // Final refresh
-
-        const totalSec = ((Date.now() - startedAt) / 1000).toFixed(1);
-        emitProgress('completed', synced, currentDealers.length, `Done in ${totalSec}s (ok: ${synced}, failed: ${errors})`);
-        return { synced, errors, total: currentDealers.length };
     };
 
     const syncAllDealerTabs = async (): Promise<{ created: number; skipped: number }> => {
@@ -1920,26 +1695,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw new Error(`Dealer with ID ${dealerId} not found even after refresh`);
         }
 
-        console.log(`[DataContext] Starting ledger sync for: ${dealer.businessName}`);
-
         // 1. Get all transactions for this dealer sorted by date
         const dealerTxns = getDealerTransactions(dealerId, customTxns);
-        console.log(`[DataContext] Found ${dealerTxns.length} transactions for ${dealer.businessName}`);
 
-        // 2. Ensure the tab exists (creates with header + opening balance if missing)
-        await initializeDealerLedger(dealer, companySettings);
-
-        // 3. Clear current rows in the sheet
+        // 2. Clear current rows in the sheet
         await clearDealerTransactionsForSync(dealer.businessName);
 
-        // 4. Re-append ALL transactions in ONE batch call (no running balance - computed from opening + invoices - receipts)
-        const success = await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns, companySettings);
-        
-        if (success) {
-            console.log(`[DataContext] Successfully synced ledger for ${dealer.businessName}`);
-        } else {
-            throw new Error(`Ledger sync failed for ${dealer.businessName}`);
-        }
+        // 3. Re-append ALL transactions in ONE batch call
+        await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns, dealer.openingBalance || 0);
     };
 
     /**
@@ -1965,9 +1728,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // 2. Clear old transaction rows (1 API call)
                 await clearDealerTransactionsForSync(dealer.businessName);
 
-                // 3. Write ALL transactions in ONE API call (batch, no running balance)
+                // 3. Write ALL transactions in ONE API call (batch instead of per-row)
                 const dealerTxns = getDealerTransactions(dealer.id);
-                await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns, companySettings);
+                await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns, dealer.openingBalance || 0);
 
                 synced++;
             } catch (e) {
@@ -2032,11 +1795,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // 2. Fetch all required data directly for the sync process (bypass React state/refs)
                 const [dealersRes, txnsRes, itemsRes, allocationsRes] = await Promise.all([
                     supabase.from('dealers').select('*'),
-                    supabase
-                        .from('transactions')
-                        .select('*')
-                        .order('date', { ascending: true })
-                        .order('created_at', { ascending: true }),
+                    supabase.from('transactions').select('*').order('date', { ascending: true }),
                     supabase.from('invoice_items').select('*'),
                     supabase.from('payment_allocations').select('*')
                 ]);
@@ -2079,9 +1838,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                             .update({ synced_to_sheet: true })
                             .eq('id', dId);
 
-                        const dName = transformedDealers.find(d => d.id === dId)?.businessName || dId;
-                        logToApplicationSheet('Mobile Transactions Batched', `Background sync: Completed ledger re-sync for ${dName}`);
-
                         console.log(`[DataContext] Successfully auto-synced dealer: ${dId}`);
                     } catch (err) {
                         console.error(`[DataContext] Background sync failed for dealer ${dId}:`, err);
@@ -2113,64 +1869,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [performBackgroundSync]);
 
     useEffect(() => {
-        // Automatic Financial Year Rollover check
-        // Guard: only run ONCE per session to avoid repeated Sheet API calls
-        const ROLLOVER_SESSION_KEY = 'erp_rollover_checked';
-        if (sessionStorage.getItem(ROLLOVER_SESSION_KEY)) return;
-
-        const runAutoRollover = async () => {
-            sessionStorage.setItem(ROLLOVER_SESSION_KEY, 'true'); // mark as checked immediately
-
-            // Delay startup to let the app settle and avoid quota spike on load
-            await new Promise(r => setTimeout(r, 10_000));
-
-            const now = new Date();
-            const currentYear = now.getFullYear();
-            
-            // Current Fiscal Year Start: April 1st
-            let fyStartYear = currentYear;
-            if (now.getMonth() < 3) { // If currently Jan/Feb/Mar, start was April of PREVIOUS year
-                fyStartYear -= 1;
-            }
-            const fyStartDate = new Date(fyStartYear, 3, 1); // April 1st
-            
-            // Check for dealers that are trailing behind the current fiscal year
-            const dealersNeedRollover = dealers.filter(d => {
-                if (!d.openingBalanceDate) return false; // New/Legacy dealer with no date set yet
-                const obDate = new Date(d.openingBalanceDate);
-                return obDate < fyStartDate;
-            });
-
-            if (dealersNeedRollover.length > 0) {
-                console.log(`[DataContext] Auto-Rollover: ${dealersNeedRollover.length} dealers are due for FY rollover. Starting background process...`);
-                
-                const closingDate = new Date(fyStartDate);
-                closingDate.setDate(closingDate.getDate() - 1); // March 31st
-                const closingDateStr = closingDate.toISOString().split('T')[0];
-                const openingDateStr = fyStartDate.toISOString().split('T')[0];
-
-                for (const dealer of dealersNeedRollover) {
-                    try {
-                        await rollOverDealerYear(dealer.id, closingDateStr, openingDateStr);
-                        logToApplicationSheet('Auto Rollover', `FY closed automatically for ${dealer.businessName}`, 0);
-                        // Small gap between dealers to avoid quota pressure
-                        await new Promise(r => setTimeout(r, 3_000));
-                    } catch (err) {
-                        console.error(`[DataContext] Auto rollover failed for ${dealer.businessName}:`, err);
-                    }
-                }
-                
-                // Final refresh to update UI state
-                await fetchData();
-            }
-        };
-
-        if (!isLoading && dealers.length > 0) {
-            runAutoRollover();
-        }
-    }, [isLoading, dealers.length]);
-
-    useEffect(() => {
         // Weekly periodic sync (every 5 minutes)
         const intervalId = setInterval(async () => {
             console.log('[DataContext] Background Interval: Triggering periodic sync check...');
@@ -2196,7 +1894,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             error,
             createInvoice,
             updateInvoice,
-            updateTransactionDriveLink,
             recordPayment,
             updateStock,
             addProduct,
@@ -2216,6 +1913,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             deleteDealerWithSheet,
             syncDealerLedgerToSheet,
             bulkSyncAllDealerLedgers,
+            rollOverDealerYear,
             addAgent,
             updateAgent,
             deleteAgent,
