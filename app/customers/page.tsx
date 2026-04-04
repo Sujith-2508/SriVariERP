@@ -745,11 +745,11 @@ export default function DealerLedger() {
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
                 {/* Header */}
-                <div className="bg-white border-b border-slate-200 p-6 sticky top-0 z-10">
+                <div className="sticky top-0 z-10 p-6 bg-white border-b border-slate-200">
                     <div className="flex items-center gap-4">
                         <button
                             onClick={() => setSelectedInvoice(null)}
-                            className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center hover:bg-slate-200 transition-colors"
+                            className="flex items-center justify-center w-10 h-10 transition-colors rounded-lg bg-slate-100 hover:bg-slate-200"
                         >
                             <ChevronLeft size={18} />
                         </button>
@@ -757,7 +757,7 @@ export default function DealerLedger() {
                             <div className="flex items-center gap-3">
                                 <h1 className="text-xl font-bold text-slate-800">Invoice {selectedInvoice.referenceId}</h1>
                                 {overdue && (
-                                    <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold flex items-center gap-1 animate-pulse">
+                                    <span className="flex items-center gap-1 px-3 py-1 text-xs font-bold text-red-700 bg-red-100 rounded-full animate-pulse">
                                         <AlertTriangle size={12} />
                                         OVERDUE
                                     </span>
@@ -768,11 +768,11 @@ export default function DealerLedger() {
                     </div>
                 </div>
 
-                <div className="p-6 max-w-4xl mx-auto">
+                <div className="max-w-4xl p-6 mx-auto">
                     {/* Overdue Alert */}
                     {overdue && (
-                        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6 flex items-center gap-4">
-                            <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center shrink-0">
+                        <div className="flex items-center gap-4 p-4 mb-6 border-2 border-red-200 bg-red-50 rounded-xl">
+                            <div className="flex items-center justify-center w-12 h-12 bg-red-500 rounded-full shrink-0">
                                 <AlertTriangle size={24} className="text-white" />
                             </div>
                             <div>
@@ -786,31 +786,31 @@ export default function DealerLedger() {
                     )}
 
                     {/* Invoice Details Card */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-                        <div className="bg-slate-800 text-white p-4">
+                    <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
+                        <div className="p-4 text-white bg-slate-800">
                             <div className="flex items-center gap-2">
                                 <FileText size={18} />
                                 <h3 className="font-bold">Invoice Details</h3>
                             </div>
                         </div>
                         <div className="p-6">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                            <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Invoice Date</p>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Invoice Date</p>
                                     <p className="font-bold text-slate-800">
                                         {new Date(selectedInvoice.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                                     </p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Invoice Amount</p>
-                                    <p className="font-bold text-slate-800 text-lg">₹{selectedInvoice.amount.toLocaleString()}</p>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Invoice Amount</p>
+                                    <p className="text-lg font-bold text-slate-800">₹{selectedInvoice.amount.toLocaleString()}</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Credit Days</p>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Credit Days</p>
                                     <p className="font-bold text-slate-800">{selectedInvoice.creditDays || 30} days</p>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-slate-500 font-medium mb-1">Due Date</p>
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Due Date</p>
                                     <p className={`font-bold ${overdue ? 'text-red-600' : 'text-slate-800'}`}>
                                         {selectedInvoice.dueDate
                                             ? new Date(selectedInvoice.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -821,21 +821,21 @@ export default function DealerLedger() {
                             </div>
 
                             {/* Payment Status Bar */}
-                            <div className="mt-6 pt-6 border-t border-slate-100">
-                                <div className="flex justify-between items-center mb-2">
+                            <div className="pt-6 mt-6 border-t border-slate-100">
+                                <div className="flex items-center justify-between mb-2">
                                     <span className="text-sm text-slate-600">Payment Progress</span>
                                     <span className="text-sm font-bold text-slate-800">
                                         ₹{invoiceData?.paid.toLocaleString()} / ₹{selectedInvoice.amount.toLocaleString()}
                                     </span>
                                 </div>
-                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-3 overflow-hidden rounded-full bg-slate-100">
                                     <div
                                         className={`h-full rounded-full transition-all ${invoiceData?.balance === 0 ? 'bg-emerald-500' : overdue ? 'bg-red-500' : 'bg-blue-500'}`}
                                         style={{ width: `${((invoiceData?.paid || 0) / selectedInvoice.amount) * 100}%` }}
                                     />
                                 </div>
                                 <div className="flex justify-between mt-2">
-                                    <span className="text-xs text-emerald-600 font-medium">Paid: ₹{invoiceData?.paid.toLocaleString()}</span>
+                                    <span className="text-xs font-medium text-emerald-600">Paid: ₹{invoiceData?.paid.toLocaleString()}</span>
                                     <span className={`text-xs font-medium ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                         {invoiceData?.balance === 0 ? 'Fully Paid ✓' : `Balance: ₹${invoiceData?.balance.toLocaleString()}`}
                                     </span>
@@ -848,37 +848,37 @@ export default function DealerLedger() {
                     {(() => {
                         const profit = calculateInvoiceProfit(selectedInvoice, products);
                         return (
-                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-                                <div className="bg-emerald-800 text-white p-4">
+                            <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
+                                <div className="p-4 text-white bg-emerald-800">
                                     <div className="flex items-center gap-2">
                                         <IndianRupee size={18} />
                                         <h3 className="font-bold">Profit Analysis (Admin Only)</h3>
                                     </div>
                                 </div>
                                 <div className="p-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
                                         <div className="space-y-3">
-                                            <div className="flex justify-between items-center text-sm">
+                                            <div className="flex items-center justify-between text-sm">
                                                 <span className="text-slate-600">Revenue (Excl. GST)</span>
                                                 <span className="font-bold text-slate-800">{formatCurrency(profit.revenue)}</span>
                                             </div>
-                                            <div className="flex justify-between items-center text-sm">
+                                            <div className="flex items-center justify-between text-sm">
                                                 <span className="text-red-600">Cost of Goods (COGS)</span>
                                                 <span className="font-bold text-red-600">-{formatCurrency(profit.cogs)}</span>
                                             </div>
-                                            <div className="flex justify-between items-center text-sm">
+                                            <div className="flex items-center justify-between text-sm">
                                                 <span className="text-orange-600">Dealer Discount ({selectedInvoice.discountPercent}%)</span>
                                                 <span className="font-bold text-orange-600">-{formatCurrency(profit.dealerDiscount)}</span>
                                             </div>
                                             {profit.serviceCharges > 0 && (
-                                                <div className="flex justify-between items-center text-sm">
+                                                <div className="flex items-center justify-between text-sm">
                                                     <span className="text-red-600">Transport/Service</span>
                                                     <span className="font-bold text-red-600">-{formatCurrency(profit.serviceCharges)}</span>
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="flex flex-col justify-center items-center bg-slate-50 rounded-xl p-4 border border-slate-100">
-                                            <p className="text-sm text-slate-500 font-medium mb-1">Net Profit</p>
+                                        <div className="flex flex-col items-center justify-center p-4 border bg-slate-50 rounded-xl border-slate-100">
+                                            <p className="mb-1 text-sm font-medium text-slate-500">Net Profit</p>
                                             <p className="text-3xl font-bold text-emerald-600">{formatCurrency(profit.netProfit)}</p>
                                             <div className={`mt-2 px-3 py-1 rounded-full text-xs font-bold ${profit.profitPercentage >= 15 ? 'bg-emerald-100 text-emerald-700' :
                                                 profit.profitPercentage >= 5 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
@@ -893,22 +893,22 @@ export default function DealerLedger() {
                     })()}
 
                     {/* Payment History Table */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-                        <div className="bg-emerald-600 text-white p-4">
+                    <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
+                        <div className="p-4 text-white bg-emerald-600">
                             <div className="flex items-center gap-2">
                                 <Receipt size={18} />
                                 <h3 className="font-bold">Payment History</h3>
                             </div>
-                            <p className="text-emerald-100 text-sm mt-1">Receipts applied to this invoice (FIFO)</p>
+                            <p className="mt-1 text-sm text-emerald-100">Receipts applied to this invoice (FIFO)</p>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
-                                <thead className="bg-slate-50 border-b border-slate-200">
+                                <thead className="border-b bg-slate-50 border-slate-200">
                                     <tr>
-                                        <th className="text-left p-4 font-semibold text-slate-600">Receipt No</th>
-                                        <th className="text-left p-4 font-semibold text-slate-600">Date</th>
-                                        <th className="text-right p-4 font-semibold text-slate-600">Amount Applied</th>
-                                        <th className="text-left p-4 font-semibold text-slate-600">Collected By</th>
+                                        <th className="p-4 font-semibold text-left text-slate-600">Receipt No</th>
+                                        <th className="p-4 font-semibold text-left text-slate-600">Date</th>
+                                        <th className="p-4 font-semibold text-right text-slate-600">Amount Applied</th>
+                                        <th className="p-4 font-semibold text-left text-slate-600">Collected By</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -923,17 +923,17 @@ export default function DealerLedger() {
                                         paymentHistory.map((payment, idx) => (
                                             <tr key={idx} className="hover:bg-slate-50">
                                                 <td className="p-4">
-                                                    <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
+                                                    <span className="px-2 py-1 font-mono font-bold rounded text-emerald-600 bg-emerald-50">
                                                         {payment.receiptRef}
                                                     </span>
                                                 </td>
                                                 <td className="p-4 text-slate-700">
                                                     {new Date(payment.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                                                 </td>
-                                                <td className="p-4 text-right font-bold text-emerald-600">
+                                                <td className="p-4 font-bold text-right text-emerald-600">
                                                     ₹{payment.amount.toLocaleString()}
                                                 </td>
-                                                <td className="p-4 text-slate-600 flex items-center gap-2">
+                                                <td className="flex items-center gap-2 p-4 text-slate-600">
                                                     <User size={14} className="text-slate-400" />
                                                     {payment.agentName || 'Admin'}
                                                 </td>
@@ -942,10 +942,10 @@ export default function DealerLedger() {
                                     )}
                                 </tbody>
                                 {paymentHistory.length > 0 && (
-                                    <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+                                    <tfoot className="border-t-2 bg-slate-50 border-slate-200">
                                         <tr>
                                             <td colSpan={2} className="p-4 font-bold text-slate-700">Total Paid</td>
-                                            <td className="p-4 text-right font-bold text-emerald-600 text-lg">
+                                            <td className="p-4 text-lg font-bold text-right text-emerald-600">
                                                 ₹{paymentHistory.reduce((acc, p) => acc + p.amount, 0).toLocaleString()}
                                             </td>
                                             <td></td>
@@ -957,8 +957,8 @@ export default function DealerLedger() {
                     </div>
 
                     {/* Balance Summary */}
-                    <div className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                        <div className="flex justify-between items-center">
+                    <div className="p-6 mt-6 bg-white border shadow-sm rounded-xl border-slate-200">
+                        <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-slate-500">Remaining Balance</p>
                                 <p className={`text-3xl font-bold ${invoiceData?.balance === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -966,7 +966,7 @@ export default function DealerLedger() {
                                 </p>
                             </div>
                             {invoiceData?.balance === 0 && (
-                                <div className="flex items-center gap-2 bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full">
+                                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-100 text-emerald-700">
                                     <span className="text-lg">✓</span>
                                     <span className="font-bold">Fully Paid</span>
                                 </div>
@@ -1036,19 +1036,19 @@ export default function DealerLedger() {
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
                 {/* Header */}
-                <div className="bg-white border-b border-slate-200 p-6 sticky top-0 z-10">
-                    <div className="flex justify-between items-start">
+                <div className="sticky top-0 z-10 p-6 bg-white border-b border-slate-200">
+                    <div className="flex items-start justify-between">
                         <div className="flex items-center gap-4">
                             <button
                                 onClick={() => setSelectedDealerId(null)}
-                                className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center hover:bg-slate-200 transition-colors"
+                                className="flex items-center justify-center w-10 h-10 transition-colors rounded-lg bg-slate-100 hover:bg-slate-200"
                             >
                                 <X size={18} />
                             </button>
                             <div>
                                 <h1 className="text-xl font-bold text-slate-800">{selectedDealer.businessName}</h1>
                                 <p className="text-sm text-slate-500">{selectedDealer.contactPerson} • {selectedDealer.phone}</p>
-                                <p className="text-xs text-slate-400 mt-1">
+                                <p className="mt-1 text-xs text-slate-400">
                                     {selectedDealer.city && `${selectedDealer.city}, `}{selectedDealer.district}
                                     {selectedDealer.pinCode && ` - ${selectedDealer.pinCode}`}
                                 </p>
@@ -1064,7 +1064,7 @@ export default function DealerLedger() {
                             <button
                                 onClick={() => openDateModal('export')}
                                 disabled={exportingPdf}
-                                className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-60">
+                                className="flex items-center gap-2 px-4 py-2 font-medium text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60">
                                 {exportingPdf ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                                 {exportingPdf ? 'Generating...' : 'Export PDF'}
                             </button>
@@ -1097,25 +1097,25 @@ export default function DealerLedger() {
 
                 <div className="p-6">
                     {/* Summary Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Opening Balance</p>
+                    <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-5">
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Opening Balance</p>
                             <p className="text-xl font-bold text-slate-800">₹{(summary.openingBalance || 0).toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Invoiced</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Invoiced</p>
                             <p className="text-xl font-bold text-slate-800">₹{totalInvoiced.toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Total Paid</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Total Paid</p>
                             <p className="text-xl font-bold text-emerald-600">₹{totalPaid.toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Net Outstanding</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Net Outstanding</p>
                             <p className="text-xl font-bold text-red-600">₹{totalBalance.toLocaleString()}</p>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-slate-200">
-                            <p className="text-xs text-slate-500 font-medium mb-1">Total Profit</p>
+                        <div className="p-4 bg-white border rounded-xl border-slate-200">
+                            <p className="mb-1 text-xs font-medium text-slate-500">Total Profit</p>
                             <div className="flex items-baseline gap-2">
                                 <p className="text-xl font-bold text-emerald-600">
                                     {formatCurrency(dealerProfitStats.totalProfit)}
@@ -1128,8 +1128,8 @@ export default function DealerLedger() {
                     </div>
 
                     {/* FIFO Explanation */}
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-                        <h4 className="font-semibold text-blue-800 mb-1 flex items-center gap-2">
+                    <div className="p-4 mb-6 border border-blue-200 bg-blue-50 rounded-xl">
+                        <h4 className="flex items-center gap-2 mb-1 font-semibold text-blue-800">
                             <Clock size={16} />
                             FIFO Payment Logic • Click on any invoice to see payment details
                         </h4>
@@ -1139,8 +1139,8 @@ export default function DealerLedger() {
                     </div>
 
                     {/* Unified Ledger Account Table */}
-                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
-                        <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                    <div className="mb-6 overflow-hidden bg-white border rounded-xl border-slate-200">
+                        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
                             <div className="flex items-center gap-3">
                                 <h3 className="font-semibold text-slate-700">Ledger Account</h3>
                                 <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-100 uppercase tracking-wider">
@@ -1152,22 +1152,22 @@ export default function DealerLedger() {
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                                <thead className="border-b bg-slate-50 text-slate-600 border-slate-200">
                                     <tr>
-                                        <th className="p-4 text-left font-medium w-32">Date</th>
-                                        <th className="p-4 text-left font-medium">Particulars</th>
-                                        <th className="p-4 text-left font-medium w-32">Vch Type</th>
-                                        <th className="p-4 text-left font-medium">Vch Ref.</th>
-                                        <th className="p-4 text-right font-medium">Debit (₹)</th>
-                                        <th className="p-4 text-right font-medium">Credit (₹)</th>
-                                        <th className="p-4 text-right font-medium">Balance (₹)</th>
-                                        <th className="p-4 text-center font-medium">Type</th>
-                                        <th className="p-4 text-center font-medium">Actions</th>
+                                        <th className="w-32 p-4 font-medium text-left">Date</th>
+                                        <th className="p-4 font-medium text-left">Particulars</th>
+                                        <th className="w-32 p-4 font-medium text-left">Vch Type</th>
+                                        <th className="p-4 font-medium text-left">Vch Ref.</th>
+                                        <th className="p-4 font-medium text-right">Debit (₹)</th>
+                                        <th className="p-4 font-medium text-right">Credit (₹)</th>
+                                        <th className="p-4 font-medium text-right">Balance (₹)</th>
+                                        <th className="p-4 font-medium text-center">Type</th>
+                                        <th className="p-4 font-medium text-center">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {statementEntries.map((entry, idx) => (
-                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                        <tr key={idx} className="transition-colors hover:bg-slate-50">
                                             <td className="p-4 text-slate-700">
                                                 {entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                                             </td>
@@ -1176,21 +1176,21 @@ export default function DealerLedger() {
                                                  entry.type === 'Invoice' ? `Sales - ${selectedDealer.businessName}` : 
                                                  `Receipt - ${selectedDealer.businessName}`}
                                             </td>
-                                            <td className="p-4 text-slate-500 font-medium italic text-xs">
+                                            <td className="p-4 text-xs italic font-medium text-slate-500">
                                                 {entry.type}
                                             </td>
                                             <td className="p-4">
-                                                <span className="font-mono px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">
+                                                <span className="px-2 py-1 font-mono text-xs font-bold rounded bg-slate-100 text-slate-600">
                                                     {entry.reference}
                                                 </span>
                                             </td>
-                                            <td className="p-4 text-right text-red-600 font-bold">
+                                            <td className="p-4 font-bold text-right text-red-600">
                                                 {entry.debit > 0 ? entry.debit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
                                             </td>
-                                            <td className="p-4 text-right text-emerald-600 font-bold">
+                                            <td className="p-4 font-bold text-right text-emerald-600">
                                                 {entry.credit > 0 ? entry.credit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
                                             </td>
-                                            <td className="p-4 text-right font-bold text-slate-900 bg-slate-50/30">
+                                            <td className="p-4 font-bold text-right text-slate-900 bg-slate-50/30">
                                                 ₹{Math.abs(entry.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                             </td>
                                             <td className="p-4 text-center">
@@ -1228,8 +1228,8 @@ export default function DealerLedger() {
                     </div>
 
                     {/* Statement Footer */}
-                    <div className="bg-white rounded-xl border border-slate-200 p-4">
-                        <div className="flex justify-between items-center">
+                    <div className="p-4 bg-white border rounded-xl border-slate-200">
+                        <div className="flex items-center justify-between">
                             <div className="text-sm text-slate-500">
                                 Statement generated on {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
                             </div>
@@ -1247,17 +1247,17 @@ export default function DealerLedger() {
     // Dealer List View
     if (!mainContent) {
         mainContent = (
-            <div className="h-full overflow-y-auto p-6">
-                <div className="flex justify-between items-center mb-6">
+            <div className="h-full p-6 overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-800">Dealer Ledgers</h1>
                         <p className="text-sm text-slate-500">View dealer statements and payment history</p>
                     </div>
-                    <div className="flex gap-3 items-center">
+                    <div className="flex items-center gap-3">
                         <button
                             onClick={handleBulkSync}
                             disabled={isSyncing}
-                            className="bg-emerald-600/90 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white transition-all shadow-lg bg-emerald-600/90 rounded-xl hover:bg-emerald-700 shadow-emerald-100 disabled:opacity-50"
                             title="Re-sync all data correctly from Database to Google Sheets"
                         >
                             {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
@@ -1265,7 +1265,7 @@ export default function DealerLedger() {
                         </button>
                         <button
                             onClick={() => openDateModal('bulk-export')}
-                            className="bg-white text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-50 transition-all shadow-sm"
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-bold transition-all bg-white border shadow-sm text-emerald-700 border-emerald-200 rounded-xl hover:bg-emerald-50"
                             title="Export all dealer statements as a single PDF"
                         >
                             <Download size={16} />
@@ -1273,12 +1273,12 @@ export default function DealerLedger() {
                         </button>
                         <button
                             onClick={() => setIsAddModalOpen(true)}
-                            className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg"
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white transition-all shadow-lg bg-slate-900 rounded-xl hover:bg-slate-800"
                         >
                             <User size={16} />
                             Add Dealer
                         </button>
-                        <div className="bg-slate-100 px-4 py-2 rounded-lg text-sm text-slate-600 flex items-center">
+                        <div className="flex items-center px-4 py-2 text-sm rounded-lg bg-slate-100 text-slate-600">
                             Total: <strong className="ml-1">{dealers.length}</strong>
                         </div>
                     </div>
@@ -1298,21 +1298,21 @@ export default function DealerLedger() {
                 </div>
 
                 {/* Dealer Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                     {
                         filteredDealers.length === 0 ? (
-                            <div className="col-span-full bg-white rounded-3xl border border-slate-200 p-20 flex flex-col items-center justify-center text-center shadow-sm">
-                                <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-6">
+                            <div className="flex flex-col items-center justify-center p-20 text-center bg-white border shadow-sm col-span-full rounded-3xl border-slate-200">
+                                <div className="flex items-center justify-center w-24 h-24 mb-6 rounded-full bg-slate-50">
                                     <Building2 size={48} className="text-slate-200" />
                                 </div>
-                                <h3 className="text-2xl font-bold text-slate-800 mb-2">No Dealers Found</h3>
-                                <p className="text-slate-500 max-w-sm mb-8">
+                                <h3 className="mb-2 text-2xl font-bold text-slate-800">No Dealers Found</h3>
+                                <p className="max-w-sm mb-8 text-slate-500">
                                     {searchTerm ? `No results for "${searchTerm}". Try a different name.` : "Start by adding your first dealer. Once added, you can manage their invoices, receipts, and statements."}
                                 </p>
                                 {!searchTerm && (
                                     <button
                                         onClick={() => setIsAddModalOpen(true)}
-                                        className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95"
+                                        className="flex items-center gap-3 px-8 py-4 font-bold text-white transition-all shadow-lg bg-emerald-600 rounded-2xl hover:bg-emerald-700 shadow-emerald-100 active:scale-95"
                                     >
                                         <User size={20} />
                                         Create Your First Dealer
@@ -1321,14 +1321,14 @@ export default function DealerLedger() {
                             </div>
                         ) : (
                             filteredDealers.map(d => (
-                                <div key={d.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
-                                    <div className="flex justify-between items-start mb-3">
+                                <div key={d.id} className="p-5 transition-shadow bg-white border shadow-sm rounded-xl border-slate-200 hover:shadow-md">
+                                    <div className="flex items-start justify-between mb-3">
                                         <div>
-                                            <h3 className="font-bold text-lg text-slate-800 leading-tight">{d.businessName}</h3>
+                                            <h3 className="text-lg font-bold leading-tight text-slate-800">{d.businessName}</h3>
                                             <p className="text-sm text-slate-500 mt-0.5">{d.contactPerson}</p>
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-xs text-slate-400 uppercase font-medium">Balance</p>
+                                            <p className="text-xs font-medium uppercase text-slate-400">Balance</p>
                                             <p className={`font-bold text-lg ${d.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
                                                 ₹{d.balance.toLocaleString()}
                                             </p>
@@ -1368,7 +1368,7 @@ export default function DealerLedger() {
                                             e.stopPropagation();
                                             handleOpenEditModal(d);
                                         }}
-                                        className="w-full mt-2 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-blue-200"
+                                        className="flex items-center justify-center w-full gap-2 py-2 mt-2 text-sm font-medium text-blue-600 transition-colors border border-blue-200 rounded-lg bg-blue-50 hover:bg-blue-100"
                                     >
                                         <Edit size={14} />
                                         Edit Dealer
@@ -1389,7 +1389,7 @@ export default function DealerLedger() {
                                                     showToast('Dealer deleted successfully', 'info');
                                                 }
                                             }}
-                                            className="w-full mt-2 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-red-200"
+                                            className="flex items-center justify-center w-full gap-2 py-2 mt-2 text-sm font-medium text-red-600 transition-colors border border-red-200 rounded-lg bg-red-50 hover:bg-red-100"
                                         >
                                             <Trash2 size={14} />
                                             Delete Dealer
@@ -1411,9 +1411,9 @@ export default function DealerLedger() {
 
             {/* Add Dealer Modal */}
             {isAddModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsAddModalOpen(false)}>
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 duration-200 bg-black/50 backdrop-blur-sm animate-in fade-in" onClick={() => setIsAddModalOpen(false)}>
+                    <div className="w-full max-w-2xl overflow-hidden bg-white shadow-xl rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50">
                             <h2 className="text-xl font-bold text-slate-800">Add New Dealer</h2>
                             <button
                                 onClick={() => setIsAddModalOpen(false)}
@@ -1425,7 +1425,7 @@ export default function DealerLedger() {
                         <form onSubmit={handleAddDealer} className="p-6 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Business Name</label>
                                     <input
                                         ref={addRefs[0] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1438,7 +1438,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Contact Person</label>
                                     <input
                                         ref={addRefs[1] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1450,7 +1450,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Phone Number</label>
                                     <input
                                         ref={addRefs[2] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1477,13 +1477,13 @@ export default function DealerLedger() {
                                         placeholder="10-digit mobile number"
                                     />
                                     {addPhoneError && (
-                                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                                        <p className="flex items-center gap-1 mt-1 text-xs text-red-600">
                                             <span>⚠</span> {addPhoneError}
                                         </p>
                                     )}
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Address</label>
                                     <textarea
                                         ref={addRefs[3] as React.RefObject<HTMLTextAreaElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e as any)}
@@ -1495,7 +1495,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">City</label>
                                     <input
                                         ref={addRefs[4] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1508,7 +1508,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">State</label>
                                     <input
                                         ref={addRefs[5] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1521,7 +1521,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Pin Code</label>
                                     <input
                                         ref={addRefs[6] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1533,7 +1533,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">GST Number</label>
                                     <input
                                         ref={addRefs[7] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1546,7 +1546,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance (₹)</label>
                                     <input
                                         ref={addRefs[8] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1558,7 +1558,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance Date</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance Date</label>
                                     <input
                                         ref={addRefs[9] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleAddKeyDown(e)}
@@ -1569,11 +1569,11 @@ export default function DealerLedger() {
                                     />
                                 </div>
                             </div>
-                            <div className="pt-4 flex gap-3">
+                            <div className="flex gap-3 pt-4">
                                 <button
                                     type="button"
                                     onClick={() => setIsAddModalOpen(false)}
-                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                    className="flex-1 py-3 font-medium transition-colors border rounded-lg text-slate-700 hover:bg-slate-50 border-slate-200"
                                 >
                                     Cancel
                                 </button>
@@ -1599,11 +1599,11 @@ export default function DealerLedger() {
 
             {/* Edit Dealer Modal */}
             {isEditModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setIsEditModalOpen(false)}>
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 duration-200 bg-black/50 backdrop-blur-sm animate-in fade-in" onClick={() => setIsEditModalOpen(false)}>
+                    <div className="w-full max-w-2xl overflow-hidden bg-white shadow-xl rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-blue-50">
                             <h2 className="text-xl font-bold text-slate-800">Edit Dealer</h2>
-                            <div className="flex gap-2 items-center">
+                            <div className="flex items-center gap-2">
                                 {editingDealer && (
                                     <button
                                         type="button"
@@ -1640,7 +1640,7 @@ export default function DealerLedger() {
                                         setIsEditModalOpen(false);
                                         setEditingDealer(null);
                                     }}
-                                    className="text-slate-400 hover:text-slate-600 ml-2"
+                                    className="ml-2 text-slate-400 hover:text-slate-600"
                                 >
                                     <X size={24} />
                                 </button>
@@ -1649,7 +1649,7 @@ export default function DealerLedger() {
                         <form onSubmit={handleEditDealer} className="p-6 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Business Name</label>
                                     <input
                                         ref={editRefs[0] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1662,7 +1662,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Contact Person</label>
                                     <input
                                         ref={editRefs[1] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1674,7 +1674,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Phone Number</label>
                                     <input
                                         ref={editRefs[2] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1701,13 +1701,13 @@ export default function DealerLedger() {
                                         placeholder="10-digit mobile number"
                                     />
                                     {editPhoneError && (
-                                        <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                                        <p className="flex items-center gap-1 mt-1 text-xs text-red-600">
                                             <span>⚠</span> {editPhoneError}
                                         </p>
                                     )}
                                 </div>
                                 <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Address</label>
                                     <textarea
                                         ref={editRefs[3] as React.RefObject<HTMLTextAreaElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e as any)}
@@ -1719,7 +1719,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">City</label>
                                     <input
                                         ref={editRefs[4] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1732,7 +1732,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">State</label>
                                     <input
                                         ref={editRefs[5] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1745,7 +1745,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Pin Code</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Pin Code</label>
                                     <input
                                         ref={editRefs[6] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1757,7 +1757,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">GST Number</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">GST Number</label>
                                     <input
                                         ref={editRefs[7] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1770,7 +1770,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance (₹)</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance (₹)</label>
                                     <input
                                         ref={editRefs[8] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1782,7 +1782,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Opening Balance Date</label>
+                                    <label className="block mb-1 text-sm font-medium text-slate-700">Opening Balance Date</label>
                                     <input
                                         ref={editRefs[9] as React.RefObject<HTMLInputElement>}
                                         onKeyDown={(e) => handleEditKeyDown(e)}
@@ -1793,7 +1793,7 @@ export default function DealerLedger() {
                                     />
                                 </div>
                             </div>
-                            <div className="pt-4 flex gap-3">
+                            <div className="flex gap-3 pt-4">
                                 {editingDealer?.balance === 0 && (
                                     <button
                                         type="button"
@@ -1811,7 +1811,7 @@ export default function DealerLedger() {
                                                 showToast('Dealer deleted successfully', 'info');
                                             }
                                         }}
-                                        className="px-4 py-3 bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-100 transition-colors border border-red-200"
+                                        className="px-4 py-3 font-bold text-red-600 transition-colors border border-red-200 rounded-lg bg-red-50 hover:bg-red-100"
                                         title="Delete Dealer"
                                     >
                                         <Trash2 size={20} />
@@ -1823,7 +1823,7 @@ export default function DealerLedger() {
                                         setIsEditModalOpen(false);
                                         setEditingDealer(null);
                                     }}
-                                    className="flex-1 py-3 text-slate-700 font-medium hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+                                    className="flex-1 py-3 font-medium transition-colors border rounded-lg text-slate-700 hover:bg-slate-50 border-slate-200"
                                 >
                                     Cancel
                                 </button>
@@ -1850,20 +1850,20 @@ export default function DealerLedger() {
             {/* ─── Date Range Modal ────────────────────────────────── */}
             {dateRangeModal.open && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+                    <div className="w-full max-w-md mx-4 overflow-hidden bg-white shadow-2xl rounded-2xl">
                         {/* Header */}
-                        <div className="bg-slate-800 text-white px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center justify-between px-6 py-4 text-white bg-slate-800">
                             <div className="flex items-center gap-3">
                                 <Calendar size={20} className="text-emerald-400" />
                                 <div>
-                                    <h2 className="font-bold text-base">Select Date Range</h2>
+                                    <h2 className="text-base font-bold">Select Date Range</h2>
                                     <p className="text-slate-400 text-xs mt-0.5">
                                         {dateRangeModal.mode === 'export' ? 'For PDF Export' : 'For WhatsApp Statement'}
                                     </p>
                                 </div>
                             </div>
                             <button onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition-colors">
+                                className="flex items-center justify-center w-8 h-8 transition-colors rounded-lg bg-slate-700 hover:bg-slate-600">
                                 <X size={16} />
                             </button>
                         </div>
@@ -1896,7 +1896,7 @@ export default function DealerLedger() {
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">Select Financial Year</label>
                                     <select value={dateRangeModal.selectedYear}
                                         onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                        className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400">
                                         {Array.from({ length: new Date().getFullYear() + 16 - 2020 }, (_, i) => 2020 + i).reverse().map(y => (
                                             <option key={y} value={y}>FY {y}-{String(y + 1).slice(-2)}</option>
                                         ))}
@@ -1910,7 +1910,7 @@ export default function DealerLedger() {
                                         <label className="block text-xs font-semibold text-slate-500 mb-1.5">Month</label>
                                         <select value={dateRangeModal.selectedMonth}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, selectedMonth: Number(e.target.value) }))}
-                                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400">
                                             {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => (
                                                 <option key={i} value={i}>{m}</option>
                                             ))}
@@ -1920,7 +1920,7 @@ export default function DealerLedger() {
                                         <label className="block text-xs font-semibold text-slate-500 mb-1.5">Year</label>
                                         <select value={dateRangeModal.selectedYear}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, selectedYear: Number(e.target.value) }))}
-                                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400">
                                             {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => 2020 + i).reverse().map(y => (
                                                 <option key={y} value={y}>{y}</option>
                                             ))}
@@ -1937,7 +1937,7 @@ export default function DealerLedger() {
                                             type="date"
                                             value={dateRangeModal.fromDate}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, fromDate: e.target.value }))}
-                                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                                         />
                                     </div>
                                     <div>
@@ -1946,7 +1946,7 @@ export default function DealerLedger() {
                                             type="date"
                                             value={dateRangeModal.toDate}
                                             onChange={e => setDateRangeModal(prev => ({ ...prev, toDate: e.target.value }))}
-                                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                                            className="w-full px-3 py-2 text-sm border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                                         />
                                     </div>
                                 </div>
