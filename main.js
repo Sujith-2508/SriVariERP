@@ -396,19 +396,37 @@ ipcMain.handle('whatsapp:send-document', async (event, { phoneNumber, pdfBase64,
     }
 
     try {
+            if (typeof phoneNumber !== 'string' || !phoneNumber.trim()) {
+                throw new Error('Invalid phone number for WhatsApp document send');
+            }
+
+            if (typeof pdfBase64 !== 'string' || !pdfBase64.trim()) {
+                throw new Error('Invalid PDF payload for WhatsApp document send');
+            }
+
         // Sanitize phone number (remove non-digits, ensure country code)
         let sanitizedNumber = phoneNumber.replace(/\D/g, '');
         if (sanitizedNumber.length === 10) {
             sanitizedNumber = '91' + sanitizedNumber; // Default to India if 10 digits
         }
 
-        const chatId = `${sanitizedNumber}@c.us`;
+        // Resolve recipient through WhatsApp first; direct chatId strings can fail
+        // on some WA Web states with "Cannot read properties of undefined (reading 'getChat')".
+        const numberId = await whatsappClient.getNumberId(sanitizedNumber);
+        if (!numberId || !numberId._serialized) {
+            throw new Error(`WhatsApp number is invalid or not registered: ${sanitizedNumber}`);
+        }
+
+        const chatId = numberId._serialized;
         const media = new MessageMedia('application/pdf', pdfBase64, filename || 'document.pdf');
 
         await whatsappClient.sendMessage(chatId, media, { caption: caption || '' });
         return { success: true };
     } catch (err) {
         console.error('Failed to send WhatsApp message:', err);
+        if (err.message && err.message.includes("Cannot read properties of undefined (reading 'getChat')")) {
+            throw new Error('Unable to open chat for this number in WhatsApp Web. Please verify the number has WhatsApp and try once again.');
+        }
         // Specifically catch detached frame or similar errors
         if (err.message && (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed'))) {
             console.error('CRITICAL: WhatsApp browser context lost. Re-initialization recommended.');

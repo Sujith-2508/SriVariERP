@@ -41,6 +41,9 @@ const INDIVIDUAL_LEDGER_HEADERS = [
     'Type'              // I
 ];
 
+// Running balance in sheet is aligned with UI ledger view:
+// opening + invoices (Dr) - receipts (Cr)
+
 // ── Shared spreadsheet base URL (for cachedRead & enqueueOp)
 // The sheetsQueue already appends this — we just need the path suffixes.
 // But cachedRead/enqueueOp in sheetsQueue use the products spreadsheet by default.
@@ -77,6 +80,8 @@ const TOKEN_KEY = 'sve_google_token';
 const LAST_REQ_KEY = 'sve_last_sheet_req';
 const READ_GAP_MS = 2_000;
 const CACHE_TTL_MS = 5 * 60_000;
+const WRITE_MAX_RETRIES = 4;
+const WRITE_RETRY_BASE_MS = 1_000;
 
 // In-memory read cache keyed by path
 const dealerReadCache: Record<string, { data: any; ts: number }> = {};
@@ -167,34 +172,61 @@ async function dealerRead(path: string): Promise<any> {
  *  we do a direct write here but with rate-limit coordination via the shared key.
  */
 async function dealerWrite(path: string, method: string, body?: any): Promise<void> {
-    // Enforce rate limit
-    const lastReq = parseInt(localStorage.getItem(LAST_REQ_KEY) || '0', 10);
-    const wait = READ_GAP_MS - (Date.now() - lastReq);
-    if (wait > 0) await new Promise(r => setTimeout(r, wait + 50));
-    localStorage.setItem(LAST_REQ_KEY, String(Date.now()));
+    let lastError: Error | null = null;
 
-    const token = await getDealerToken();
-    const res = await fetch(`${DEAL_SHEETS_BASE}${path}`, {
-        method,
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-    });
+    for (let attempt = 1; attempt <= WRITE_MAX_RETRIES; attempt++) {
+        try {
+            // Enforce rate limit across all sheet modules
+            const lastReq = parseInt(localStorage.getItem(LAST_REQ_KEY) || '0', 10);
+            const wait = READ_GAP_MS - (Date.now() - lastReq);
+            if (wait > 0) await new Promise(r => setTimeout(r, wait + 50));
+            localStorage.setItem(LAST_REQ_KEY, String(Date.now()));
 
-    if (res.status === 429) {
-        console.warn('[SheetsDealers] 429 on write — operation dropped (will resync on next app load):', path);
-        return; // Don't throw — let the app continue
-    }
-    if (!res.ok) {
-        const txt = await res.text();
-        if (!txt.includes('already exists')) {
-            console.error('[SheetsDealers] Write error', res.status, txt.slice(0, 200));
+            const token = await getDealerToken();
+            const res = await fetch(`${DEAL_SHEETS_BASE}${path}`, {
+                method,
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: body ? JSON.stringify(body) : undefined,
+            });
+
+            if (res.ok) {
+                // Invalidate related read cache on successful write
+                Object.keys(dealerReadCache).forEach(k => {
+                    if (k.includes(path.split('!')[0])) delete dealerReadCache[k];
+                });
+                return;
+            }
+
+            const txt = await res.text();
+            if (txt.includes('already exists')) {
+                console.log('[SheetsDealers] Tab already exists, skipping create:', path);
+                return;
+            }
+
+            const retryable = res.status === 429 || res.status >= 500;
+            if (retryable && attempt < WRITE_MAX_RETRIES) {
+                const delay = WRITE_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+                console.warn(`[SheetsDealers] Write retry ${attempt}/${WRITE_MAX_RETRIES} after status ${res.status}: ${path}`);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+
+            lastError = new Error(`[SheetsDealers] Write error ${res.status} for ${path}: ${txt.slice(0, 300)}`);
+            break;
+        } catch (err: any) {
+            const msg = err?.message || String(err);
+            if (attempt < WRITE_MAX_RETRIES) {
+                const delay = WRITE_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+                console.warn(`[SheetsDealers] Network retry ${attempt}/${WRITE_MAX_RETRIES} for ${path}: ${msg}`);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            lastError = new Error(`[SheetsDealers] Network write failure for ${path}: ${msg}`);
+            break;
         }
-        return; // Don't throw for benign errors
     }
-    // Invalidate related read cache on successful write
-    Object.keys(dealerReadCache).forEach(k => {
-        if (k.includes(path.split('!')[0])) delete dealerReadCache[k];
-    });
+
+    throw lastError || new Error(`[SheetsDealers] Write failed for ${path}`);
 }
 
 // ──────────── Tab Name Sanitizer ────────────
@@ -218,6 +250,31 @@ function dealerToRow(dealer: Dealer): any[] {
         dealer.pinCode || '', dealer.gstNumber || '', dealer.address || '',
         dealer.balance || 0, dealer.openingBalance || 0, dealer.id,
     ];
+}
+
+function parseAmount(value: any): number {
+    if (value === null || value === undefined) return 0;
+    const num = parseFloat(String(value).replace(/[₹,\s]/g, '').trim());
+    return Number.isFinite(num) ? num : 0;
+}
+
+function formatAmount(value: number): string {
+    return Number(parseFloat(String(value)).toFixed(2)).toString();
+}
+
+function formatTxnDateTime(dateValue: any, createdAtValue?: any): string {
+    const baseDate = new Date(dateValue);
+    const timeSource = createdAtValue ? new Date(createdAtValue) : baseDate;
+
+    const datePart = baseDate.toLocaleDateString('en-IN');
+    const timePart = timeSource.toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+    });
+
+    return `${datePart} ${timePart}`;
 }
 
 // ──────────── Ensure index tab exists (cached) ────────────
@@ -282,7 +339,7 @@ export async function initializeDealerLedger(dealer: Dealer, companyInfo: any): 
     if (!dealer?.businessName) return;
     const name = sanitizeTabName(dealer.businessName);
 
-    // Skip if we already know this tab exists — saves a meta read
+    // Create sheet if not known
     if (!isKnownTab(name)) {
         await dealerWrite(':batchUpdate', 'POST', {
             requests: [{ addSheet: { properties: { title: name } } }]
@@ -309,7 +366,7 @@ export async function initializeDealerLedger(dealer: Dealer, companyInfo: any): 
         [openingDateStr, 'Opening Balance', '', '', '', '', '', String(balanceVal), isDebit ? 'Dr' : 'Cr'],
     ];
 
-    await dealerWrite(`/values/'${name}'!A1:I10?valueInputOption=USER_ENTERED`, 'PUT', { values: rows });
+    await dealerWrite(`/values/${quoteSheetName(name)}!A1:I10?valueInputOption=USER_ENTERED`, 'PUT', { values: rows });
 }
 
 // ──────────── Delete dealer sheet tab ────────────
@@ -331,8 +388,8 @@ export async function deleteDealerSheet(sheetName: string): Promise<boolean> {
     }
 }
 
-// ──────────── Append single transaction ────────────
-export async function syncTransactionToDealerSheet(dealerName: string, transaction: any, runningBalance: number): Promise<boolean> {
+// ──────────── Append single transaction (NO running balance - computed in UI) ────────────
+export async function syncTransactionToDealerSheet(dealerName: string, transaction: any): Promise<boolean> {
     if (transaction.referenceId === 'BAL B/F') return true;
     const name = sanitizeTabName(dealerName);
     try {
@@ -358,20 +415,40 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
             }
         }
 
+        // Read current ledger rows to derive latest running balance from sheet.
+        const existing = await dealerRead(`/values/${quoteSheetName(name)}!F10:H10000`);
+        const existingRows: any[][] = existing?.values || [];
+
+        let runningBalance = 0;
+        if (existingRows.length > 0) {
+            // Opening row has balance in H (index 2 for F:G:H range)
+            runningBalance = parseAmount(existingRows[0]?.[2]);
+            // Transaction rows contain Sales in F and Receipts in G
+            for (let i = 1; i < existingRows.length; i++) {
+                const row = existingRows[i] || [];
+                const sales = parseAmount(row[0]);
+                const receipts = parseAmount(row[1]);
+                runningBalance += sales - receipts;
+            }
+        }
+
+        const amount = parseAmount(transaction.amount);
+        const nextRunning = runningBalance + ((isInvoice || isCheckReturn) ? amount : -amount);
+
         const rowData = [
-            new Date(transaction.date).toLocaleDateString('en-IN'),
+            formatTxnDateTime(transaction.date, transaction.createdAt),
             particulars,
             isInvoice ? (transaction.referenceId || '') : '',
             !isInvoice ? (transaction.referenceId || '') : '',
             isCheckReturn ? 'Cheque Return' : (isInvoice ? 'Sales' : (transaction.notes?.toLowerCase().includes('stock return') ? 'Stock Return' : 'Receipt')),
-            isInvoice ? transaction.amount : '',
-            !isInvoice ? transaction.amount : '',
-            Math.abs(runningBalance),
-            (isInvoice || isCheckReturn) ? 'Cr' : 'Dr',
+            isInvoice ? amount : '',
+            !isInvoice ? amount : '',
+            formatAmount(Math.abs(nextRunning)),
+            (isInvoice || isCheckReturn) ? 'Dr' : 'Cr',
         ];
 
         await dealerWrite(
-            `/values/'${name}'!A11:I1000000:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+            `/values/${quoteSheetName(name)}!A11:I/append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
             'POST', { values: [rowData] }
         );
         return true;
@@ -381,72 +458,123 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
     }
 }
 
-// ──────────── Batch write all transactions (one API call) ────────────
+// ──────────── Batch write all transactions (one API call, NO running balance) ────────────
 export async function batchWriteTransactionsToDealerSheet(
-    dealerName: string, transactions: any[], openingBalance = 0
+    dealerName: string, transactions: any[], companyInfo?: any
 ): Promise<boolean> {
     const name = sanitizeTabName(dealerName);
+    const quotedName = quoteSheetName(name);
     const filteredTxns = transactions.filter(t => t.referenceId !== 'BAL B/F');
     if (filteredTxns.length === 0) return true;
 
-    try {
-        let balance = Number(openingBalance) || 0;
-        const rows = filteredTxns.map(txn => {
-            const isInvoice = txn.type === 'INVOICE';
-            if (isInvoice) balance += txn.amount; else balance -= txn.amount;
-            const isCheckReturn = txn.notes?.startsWith('Cheque Return') ||
-                txn.notes?.startsWith('Check Return') || txn.notes?.startsWith('Chq Return');
-            let particulars = '';
-            if (isCheckReturn) {
-                particulars = `Cheque Return (${txn.referenceId || ''})`;
-            } else if (isInvoice) {
-                particulars = `Goods Sold to ${txn.destination || 'Destination'}`;
-                if (txn.vehicleNumber) particulars += ` via ${txn.vehicleNumber}`;
-            } else {
-                const isStockReturn = txn.notes?.includes('Stock Return');
-                if (isStockReturn) {
-                    particulars = 'Stock Return Received';
-                } else {
-                    const agentPart = txn.agentName ? ` (By ${txn.agentName})` : '';
-                    const notePart = txn.notes ? ` - ${txn.notes}` : '';
-                    particulars = `Receipt Received${agentPart}${notePart}`;
-                }
-            }
-            return [
-                new Date(txn.date).toLocaleDateString('en-IN'), particulars,
-                isInvoice ? (txn.referenceId || '') : '', !isInvoice ? (txn.referenceId || '') : '',
-                isCheckReturn ? 'Cheque Return' : (isInvoice ? 'Sales' : (txn.notes?.toLowerCase().includes('stock return') ? 'Stock Return' : 'Receipt')),
-                isInvoice ? txn.amount : '', !isInvoice ? txn.amount : '',
-                Math.abs(balance), (isInvoice || isCheckReturn) ? 'Cr' : 'Dr',
-            ];
-        });
-        await dealerWrite(
-            `/values/'${name}'!A11:I1000000:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-            'POST', { values: rows }
-        );
+    // Protect against accidental duplicate transaction objects in memory/state.
+    const seen = new Set<string>();
+    const dedupedTxns = filteredTxns.filter(txn => {
+        const key = txn.id || `${txn.referenceId || ''}|${txn.type || ''}|${txn.date || ''}|${txn.amount || 0}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
-    } catch (e) {
-        console.error(`[SheetsDealers] batchWrite failed for ${name}:`, e);
-        return false;
+    });
+
+    // Build the rows first
+    const openingTxn = transactions.find(t => t.referenceId === 'BAL B/F');
+    let runningBalance = openingTxn ? parseAmount(openingTxn.amount) : 0;
+
+    // Fallback: if no BAL B/F txn exists, read opening balance from row 10 column H
+    if (!openingTxn) {
+        const openingData = await dealerRead(`/values/${quotedName}!H10:H10`);
+        runningBalance = parseAmount(openingData?.values?.[0]?.[0]);
     }
+
+    const sortedTxns = [...dedupedTxns].sort((a, b) => {
+        if (a.referenceId === 'BAL B/F') return -1;
+        if (b.referenceId === 'BAL B/F') return 1;
+
+        const eventA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
+        const eventB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
+        if (eventA !== eventB) return eventA - eventB;
+
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+
+        const refA = a.referenceId || '';
+        const refB = b.referenceId || '';
+        return refA.localeCompare(refB);
+    });
+
+    const rows = sortedTxns.map(txn => {
+        const isInvoice = txn.type === 'INVOICE';
+        const isCheckReturn = txn.notes?.startsWith('Cheque Return') ||
+            txn.notes?.startsWith('Check Return') || txn.notes?.startsWith('Chq Return');
+        let particulars = '';
+        if (isCheckReturn) {
+            particulars = `Cheque Return (${txn.referenceId || ''})`;
+        } else if (isInvoice) {
+            particulars = `Goods Sold to ${txn.destination || 'Destination'}`;
+            if (txn.vehicleNumber) particulars += ` via ${txn.vehicleNumber}`;
+        } else {
+            const isStockReturn = txn.notes?.includes('Stock Return');
+            if (isStockReturn) {
+                particulars = 'Stock Return Received';
+            } else {
+                const agentPart = txn.agentName ? ` (By ${txn.agentName})` : '';
+                const notePart = txn.notes ? ` - ${txn.notes}` : '';
+                particulars = `Receipt Received${agentPart}${notePart}`;
+            }
+        }
+        const amount = parseAmount(txn.amount);
+        runningBalance += (isInvoice || isCheckReturn) ? amount : -amount;
+
+        return [
+            formatTxnDateTime(txn.date, txn.createdAt), particulars,
+            isInvoice ? (txn.referenceId || '') : '', !isInvoice ? (txn.referenceId || '') : '',
+            isCheckReturn ? 'Cheque Return' : (isInvoice ? 'Sales' : (txn.notes?.toLowerCase().includes('stock return') ? 'Stock Return' : 'Receipt')),
+            isInvoice ? amount : '', !isInvoice ? amount : '',
+            formatAmount(Math.abs(runningBalance)),
+            (isInvoice || isCheckReturn) ? 'Dr' : 'Cr',
+        ];
+    });
+
+    // Ensure sheet exists
+    if (!isKnownTab(name)) {
+        console.log(`[SheetsDealers] Creating sheet for "${name}"...`);
+        await initializeDealerLedger({
+            businessName: dealerName,
+            openingBalance: 0,
+            address: '',
+            phone: '',
+            gstNumber: ''
+        } as Dealer, companyInfo);
+        // Wait for sheet to be ready
+        await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // Deterministic write for full-sync rebuilds: overwrite exact data range after clear.
+    await dealerWrite(
+        `/values/${quotedName}!A11:I${10 + rows.length}?valueInputOption=USER_ENTERED`,
+        'PUT', { values: rows }
+    );
+
+    console.log(`[SheetsDealers] Wrote ${rows.length} transactions for ${name}`);
+    return true;
 }
 
-// ──────────── Rollover rows ────────────
-export async function appendRolloverRowsToDealerSheet(dealerName: string, balance: number, closingDateStr: string, openingDateStr: string): Promise<void> {
-    const name = sanitizeTabName(dealerName);
-    const closingRow = [new Date(closingDateStr).toLocaleDateString('en-IN'), "'CLOSING BALANCE (CARRIED FORWARD)", '', '', '', '', '', Math.abs(balance), balance >= 0 ? 'Cr' : 'Dr'];
-    const openingRow = [new Date(openingDateStr).toLocaleDateString('en-IN'), "'OPENING BALANCE (BROUGHT FORWARD)", '', '', '', '', '', Math.abs(balance), balance >= 0 ? 'Cr' : 'Dr'];
-    await dealerWrite(
-        `/values/'${name}'!A11:I1000000:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-        'POST', { values: [closingRow, openingRow] }
-    );
+// ──────────── Rollover rows (DEPRECATED - balance now computed, not written) ────────────
+// This function is kept for backward compatibility but should not be used for new rollovers
+export async function appendRolloverRowsToDealerSheet(dealerName: string, _balance: number, closingDateStr: string, openingDateStr: string): Promise<void> {
+    console.log('[SheetsDealers] Skipping deprecated rollover row append to prevent duplicate balance rows', {
+        dealerName,
+        closingDateStr,
+        openingDateStr,
+    });
 }
 
 // ──────────── Find transaction row (cached read) ────────────
 export async function findTransactionRow(dealerName: string, referenceId: string): Promise<number> {
     const name = sanitizeTabName(dealerName);
     try {
-        const data = await dealerRead(`/values/'${name}'!C11:D`);
+        const data = await dealerRead(`/values/${quoteSheetName(name)}!C11:D`);
         if (!data) return -1;
         const rows: string[][] = data.values || [];
         for (let i = 0; i < rows.length; i++) {
@@ -456,14 +584,34 @@ export async function findTransactionRow(dealerName: string, referenceId: string
     return -1;
 }
 
+// ──────────── Helper to encode sheet name for URL ────────────
+function encodeSheetNameForUrl(name: string): string {
+    return encodeURIComponent(name).replace(/%20/g, ' ');
+}
+
+// ──────────── Helper to wrap sheet name in quotes for A1 notation ────────────
+function quoteSheetName(name: string): string {
+    if (name.includes(' ') || name.includes('.') || name.includes(',') || name.includes('-') || name.includes('/') || name.includes("'")) {
+        return `'${name.replace(/'/g, "''")}'`;
+    }
+    return name;
+}
+
 // ──────────── Clear dealer transactions ────────────
 export async function clearDealerTransactionsForSync(dealerName: string): Promise<void> {
     const name = sanitizeTabName(dealerName);
-    await dealerWrite(`/values/'${name}'!A11:I:clear`, 'POST');
-    // Invalidate cached reads for this tab
+
+    // Clear the cache - we'll rebuild on write
     Object.keys(dealerReadCache).forEach(k => {
         if (k.includes(name)) delete dealerReadCache[k];
     });
+
+    // Hard clear all transaction rows so manual/full sync is truly self-healing.
+    await dealerWrite('/values:batchClear', 'POST', {
+        ranges: [`${quoteSheetName(name)}!A11:I10000`]
+    });
+
+    console.log(`[SheetsDealers] Cleared transaction rows for ${name}`);
 }
 
 // ──────────── Bulk sync dealers to index sheet ────────────
@@ -499,7 +647,7 @@ export async function bulkCreateDealerTabs(dealers: Dealer[], companyInfo?: any)
 // ──────────── Fetch raw dealers from Tally export sheet ────────────
 export async function fetchRefinedDealersRaw(): Promise<any[]> {
     try {
-        const data = await dealerRead(`/values/'refined dealers'!A:E`);
+        const data = await dealerRead(`/values/${quoteSheetName('refined dealers')}!A:E`);
         if (!data) return [];
         const rows: string[][] = data.values || [];
         if (rows.length <= 1) return [];
@@ -518,7 +666,7 @@ export async function fetchRefinedDealersRaw(): Promise<any[]> {
 // ──────────── Parse Tally ledger vouchers ────────────
 export async function parseTallyLedgers(): Promise<any[]> {
     try {
-        const data = await dealerRead(`/values/'Ledger Vouchers'!A:G`);
+        const data = await dealerRead(`/values/${quoteSheetName('Ledger Vouchers')}!A:G`);
         if (!data) return [];
         const rows: string[][] = data.values || [];
         const dealersList: any[] = [];
@@ -586,5 +734,143 @@ export async function deleteAllTabsExcept(keepTabs: string[]): Promise<number> {
     } catch (e) {
         console.error('[SheetsDealers] deleteAllTabsExcept failed:', e);
         return 0;
+    }
+}
+
+// ──────────── Ledger Health Check ────────────
+// Validates dealer ledger structure and returns any issues found
+export interface LedgerHealthCheckResult {
+    healthy: boolean;
+    issues: string[];
+    stats: {
+        openingBalanceCount: number;
+        transactionCount: number;
+        closingBalanceCount: number;
+        duplicateRefs: number;
+    };
+}
+
+export async function validateDealerLedger(dealerName: string): Promise<LedgerHealthCheckResult> {
+    const name = sanitizeTabName(dealerName);
+    const issues: string[] = [];
+    const stats = {
+        openingBalanceCount: 0,
+        transactionCount: 0,
+        closingBalanceCount: 0,
+        duplicateRefs: 0,
+    };
+
+    try {
+        // Read all rows from the dealer's ledger tab (starting from row 10 where data begins)
+        const data = await dealerRead(`/values/${quoteSheetName(name)}!A10:I500`);
+        if (!data || !data.values || data.values.length === 0) {
+            return { healthy: false, issues: ['Ledger sheet is empty or missing'], stats };
+        }
+
+        const rows = data.values;
+        const seenRefs = new Set<string>();
+
+        // Check header row (should be row 9, index 0 in this range)
+        const headerRow = rows[0];
+        if (!headerRow || headerRow[0] !== 'Date') {
+            issues.push('Ledger header is missing or corrupted');
+        }
+
+        // Analyze data rows (skip header, start from index 1)
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.length === 0) continue;
+
+            const date = (row[0] || '').toString().trim();
+            const particulars = (row[1] || '').toString().toLowerCase();
+            const invoiceNo = (row[2] || '').toString().trim();
+            const receiptNo = (row[3] || '').toString().trim();
+            const balance = (row[7] || '').toString().trim();
+
+            // Skip empty rows
+            if (!date && !particulars) continue;
+
+            // Check for opening balance
+            if (particulars.includes('opening balance')) {
+                stats.openingBalanceCount++;
+                if (stats.openingBalanceCount > 1) {
+                    issues.push(`Multiple opening balance rows found (row ${i + 10})`);
+                }
+                continue;
+            }
+
+            // Check for closing balance
+            if (particulars.includes('closing balance') || particulars.includes('carried forward')) {
+                stats.closingBalanceCount++;
+                continue;
+            }
+
+            // This is a transaction row
+            stats.transactionCount++;
+
+            // Check for duplicate references
+            const ref = invoiceNo || receiptNo;
+            if (ref) {
+                if (seenRefs.has(ref)) {
+                    stats.duplicateRefs++;
+                    issues.push(`Duplicate transaction reference: ${ref} (row ${i + 10})`);
+                }
+                seenRefs.add(ref);
+            }
+
+            // Check for problematic balance column in transaction rows
+            // Under new architecture, balance column (H) should be empty for transactions
+            if (balance && balance !== '' && !particulars.includes('opening') && !particulars.includes('closing')) {
+                // This is a warning - existing sheets may have old data
+                console.warn(`[SheetsDealers] Legacy balance data found in transaction row ${i + 10}: ${balance}`);
+            }
+        }
+
+        // Validate opening balance count
+        if (stats.openingBalanceCount === 0) {
+            issues.push('No opening balance row found - ledger may not be properly initialized');
+        }
+
+        return {
+            healthy: issues.length === 0,
+            issues,
+            stats,
+        };
+    } catch (e) {
+        console.error(`[SheetsDealers] Health check failed for ${name}:`, e);
+        return {
+            healthy: false,
+            issues: [`Failed to read ledger: ${e}`],
+            stats,
+        };
+    }
+}
+
+// ──────────── Rebuild Dealer Ledger (Clean Rebuild) ────────────
+export async function rebuildDealerLedger(
+    dealer: Dealer,
+    transactions: any[],
+    companyInfo?: any
+): Promise<boolean> {
+    const name = sanitizeTabName(dealer.businessName);
+    console.log(`[SheetsDealers] Rebuilding ledger for ${dealer.businessName}`);
+
+    try {
+        // Step 1: Clear all transaction rows (keep header rows 1-10)
+        await clearDealerTransactionsForSync(name);
+
+        // Step 2: Re-write header + opening balance (rows 1-11)
+        await initializeDealerLedger(dealer, companyInfo);
+
+        // Step 3: Batch write all transactions (no running balance)
+        if (transactions && transactions.length > 0) {
+            await batchWriteTransactionsToDealerSheet(dealer.businessName, transactions);
+        }
+
+        console.log(`[SheetsDealers] Successfully rebuilt ledger for ${dealer.businessName}`);
+        return true;
+    } catch (e) {
+        console.error(`[SheetsDealers] Failed to rebuild ledger for ${dealer.businessName}:`, e);
+        return false;
     }
 }

@@ -705,7 +705,8 @@ export async function appendToSupplierSheetTab(
         const formatAmount = (val: number) => val === 0 ? '0' : val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const debitStr = formatAmount(row.debit);
         const creditStr = formatAmount(row.credit);
-        const balStr = formatAmount(Math.abs(row.balance));
+        // Balance is intentionally left empty for transaction rows - computed from opening + bills - payments
+        const balStr = isOpeningBal ? formatAmount(Math.abs(row.balance)) : '';
 
         const dt = new Date(row.date);
         const dateStr = !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : row.date;
@@ -720,6 +721,7 @@ export async function appendToSupplierSheetTab(
         const debitFormat = isOpeningBal ? cellFormat : { ...cellFormat, textFormat: { ...cellFormat.textFormat, foregroundColor: {red: 0.8, green: 0, blue: 0} } };
         const creditFormat = isOpeningBal ? cellFormat : { ...cellFormat, textFormat: { ...cellFormat.textFormat, foregroundColor: {red: 0, green: 0.5, blue: 0} } };
 
+        // Balance column (H) is intentionally EMPTY for transaction rows - computed in UI from opening + bills - payments
         const rowData = {
             values: [
                 { userEnteredValue: { stringValue: dateStr }, userEnteredFormat: cellFormat },
@@ -729,8 +731,8 @@ export async function appendToSupplierSheetTab(
                 { userEnteredValue: { stringValue: row.vchNo }, userEnteredFormat: cellFormat },
                 { userEnteredValue: { stringValue: debitStr }, userEnteredFormat: { ...debitFormat, horizontalAlignment: 'RIGHT' } },
                 { userEnteredValue: { stringValue: creditStr }, userEnteredFormat: { ...creditFormat, horizontalAlignment: 'RIGHT' } },
-                { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: true } } },
-                { userEnteredValue: { stringValue: row.balanceType }, userEnteredFormat: cellFormat }
+                { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: isOpeningBal } } },
+                { userEnteredValue: { stringValue: isOpeningBal ? row.balanceType : '' }, userEnteredFormat: cellFormat }
             ]
         };
 
@@ -846,5 +848,102 @@ export async function deleteSheetRowByRef(
     } catch (err) {
         console.warn('[GoogleSheetSuppliers] deleteSheetRowByRef error:', err);
         return false;
+    }
+}
+
+// ──────────── Supplier Ledger Health Check ────────────
+export interface SupplierLedgerHealthCheckResult {
+    healthy: boolean;
+    issues: string[];
+    stats: {
+        openingBalanceCount: number;
+        transactionCount: number;
+        closingBalanceCount: number;
+        duplicateRefs: number;
+    };
+}
+
+export async function validateSupplierLedger(supplierName: string): Promise<SupplierLedgerHealthCheckResult> {
+    const issues: string[] = [];
+    const stats = {
+        openingBalanceCount: 0,
+        transactionCount: 0,
+        closingBalanceCount: 0,
+        duplicateRefs: 0,
+    };
+
+    try {
+        const token = await getAccessToken();
+        const sheetId = await getSheetIdByName(token, supplierName);
+        if (sheetId === null) {
+            return { healthy: false, issues: ['Supplier sheet tab not found'], stats };
+        }
+
+        const response = await fetchWithRetry(
+            `${SHEETS_API_BASE}/values/'${encodeURIComponent(supplierName)}'!A10:I500`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        
+        if (!response.ok) {
+            return { healthy: false, issues: ['Failed to read sheet'], stats };
+        }
+
+        const data = await response.json();
+        const rows = data.values || [];
+        const seenRefs = new Set<string>();
+
+        // Check header row
+        if (rows.length > 0 && rows[0][0] !== 'Date') {
+            issues.push('Ledger header is missing or corrupted');
+        }
+
+        // Analyze data rows
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.length === 0) continue;
+
+            const particulars = (row[1] || '').toLowerCase();
+            const vchNo = (row[4] || '').toString().trim();
+            const balance = (row[7] || '').toString().trim();
+
+            if (!particulars) continue;
+
+            if (particulars.includes('opening balance')) {
+                stats.openingBalanceCount++;
+                if (stats.openingBalanceCount > 1) {
+                    issues.push(`Multiple opening balance rows found (row ${i + 10})`);
+                }
+                continue;
+            }
+
+            if (particulars.includes('closing') || particulars.includes('carried forward')) {
+                stats.closingBalanceCount++;
+                continue;
+            }
+
+            stats.transactionCount++;
+
+            if (vchNo) {
+                if (seenRefs.has(vchNo)) {
+                    stats.duplicateRefs++;
+                    issues.push(`Duplicate voucher reference: ${vchNo}`);
+                }
+                seenRefs.add(vchNo);
+            }
+
+            // Balance column should be empty for transactions under new architecture
+            if (balance && balance !== '' && !particulars.includes('opening') && !particulars.includes('closing')) {
+                console.warn(`[GoogleSheetSuppliers] Legacy balance data in transaction row ${i + 10}`);
+            }
+        }
+
+        if (stats.openingBalanceCount === 0) {
+            issues.push('No opening balance row found');
+        }
+
+        return { healthy: issues.length === 0, issues, stats };
+    } catch (e) {
+        console.error(`[GoogleSheetSuppliers] Health check failed for ${supplierName}:`, e);
+        return { healthy: false, issues: [`Failed to read ledger: ${e}`], stats };
     }
 }

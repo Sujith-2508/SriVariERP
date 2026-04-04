@@ -24,6 +24,30 @@ import SearchableSelect from '@/components/SearchableSelect';
 import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
+function toErrorPayload(err: unknown): Record<string, unknown> {
+    if (err instanceof Error) {
+        const e = err as Error & { code?: string; details?: string; hint?: string };
+        return {
+            name: e.name,
+            message: e.message,
+            code: e.code,
+            details: e.details,
+            hint: e.hint,
+        };
+    }
+    if (typeof err === 'object' && err !== null) {
+        const anyErr = err as any;
+        return {
+            message: anyErr.message,
+            code: anyErr.code,
+            details: anyErr.details,
+            hint: anyErr.hint,
+            raw: anyErr,
+        };
+    }
+    return { message: String(err) };
+}
+
 export default function Billing() {
     const { dealers, products, transactions, createInvoice, updateInvoice, updateTransactionDriveLink, addDealer, isLoading, refreshData, companySettings } = useData();
     const { showToast } = useToast();
@@ -702,8 +726,8 @@ export default function Billing() {
                     try {
                         const { isGoogleDriveConnected } = await import('@/lib/googleDriveService');
                         const isConnected = await isGoogleDriveConnected();
-                        if (!isConnected) {
-                            console.log('[Billing] Skipping Drive upload: Not connected');
+                        if (isConnected !== true) {
+                            console.log('[Billing] Skipping Drive upload: Drive not connected or expired');
                             setDriveUploadStatus('idle');
                             return;
                         }
@@ -743,7 +767,7 @@ export default function Billing() {
                         
                         setDriveUploadStatus('success');
                     } catch (driveErr) {
-                        console.error('[Billing] Automatic Drive upload failed:', driveErr);
+                        console.error('[Billing] Automatic Drive upload failed:', toErrorPayload(driveErr));
                         setDriveUploadStatus('error');
                     }
                 })();

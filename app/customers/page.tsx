@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { deleteAllTabsExcept } from '@/lib/googleSheetDealers';
-import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
+import { isGoogleDriveConnected, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 // ... existing imports
@@ -24,6 +24,7 @@ export default function DealerLedger() {
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
     const [isSyncing, setIsSyncing] = useState(false);
+    const [syncingDealerId, setSyncingDealerId] = useState<string | null>(null);
     const [isImporting, setIsImporting] = useState(false);
     const [isTallyImporting, setIsTallyImporting] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -35,6 +36,7 @@ export default function DealerLedger() {
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [exportingPdf, setExportingPdf] = useState(false);
     const [bulkExporting, setBulkExporting] = useState(false);
+    const [bulkSyncStatus, setBulkSyncStatus] = useState<{ phase: string; done: number; total: number; detail?: string } | null>(null);
 
 
     // Date range modal state
@@ -535,52 +537,45 @@ export default function DealerLedger() {
             );
             const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
             const rangeText = getWhatsAppRangeText();
+            const fileName = `${safeName}_Statement_${getPdfLabel()}.pdf`;
 
-            if (window.electron?.whatsapp?.sendPDF) {
+            const desktopSendAvailable = Boolean(window.electron?.whatsapp?.sendPDF);
+
+            if (desktopSendAvailable) {
+                const caption = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`;
                 await window.electron.whatsapp.sendPDF(
                     selectedDealer.phone,
                     base64Pdf,
-                    `${safeName}_Statement_${getPdfLabel()}.pdf`,
-                    `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`
+                    fileName,
+                    caption
                 );
             } else {
-                // WEB FALLBACK: check Drive connection first
-                const electronAny = window.electron as any;
-                const driveConnected = electronAny?.drive
-                    ? await electronAny.drive.isConnected()
-                    : true; // Web mode: assume connected (uses OAuth flow)
-
-                if (!driveConnected) {
+                const driveStatus = await isGoogleDriveConnected();
+                if (driveStatus !== true) {
                     const goToDrive = await showConfirm({
                         title: 'Google Drive Not Connected',
-                        message: 'Google Drive is not connected. The statement link cannot be generated. Would you like to go to Settings to connect Google Drive?',
+                        message: 'Drive connection is required for web WhatsApp sends. Please connect Google Drive in Settings.',
                         confirmLabel: 'Go to Settings',
-                        cancelLabel: 'Send Text Only',
+                        cancelLabel: 'Cancel',
                         type: 'warning'
                     });
-                    if (goToDrive) {
-                        router.push('/settings');
-                        setWhatsappSending('idle');
-                        return;
-                    }
-                    // User chose "Send Text Only" fallback
-                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. (Full statement available in office)`;
-                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                    window.open(whatsappUrl, '_blank');
-                } else {
-                    try {
-                        const stmtLink = await uploadToWhatsAppFolder(base64Pdf, `${safeName}_Statement_${getPdfLabel()}.pdf`);
-                        const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. \n\nView Statement PDF: ${stmtLink}`;
-                        const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                        window.open(whatsappUrl, '_blank');
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                    } catch (err: any) {
-                        console.error('Web WhatsApp share failed:', err);
-                        const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`;
-                        const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                        window.open(whatsappUrl, '_blank');
-                    }
+                    if (goToDrive) router.push('/settings');
+                    setWhatsappSending('idle');
+                    return;
                 }
+
+                let stmtLink = '';
+                try {
+                    stmtLink = await uploadToWhatsAppFolder(base64Pdf, fileName);
+                } catch (uploadErr: any) {
+                    console.error('[Customers] Statement Drive upload failed:', uploadErr);
+                    throw new Error(uploadErr?.message || 'Drive upload failed. Statement was not sent.');
+                }
+
+                const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.\n\nView Statement PDF: ${stmtLink}`;
+                const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+                window.open(whatsappUrl, '_blank');
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
             setWhatsappSending('success');
@@ -590,6 +585,83 @@ export default function DealerLedger() {
             console.error('WhatsApp send failed', err);
             setWhatsappSending('error');
             setWhatsappError(err.message || 'Failed to send WhatsApp message');
+        }
+    };
+
+    const handleCopyWhatsAppStatementText = async () => {
+        const selectedDealer = dealers.find(d => d.id === selectedDealerId);
+        if (!selectedDealer) return;
+
+        try {
+            const { invoices, payments, summary } = filterStatementByRange(selectedDealer.id);
+            const rangeText = getWhatsAppRangeText();
+
+            const driveStatus = await isGoogleDriveConnected();
+            if (driveStatus !== true) {
+                const goToDrive = await showConfirm({
+                    title: 'Google Drive Not Connected',
+                    message: 'Drive connection is required to copy statement text with PDF link. Please connect Google Drive in Settings.',
+                    confirmLabel: 'Go to Settings',
+                    cancelLabel: 'Cancel',
+                    type: 'warning'
+                });
+                if (goToDrive) router.push('/settings');
+                return;
+            }
+
+            const base64Pdf = await generateStatementPDFBase64(
+                selectedDealer,
+                invoices,
+                payments,
+                companySettings,
+                summary
+            );
+
+            const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
+            const fileName = `${safeName}_Statement_${getPdfLabel()}.pdf`;
+
+            let stmtLink = '';
+            try {
+                stmtLink = await uploadToWhatsAppFolder(base64Pdf, fileName);
+            } catch (uploadErr: any) {
+                console.error('[Customers] Statement Drive upload failed during copy:', uploadErr);
+                throw new Error(uploadErr?.message || 'Drive upload failed. Could not copy text with PDF link.');
+            }
+
+            const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.\n\nView Statement PDF: ${stmtLink}`;
+
+            let copied = false;
+            if (navigator.clipboard?.writeText) {
+                try {
+                    await navigator.clipboard.writeText(message);
+                    copied = true;
+                } catch {
+                    copied = false;
+                }
+            }
+
+            if (!copied) {
+                const textArea = document.createElement('textarea');
+                textArea.value = message;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                copied = document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+
+            if (!copied) {
+                throw new Error('Unable to copy text automatically. Please try again.');
+            }
+
+            setDateRangeModal(prev => ({ ...prev, open: false }));
+            showToast('WhatsApp message with Drive link copied. Paste and send in WhatsApp.', 'success');
+            logToApplicationSheet('WhatsApp Statement Text Copied', `Dealer: ${selectedDealer.businessName}, Range: ${rangeText}, Balance: Rs. ${summary.totalOutstanding.toLocaleString()}`).catch(() => {});
+        } catch (err: any) {
+            console.error('Failed to copy WhatsApp statement text:', err);
+            showToast(err?.message || 'Failed to copy WhatsApp text', 'error');
         }
     };
 
@@ -603,14 +675,56 @@ export default function DealerLedger() {
         if (!confirmed) return;
 
         setIsSyncing(true);
+        setBulkSyncStatus({ phase: 'starting', done: 0, total: 0, detail: 'Preparing sync...' });
         try {
-            await bulkSyncDealers();
-            showToast('Full sync complete! All data and ledgers are now up-to-date.', 'success');
+            const result = await bulkSyncDealers((phase, done, total, detail) => {
+                setBulkSyncStatus({ phase, done, total, detail });
+                console.log(`[DealerLedger][BulkSyncUI] ${phase} ${done}/${total}${detail ? ` - ${detail}` : ''}`);
+            });
+
+            if (result.total === 0) {
+                showToast('No dealers found to sync.', 'info');
+            } else if (result.errors === 0) {
+                showToast(`Full sync complete! ${result.synced}/${result.total} dealers synced successfully.`, 'success');
+            } else if (result.synced > 0) {
+                showToast(`Partial sync: ${result.synced} succeeded, ${result.errors} failed. Check console logs for failed dealer names.`, 'warning');
+            } else {
+                showToast('Sync failed for all dealers. Check console logs for connection or permission errors.', 'error');
+            }
         } catch (error) {
             console.error('Core sync failed:', error);
             showToast('Failed to sync. Please check your internet connection or Google Sheets connectivity.', 'error');
         } finally {
             setIsSyncing(false);
+            setBulkSyncStatus(null);
+        }
+    };
+
+    const getBulkSyncLabel = () => {
+        if (!bulkSyncStatus) return '';
+        const { phase, done, total, detail } = bulkSyncStatus;
+        const phaseText = phase === 'starting' ? 'Starting'
+            : phase === 'master-index' ? 'Syncing Master Index'
+                : phase === 'dealer-ledgers' ? 'Syncing Dealer Ledgers'
+                    : phase === 'final-refresh' ? 'Final Refresh'
+                        : phase === 'completed' ? 'Completed'
+                            : phase === 'error' ? 'Error'
+                                : phase;
+
+        const progressText = total > 0 ? `${done}/${total}` : '';
+        return [phaseText, progressText, detail].filter(Boolean).join(' • ');
+    };
+
+    const handleSyncSingleDealer = async (dealerId: string) => {
+        setSyncingDealerId(dealerId);
+        try {
+            await syncDealerLedgerToSheet(dealerId);
+            showToast('Dealer ledger synced to Google Sheets!', 'success');
+        } catch (error: any) {
+            console.error(`Sync failed for dealer ${dealerId}:`, error);
+            showToast(`Failed to sync dealer: ${error.message || 'Unknown error'}`, 'error');
+        } finally {
+            setSyncingDealerId(null);
         }
     };
 
@@ -1043,6 +1157,7 @@ export default function DealerLedger() {
         const rawLedgerEntries = [
             ...invoices.map(inv => ({
                 date: inv.date,
+                createdAt: inv.originalTransaction?.createdAt ? new Date(inv.originalTransaction.createdAt) : inv.date,
                 reference: inv.referenceId,
                 type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
                 debit: inv.amount,
@@ -1052,6 +1167,7 @@ export default function DealerLedger() {
             })),
             ...payments.map(pay => ({
                 date: pay.date,
+                createdAt: pay.originalTransaction?.createdAt ? new Date(pay.originalTransaction.createdAt) : pay.date,
                 reference: pay.referenceId,
                 type: 'Payment',
                 debit: 0,
@@ -1091,6 +1207,18 @@ export default function DealerLedger() {
                                     {overdueCount} Overdue
                                 </div>
                             )}
+                            <button
+                                onClick={() => handleSyncSingleDealer(selectedDealer.id)}
+                                disabled={syncingDealerId === selectedDealer.id}
+                                className="bg-amber-500 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-amber-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                                {syncingDealerId === selectedDealer.id ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                    <CloudUpload size={16} />
+                                )}
+                                {syncingDealerId === selectedDealer.id ? 'Syncing...' : 'Sync to Sheet'}
+                            </button>
                             <button
                                 onClick={() => openDateModal('export')}
                                 disabled={exportingPdf}
@@ -1184,7 +1312,7 @@ export default function DealerLedger() {
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                                     <tr>
-                                        <th className="p-4 text-left font-medium w-32">Date</th>
+                                        <th className="p-4 text-left font-medium w-40">Date / Time</th>
                                         <th className="p-4 text-left font-medium">Particulars</th>
                                         <th className="p-4 text-left font-medium w-32">Vch Type</th>
                                         <th className="p-4 text-left font-medium">Vch Ref.</th>
@@ -1199,7 +1327,12 @@ export default function DealerLedger() {
                                     {statementEntries.map((entry, idx) => (
                                         <tr key={idx} className="hover:bg-slate-50 transition-colors">
                                             <td className="p-4 text-slate-700">
-                                                {entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                <div className="font-medium">
+                                                    {entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                </div>
+                                                <div className="text-[11px] text-slate-400 mt-0.5">
+                                                    {(entry.createdAt || entry.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                                                </div>
                                             </td>
                                             <td className="p-4 font-medium text-slate-800">
                                                 {entry.type === 'Opening Balance' ? 'Opening Balance' : 
@@ -1314,6 +1447,12 @@ export default function DealerLedger() {
                     </div>
                 </div>
 
+                {isSyncing && bulkSyncStatus && (
+                    <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        {getBulkSyncLabel()}
+                    </div>
+                )}
+
                 {/* Search */}
                 <div className="relative max-w-md mb-6">
                     <Search className="absolute left-3 top-3 text-slate-400" size={18} />
@@ -1391,6 +1530,27 @@ export default function DealerLedger() {
                                         <FileText size={16} />
                                         View Statement
                                         <ArrowRight size={14} />
+                                    </button>
+
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSyncSingleDealer(d.id);
+                                        }}
+                                        disabled={syncingDealerId === d.id}
+                                        className="w-full mt-2 bg-amber-50 hover:bg-amber-100 text-amber-700 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 border border-amber-200 disabled:opacity-50"
+                                    >
+                                        {syncingDealerId === d.id ? (
+                                            <>
+                                                <RefreshCw size={14} className="animate-spin" />
+                                                Syncing...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CloudUpload size={14} />
+                                                Sync to Sheet
+                                            </>
+                                        )}
                                     </button>
 
                                     <button
@@ -1985,30 +2145,50 @@ export default function DealerLedger() {
                             )}
 
                             {/* Actions */}
-                            <div className="flex gap-3 pt-2">
-                                <button
-                                    onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                    className="flex-1 py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (dateRangeModal.mode === 'export') handleExportPDF();
-                                        else if (dateRangeModal.mode === 'bulk-export') handleBulkExportPDF();
-                                        else handleSendWhatsAppStatement();
-                                    }}
-                                    className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
-                                >
-                                    {dateRangeModal.mode === 'export' ? (
-                                        <><Download size={18} /> Export PDF</>
-                                    ) : dateRangeModal.mode === 'bulk-export' ? (
-                                        <><Download size={18} /> Export All</>
-                                    ) : (
-                                        <><MessageSquare size={18} /> Send</>
-                                    )}
-                                </button>
-                            </div>
+                            {dateRangeModal.mode === 'whatsapp' ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                                    <button
+                                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                        className="py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleCopyWhatsAppStatementText}
+                                        className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 border border-blue-500 flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
+                                    >
+                                        <FileText size={18} /> Copy Text + Link
+                                    </button>
+                                    <button
+                                        onClick={handleSendWhatsAppStatement}
+                                        className="py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
+                                    >
+                                        <MessageSquare size={18} /> Send Directly
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
+                                        className="flex-1 py-3 font-semibold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (dateRangeModal.mode === 'export') handleExportPDF();
+                                            else handleBulkExportPDF();
+                                        }}
+                                        className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
+                                    >
+                                        {dateRangeModal.mode === 'export' ? (
+                                            <><Download size={18} /> Export PDF</>
+                                        ) : (
+                                            <><Download size={18} /> Export All</>
+                                        )}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

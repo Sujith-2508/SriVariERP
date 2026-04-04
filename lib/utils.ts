@@ -83,20 +83,24 @@ export function calculateDealerStatement(transactions: Transaction[], openingBal
     const invoices: InvoiceStatement[] = [];
     const payments: PaymentStatement[] = [];
 
-    // Sort transactions by date ascending to apply FIFO correctly
+    // Sort transactions by actual event time (createdAt first, date fallback).
+    // This prevents date-only invoices (00:00) from incorrectly appearing before receipts created later.
     const sortedTxns = [...transactions].sort((a, b) => {
+        // Special case: BAL B/F always first
+        if (a.referenceId === 'BAL B/F') return -1;
+        if (b.referenceId === 'BAL B/F') return 1;
+
+        const eventA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
+        const eventB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
+        if (eventA !== eventB) return eventA - eventB;
+
         const dateA = new Date(a.date).getTime();
         const dateB = new Date(b.date).getTime();
         if (dateA !== dateB) return dateA - dateB;
 
-        // Special case: BAL B/F always first among same-day transactions
-        if (a.referenceId === 'BAL B/F') return -1;
-        if (b.referenceId === 'BAL B/F') return 1;
-
-        // Fallback to creation time for same-day transactions
-        const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return createdA - createdB;
+        const refA = a.referenceId || '';
+        const refB = b.referenceId || '';
+        return refA.localeCompare(refB);
     });
 
     const today = new Date();
