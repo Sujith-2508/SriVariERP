@@ -1,19 +1,27 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/contexts/DataContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
 import { Agent } from '@/types';
 import { UserPlus, Edit2, Trash2, Users, Target, MapPin, Phone, X, Check, TrendingUp, Navigation2, Calendar, DollarSign, Receipt, Activity, FileText, ExternalLink } from 'lucide-react';
-import { LiveMap } from '@/components/LiveMap';
 import { AgentStatusList } from '@/components/AgentStatusList';
 import { AttendanceCalendar } from '@/components/AttendanceCalendar';
 import AgentSalaryManagement from '@/components/AgentSalaryManagement';
 import CompanyExpenseManagement from '@/components/CompanyExpenseManagement';
 import { ProfitAnalysis } from '@/components/ProfitAnalysis';
 import { AgentRecentActivity } from '@/components/AgentRecentActivity';
+
+const LiveMap = dynamic(
+    () => import('@/components/LiveMap').then((mod) => mod.LiveMap),
+    {
+        ssr: false,
+        loading: () => <div className="h-full w-full bg-slate-50 animate-pulse" />,
+    }
+);
 
 type TabType = 'overview' | 'tracking' | 'attendance' | 'salary' | 'expenses' | 'analysis';
 
