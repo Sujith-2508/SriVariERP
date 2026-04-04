@@ -21,7 +21,7 @@ import {
     cn 
 } from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
-import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
+import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder, isGoogleDriveConnected } from '@/lib/googleDriveService';
 import { logToApplicationSheet } from '@/lib/googleSheetWriter';
 
 function toErrorPayload(err: unknown): Record<string, unknown> {
@@ -46,6 +46,26 @@ function toErrorPayload(err: unknown): Record<string, unknown> {
         };
     }
     return { message: String(err) };
+}
+
+const WA_LAST_READY_AT_KEY = 'sve_whatsapp_last_ready_at';
+
+function markWhatsAppReadyNow() {
+    try {
+        localStorage.setItem(WA_LAST_READY_AT_KEY, String(Date.now()));
+    } catch {
+        // ignore storage errors
+    }
+}
+
+function getLastWhatsAppReadyAt(): number {
+    try {
+        const raw = localStorage.getItem(WA_LAST_READY_AT_KEY);
+        const parsed = raw ? parseInt(raw, 10) : 0;
+        return Number.isFinite(parsed) ? parsed : 0;
+    } catch {
+        return 0;
+    }
 }
 
 export default function Billing() {
@@ -806,6 +826,55 @@ export default function Billing() {
 
 
     const [isHandlingSendRef, setIsHandlingSendRef] = useState(false);
+
+    const waitForDesktopWhatsAppReady = async (maxWaitMs: number = 30000): Promise<{ ready: boolean; status: string }> => {
+        if (!window.electron?.whatsapp?.getStatus) {
+            return { ready: true, status: 'READY' };
+        }
+
+        const start = Date.now();
+        let lastStatus = 'DISCONNECTED';
+        let reconnectTriggered = false;
+        const lastReadyAt = getLastWhatsAppReadyAt();
+        const hadRecentReady = lastReadyAt > 0 && (Date.now() - lastReadyAt) < 24 * 60 * 60 * 1000;
+
+        while (Date.now() - start < maxWaitMs) {
+            const status = await window.electron.whatsapp.getStatus();
+            lastStatus = status;
+
+            if (status === 'READY') {
+                markWhatsAppReadyNow();
+                return { ready: true, status };
+            }
+
+            // If user was recently connected and process restarted in odd state,
+            // attempt one automatic reconnect before failing.
+            if (
+                status === 'DISCONNECTED' &&
+                hadRecentReady &&
+                !reconnectTriggered &&
+                window.electron?.whatsapp?.reconnect
+            ) {
+                reconnectTriggered = true;
+                try {
+                    await window.electron.whatsapp.reconnect();
+                    showToast('Reconnecting WhatsApp automatically...', 'info');
+                } catch (reconnectErr) {
+                    console.warn('[WhatsApp] Auto-reconnect trigger failed:', reconnectErr);
+                }
+            }
+
+            if (['CONNECTING', 'AUTHENTICATED', 'RECONNECTING', 'DISCONNECTED', 'QR_READY'].includes(status)) {
+                await new Promise(r => setTimeout(r, 1200));
+                continue;
+            }
+
+            break;
+        }
+
+        return { ready: false, status: lastStatus };
+    };
+
     const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
         if (!companySettings || !dealer) {
             console.warn('[WhatsApp] Missing settings or dealer', { companySettings: !!companySettings, dealer: !!dealer });
@@ -828,18 +897,13 @@ export default function Billing() {
             console.log('[WhatsApp] Environment detected:', isElectron ? 'ELECTRON' : 'WEB/BROWSER');
 
             if (isElectron && window.electron?.whatsapp?.getStatus) {
-                const status = await window.electron.whatsapp.getStatus();
-                console.log('[WhatsApp] Electron WhatsApp status:', status);
-                if (status === 'AUTHENTICATED') {
-                    showToast('WhatsApp is still initializing. Please wait a few seconds...', 'info');
-                    // Wait a bit and try one more time to see if it becomes ready
-                    await new Promise(r => setTimeout(r, 4000));
-                    const newStatus = await window.electron.whatsapp.getStatus();
-                    if (newStatus !== 'READY') {
-                        throw new Error('WhatsApp is taking longer than expected to initialize. Please try again in 10 seconds.');
+                const readiness = await waitForDesktopWhatsAppReady(30000);
+                console.log('[WhatsApp] Electron WhatsApp readiness:', readiness);
+                if (!readiness.ready) {
+                    if (readiness.status === 'QR_READY') {
+                        throw new Error('WhatsApp needs QR confirmation. Please open Settings once, scan QR if shown, and retry.');
                     }
-                } else if (status !== 'READY') {
-                    throw new Error('WhatsApp is not connected in the desktop app. Please go to Settings to link your account.');
+                    throw new Error(`WhatsApp is still initializing (${readiness.status}). Please retry in a few seconds.`);
                 }
             }
 
@@ -888,9 +952,15 @@ export default function Billing() {
                     `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`,
                     `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`
                 );
+                markWhatsAppReadyNow();
                 console.log('[WhatsApp] Electron send complete.');
             } else {
                 console.log('[WhatsApp] Sending via Web Fallback (Drive + WA Link)...');
+                const driveStatus = await isGoogleDriveConnected();
+                if (driveStatus !== true) {
+                    throw new Error('Google Drive is not connected for web WhatsApp send. Please connect Drive in Settings and try again.');
+                }
+
                 // Invoice Web Path
                 const invoiceLink = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
                 const invoiceMsg = `Hello ${dealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${invoiceLink}`;

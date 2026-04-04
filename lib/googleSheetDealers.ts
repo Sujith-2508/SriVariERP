@@ -448,7 +448,7 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
         ];
 
         await dealerWrite(
-            `/values/${quoteSheetName(name)}!A11:I/append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+            `/values/${quoteSheetName(name)}!A11:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
             'POST', { values: [rowData] }
         );
         return true;

@@ -211,7 +211,7 @@ export default function SettingsPage() {
         const electron = (window as any).electron;
         if (!electron?.drive?.disconnect) {
             localStorage.removeItem('drive_token');
-            setDriveConnected(false);
+            setDriveStatus('not_connected');
             setDriveMessage({ type: 'success', text: `Disconnected from Google Drive ${!isElectron ? '(Web Mode)' : ''}.` });
             return;
         }
@@ -272,7 +272,11 @@ export default function SettingsPage() {
                 const tokens = await resp.json();
                 if (tokens.error) throw new Error(tokens.error_description || tokens.error);
 
-                await electron.drive.saveTokens(tokens);
+                await electron.drive.saveTokens({
+                    ...tokens,
+                    oauth_client_id: clientId,
+                    oauth_client_secret: clientSecret || ''
+                });
                 setDriveStatus('connected');
                 setDriveMessage({ type: 'success', text: 'Google Drive connected! Invoices will now be saved automatically.' });
                 setDriveConnecting(false);

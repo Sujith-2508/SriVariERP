@@ -95,6 +95,8 @@ const outDir = path.join(__dirname, 'out');
 let mainWindow;
 let whatsappClient;
 let whatsappStatus = 'DISCONNECTED';
+let whatsappAutoReconnectTimer = null;
+let whatsappManualLogoutRequested = false;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -184,6 +186,11 @@ function createWindow() {
 
 function initWhatsApp() {
     try {
+        if (whatsappAutoReconnectTimer) {
+            clearTimeout(whatsappAutoReconnectTimer);
+            whatsappAutoReconnectTimer = null;
+        }
+
         if (whatsappClient && (whatsappStatus === 'CONNECTING' || whatsappStatus === 'QR_READY' || whatsappStatus === 'AUTHENTICATED' || whatsappStatus === 'READY')) {
             logToFile('[WhatsApp] Client already initialized or connecting. Status:', whatsappStatus);
             return;
@@ -351,6 +358,17 @@ function initWhatsApp() {
         console.log('WhatsApp Disconnected:', reason);
         whatsappStatus = 'DISCONNECTED';
         if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+
+        // Keep session sticky unless user intentionally logs out.
+        const reasonStr = String(reason || '').toUpperCase();
+        const shouldAutoReconnect = !whatsappManualLogoutRequested && reasonStr !== 'LOGOUT';
+        if (shouldAutoReconnect) {
+            if (whatsappAutoReconnectTimer) clearTimeout(whatsappAutoReconnectTimer);
+            whatsappAutoReconnectTimer = setTimeout(() => {
+                logToFile('[WhatsApp] Auto-reconnect after disconnect reason:', reasonStr || 'unknown');
+                initWhatsApp();
+            }, 3000);
+        }
     });
 
         logToFile('[WhatsApp] Starting WhatsApp Client initialization...');
@@ -370,6 +388,67 @@ function initWhatsApp() {
 }
 
 // IPC Handlers
+async function sendWhatsAppDocumentOnce({ phoneNumber, pdfBase64, filename, caption }) {
+    if (typeof phoneNumber !== 'string' || !phoneNumber.trim()) {
+        throw new Error('Invalid phone number for WhatsApp document send');
+    }
+
+    if (typeof pdfBase64 !== 'string' || !pdfBase64.trim()) {
+        throw new Error('Invalid PDF payload for WhatsApp document send');
+    }
+
+    // Sanitize phone number (remove non-digits, ensure country code)
+    let sanitizedNumber = phoneNumber.replace(/\D/g, '');
+    if (sanitizedNumber.length === 10) {
+        sanitizedNumber = '91' + sanitizedNumber; // Default to India if 10 digits
+    }
+
+    const numberId = await whatsappClient.getNumberId(sanitizedNumber);
+    if (!numberId || !numberId._serialized) {
+        throw new Error(`WhatsApp number is invalid or not registered: ${sanitizedNumber}`);
+    }
+
+    const chatId = numberId._serialized;
+    const media = new MessageMedia('application/pdf', pdfBase64, filename || 'document.pdf');
+    await whatsappClient.sendMessage(chatId, media, { caption: caption || '' });
+}
+
+function isTransientWhatsAppContextError(err) {
+    const msg = String(err?.message || err || '');
+    return (
+        msg.includes('detached Frame') ||
+        msg.includes('Execution context was destroyed') ||
+        msg.includes("Cannot read properties of null (reading 'evaluate')") ||
+        msg.includes("Cannot read properties of undefined (reading 'getChat')")
+    );
+}
+
+async function waitForWhatsAppReady(timeoutMs = 20000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+        if (whatsappStatus === 'READY') return true;
+        await new Promise(r => setTimeout(r, 500));
+    }
+    return whatsappStatus === 'READY';
+}
+
+async function recoverWhatsAppWithoutWipingSession() {
+    try {
+        if (whatsappClient) {
+            await whatsappClient.destroy();
+        }
+    } catch (destroyErr) {
+        console.warn('[WhatsApp] Non-fatal destroy error during auto-recovery:', destroyErr?.message || destroyErr);
+    }
+
+    whatsappClient = null;
+    whatsappStatus = 'DISCONNECTED';
+    if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
+
+    initWhatsApp();
+    return await waitForWhatsAppReady(20000);
+}
+
 ipcMain.handle('whatsapp:send-document', async (event, { phoneNumber, pdfBase64, filename, caption }) => {
     if (whatsappStatus !== 'READY') {
         // If it's authenticated but not ready, wait up to 10 seconds before failing
@@ -396,37 +475,27 @@ ipcMain.handle('whatsapp:send-document', async (event, { phoneNumber, pdfBase64,
     }
 
     try {
-            if (typeof phoneNumber !== 'string' || !phoneNumber.trim()) {
-                throw new Error('Invalid phone number for WhatsApp document send');
-            }
-
-            if (typeof pdfBase64 !== 'string' || !pdfBase64.trim()) {
-                throw new Error('Invalid PDF payload for WhatsApp document send');
-            }
-
-        // Sanitize phone number (remove non-digits, ensure country code)
-        let sanitizedNumber = phoneNumber.replace(/\D/g, '');
-        if (sanitizedNumber.length === 10) {
-            sanitizedNumber = '91' + sanitizedNumber; // Default to India if 10 digits
-        }
-
-        // Resolve recipient through WhatsApp first; direct chatId strings can fail
-        // on some WA Web states with "Cannot read properties of undefined (reading 'getChat')".
-        const numberId = await whatsappClient.getNumberId(sanitizedNumber);
-        if (!numberId || !numberId._serialized) {
-            throw new Error(`WhatsApp number is invalid or not registered: ${sanitizedNumber}`);
-        }
-
-        const chatId = numberId._serialized;
-        const media = new MessageMedia('application/pdf', pdfBase64, filename || 'document.pdf');
-
-        await whatsappClient.sendMessage(chatId, media, { caption: caption || '' });
+        await sendWhatsAppDocumentOnce({ phoneNumber, pdfBase64, filename, caption });
         return { success: true };
     } catch (err) {
         console.error('Failed to send WhatsApp message:', err);
-        if (err.message && err.message.includes("Cannot read properties of undefined (reading 'getChat')")) {
-            throw new Error('Unable to open chat for this number in WhatsApp Web. Please verify the number has WhatsApp and try once again.');
+
+        if (isTransientWhatsAppContextError(err)) {
+            console.warn('[WhatsApp] Transient context error detected. Attempting automatic client recovery and one retry...');
+            const recovered = await recoverWhatsAppWithoutWipingSession();
+            if (recovered && whatsappClient && whatsappStatus === 'READY') {
+                try {
+                    await sendWhatsAppDocumentOnce({ phoneNumber, pdfBase64, filename, caption });
+                    return { success: true, recovered: true };
+                } catch (retryErr) {
+                    console.error('[WhatsApp] Retry after auto-recovery failed:', retryErr);
+                    throw new Error('WhatsApp session became unstable while sending. Please retry once. If it persists, use Re-sync Connection in Settings.');
+                }
+            }
+
+            throw new Error('WhatsApp session became unstable and auto-recovery did not complete. Please use Re-sync Connection in Settings.');
         }
+
         // Specifically catch detached frame or similar errors
         if (err.message && (err.message.includes('detached Frame') || err.message.includes('Execution context was destroyed'))) {
             console.error('CRITICAL: WhatsApp browser context lost. Re-initialization recommended.');
@@ -439,6 +508,7 @@ ipcMain.handle('whatsapp:send-document', async (event, { phoneNumber, pdfBase64,
 
 ipcMain.handle('whatsapp:reconnect', async () => {
     console.log('Manual WhatsApp Reconnect Triggered');
+    whatsappManualLogoutRequested = false;
     if (whatsappClient) {
         try {
             await whatsappClient.destroy();
@@ -448,16 +518,8 @@ ipcMain.handle('whatsapp:reconnect', async () => {
         whatsappClient = null;
     }
 
-    // CRITICAL: Wipe the session folder to ensure a clean start
-    const sessionPath = path.join(app.getPath('userData'), 'whatsapp-session');
-    try {
-        if (fs.existsSync(sessionPath)) {
-            fs.rmSync(sessionPath, { recursive: true, force: true });
-            console.log('Wiped WhatsApp session folder:', sessionPath);
-        }
-    } catch (err) {
-        console.error('Failed to wipe session folder:', err);
-    }
+    // Preserve LocalAuth session by default; wiping forces QR every time.
+    // If a hard reset is ever needed, it should be an explicit separate action.
 
     whatsappStatus = 'DISCONNECTED';
     if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
@@ -476,6 +538,7 @@ ipcMain.handle('whatsapp:get-status', () => {
 
 ipcMain.handle('whatsapp:logout', async () => {
     if (whatsappClient) {
+        whatsappManualLogoutRequested = true;
         await whatsappClient.logout();
         whatsappStatus = 'DISCONNECTED';
         if (mainWindow) mainWindow.webContents.send('whatsapp:status', whatsappStatus);
@@ -596,13 +659,15 @@ async function getDriveOAuthAccessToken() {
         ? JSON.parse(process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY)
         : {};
     // Priority list for OAuth credentials (Main process only runs in Desktop mode)
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_DESKTOP ||
+    const clientId = tokens.oauth_client_id ||
+                     process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_DESKTOP ||
                      process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || 
                      process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_WEB || 
                      process.env.GOOGLE_OAUTH_CLIENT_ID || 
                      serviceKey.oauth_client_id || '';
                      
-    const clientSecret = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_DESKTOP ||
+    const clientSecret = tokens.oauth_client_secret ||
+                         process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_DESKTOP ||
                          process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || 
                          process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_WEB || 
                          process.env.GOOGLE_OAUTH_CLIENT_SECRET || 
@@ -613,20 +678,32 @@ async function getDriveOAuthAccessToken() {
         return null;
     }
 
-    const result = await postOAuthRequest({
+    const refreshBody = {
         client_id: clientId,
-        client_secret: clientSecret,
         refresh_token: tokens.refresh_token,
         grant_type: 'refresh_token'
-    });
+    };
+    if (clientSecret) {
+        refreshBody.client_secret = clientSecret;
+    }
+
+    const result = await postOAuthRequest(refreshBody);
 
     if (result.error) {
         console.error('[Drive OAuth] Refresh failed:', result.error, result.error_description || '');
-        return null; // Return null so the caller knows it failed
+        const hardAuthError = ['invalid_grant', 'invalid_request', 'invalid_client'].includes(String(result.error));
+        if (hardAuthError) {
+            return null;
+        }
+        // Avoid forcing reconnect due to transient auth/network edge-cases.
+        // Caller operations can still attempt with existing token and retry later.
+        return tokens.access_token || null;
     }
 
     const updated = {
         ...tokens,
+        oauth_client_id: clientId,
+        oauth_client_secret: clientSecret || tokens.oauth_client_secret || '',
         access_token: result.access_token,
         expires_at: Date.now() + (result.expires_in - 60) * 1000
     };
@@ -639,28 +716,15 @@ ipcMain.handle('drive:is-connected', async () => {
     const tokens = readDriveTokens();
     if (!tokens || !tokens.refresh_token) return 'not_connected';
 
-    // Helper for diagnostic refresh
-    async function checkRefresh() {
-        const serviceKey = process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY ? JSON.parse(process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY) : {};
-        const cid = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_DESKTOP || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
-        const csec = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_DESKTOP || process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET || '';
-        
-        try {
-            const res = await postOAuthRequest({
-                client_id: cid,
-                client_secret: csec,
-                refresh_token: tokens.refresh_token,
-                grant_type: 'refresh_token'
-            });
-            if (res.error) return res.error;
-            return 'OK';
-        } catch (e) { return 'NETWORK_ERROR'; }
+    try {
+        const token = await getDriveOAuthAccessToken();
+        if (!token) return 'expired';
+        return 'connected';
+    } catch (e) {
+        console.warn('[Drive OAuth] Non-fatal status check error:', e?.message || e);
+        // Be tolerant: do not force reconnect on transient check failures.
+        return 'connected';
     }
-
-    const status = await checkRefresh();
-    if (status === 'OK') return 'connected';
-    if (status === 'invalid_grant' || status === 'invalid_request') return 'expired';
-    return 'error';
 });
 
 // IPC: Get a fresh OAuth access token (used by renderer for Drive uploads)
@@ -803,8 +867,26 @@ ipcMain.handle('drive:connect', async (event, { clientId }) => {
 
 // IPC: Exchange code for tokens and store them
 ipcMain.handle('drive:save-tokens', async (event, tokens) => {
+    const serviceKey = process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY
+        ? JSON.parse(process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_KEY)
+        : {};
+
+    const oauthClientId = tokens.oauth_client_id ||
+        process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_DESKTOP ||
+        process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID ||
+        process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID_WEB ||
+        serviceKey.oauth_client_id || '';
+
+    const oauthClientSecret = tokens.oauth_client_secret ||
+        process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_DESKTOP ||
+        process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET ||
+        process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_SECRET_WEB ||
+        serviceKey.oauth_client_secret || '';
+
     writeDriveTokens({
         ...tokens,
+        oauth_client_id: oauthClientId,
+        oauth_client_secret: oauthClientSecret,
         expires_at: Date.now() + (tokens.expires_in - 60) * 1000
     });
     return true;

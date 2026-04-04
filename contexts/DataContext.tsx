@@ -1476,54 +1476,73 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .eq('id', id);
 
         if (error) {
-            const errObj = {
-                code: (error as any)?.code,
-                message: (error as any)?.message,
-                details: (error as any)?.details,
-                hint: (error as any)?.hint,
+            const primaryError: any = error;
+            const primaryErrObj = {
+                code: primaryError?.code,
+                message: primaryError?.message,
+                details: primaryError?.details,
+                hint: primaryError?.hint,
+                raw: primaryError,
             };
 
-            // Backward-compatible behavior when DB doesn't yet have drive_link column.
-            if ((error as any)?.code === '42703') {
-                console.warn('[DataContext] Drive link column missing in transactions table. Falling back to notes JSON save.', errObj);
+            const primaryText = [primaryError?.message, primaryError?.details, primaryError?.hint]
+                .filter(Boolean)
+                .join(' | ')
+                .toLowerCase();
 
-                const existingTxn = transactions.find(t => t.id === id);
-                let mergedNotesObj: any = {};
-                if (existingTxn?.notes) {
-                    try {
-                        const parsed = JSON.parse(existingTxn.notes);
-                        if (parsed && typeof parsed === 'object') {
-                            mergedNotesObj = parsed;
-                        } else {
-                            mergedNotesObj = { note: existingTxn.notes };
-                        }
-                    } catch {
-                        mergedNotesObj = { note: existingTxn.notes };
-                    }
-                }
-                mergedNotesObj.driveLink = link;
-                const mergedNotes = JSON.stringify(mergedNotesObj);
+            const missingDriveColumn =
+                primaryError?.code === '42703' ||
+                (primaryText.includes('drive_link') && (primaryText.includes('schema cache') || primaryText.includes('column')));
 
-                const { error: notesError } = await supabase
-                    .from('transactions')
-                    .update({ notes: mergedNotes })
-                    .eq('id', id);
-
-                if (notesError) {
-                    console.error('[DataContext] Failed to save driveLink in notes fallback:', {
-                        code: (notesError as any)?.code,
-                        message: (notesError as any)?.message,
-                        details: (notesError as any)?.details,
-                        hint: (notesError as any)?.hint,
-                    });
-                }
-
-                setTransactions(prev => prev.map(t => t.id === id ? { ...t, driveLink: link, notes: mergedNotes } : t));
-                return;
+            if (missingDriveColumn) {
+                console.warn('[DataContext] drive_link column not available. Saving link to notes JSON fallback.', primaryErrObj);
+            } else {
+                console.warn('[DataContext] Primary drive_link update failed. Attempting notes JSON fallback.', primaryErrObj);
             }
 
-            console.error('[DataContext] Error updating drive link:', errObj);
-            throw new Error((error as any)?.message || 'Failed to update drive link');
+            // Always attempt notes fallback if primary column update fails.
+            const existingTxn = transactions.find(t => t.id === id);
+            let mergedNotesObj: any = {};
+            if (existingTxn?.notes) {
+                try {
+                    const parsed = JSON.parse(existingTxn.notes);
+                    if (parsed && typeof parsed === 'object') {
+                        mergedNotesObj = parsed;
+                    } else {
+                        mergedNotesObj = { note: existingTxn.notes };
+                    }
+                } catch {
+                    mergedNotesObj = { note: existingTxn.notes };
+                }
+            }
+
+            mergedNotesObj.driveLink = link;
+            mergedNotesObj.driveLinkUpdatedAt = new Date().toISOString();
+            const mergedNotes = JSON.stringify(mergedNotesObj);
+
+            const { error: notesError } = await supabase
+                .from('transactions')
+                .update({ notes: mergedNotes })
+                .eq('id', id);
+
+            if (notesError) {
+                const fallbackErrObj = {
+                    code: (notesError as any)?.code,
+                    message: (notesError as any)?.message,
+                    details: (notesError as any)?.details,
+                    hint: (notesError as any)?.hint,
+                    raw: notesError,
+                };
+                console.error('[DataContext] Failed to persist drive link in both primary and fallback writes:', {
+                    id,
+                    primary: primaryErrObj,
+                    fallback: fallbackErrObj,
+                });
+                throw new Error((notesError as any)?.message || (primaryError as any)?.message || 'Failed to save drive link');
+            }
+
+            setTransactions(prev => prev.map(t => t.id === id ? { ...t, driveLink: link, notes: mergedNotes } : t));
+            return;
         }
 
         setTransactions(prev => prev.map(t => t.id === id ? { ...t, driveLink: link } : t));
