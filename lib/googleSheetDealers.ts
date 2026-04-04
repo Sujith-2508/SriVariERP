@@ -367,6 +367,7 @@ export async function initializeDealerLedger(dealer: Dealer, companyInfo: any): 
     ];
 
     await dealerWrite(`/values/${quoteSheetName(name)}!A1:I10?valueInputOption=USER_ENTERED`, 'PUT', { values: rows });
+    await styleDealerLedgerRows(name);
 }
 
 // ──────────── Delete dealer sheet tab ────────────
@@ -393,6 +394,9 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
     if (transaction.referenceId === 'BAL B/F') return true;
     const name = sanitizeTabName(dealerName);
     try {
+        // Keep a single terminal closing row by removing stale one before appending a new transaction.
+        await removeClosingRows(name);
+
         const isInvoice = transaction.type === 'INVOICE';
         const isCheckReturn = transaction.notes?.startsWith('Cheque Return') ||
             transaction.notes?.startsWith('Check Return') ||
@@ -451,6 +455,10 @@ export async function syncTransactionToDealerSheet(dealerName: string, transacti
             `/values/${quoteSheetName(name)}!A11:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
             'POST', { values: [rowData] }
         );
+
+        // Always keep the sheet-level closing balance row visible and updated.
+        await appendClosingRow(name, nextRunning, transaction.date, transaction.createdAt);
+        await styleDealerLedgerRows(name);
         return true;
     } catch (e) {
         console.error(`[SheetsDealers] Failed to sync transaction for ${name}:`, e);
@@ -465,7 +473,15 @@ export async function batchWriteTransactionsToDealerSheet(
     const name = sanitizeTabName(dealerName);
     const quotedName = quoteSheetName(name);
     const filteredTxns = transactions.filter(t => t.referenceId !== 'BAL B/F');
-    if (filteredTxns.length === 0) return true;
+    if (filteredTxns.length === 0) {
+        await removeClosingRows(name);
+        const openingData = await dealerRead(`/values/${quotedName}!A10:H10`);
+        const openingDateVal = openingData?.values?.[0]?.[0] || new Date();
+        const openingBalVal = parseAmount(openingData?.values?.[0]?.[7]);
+        await appendClosingRow(name, openingBalVal, openingDateVal, openingDateVal);
+        await styleDealerLedgerRows(name);
+        return true;
+    }
 
     // Protect against accidental duplicate transaction objects in memory/state.
     const seen = new Set<string>();
@@ -551,23 +567,49 @@ export async function batchWriteTransactionsToDealerSheet(
     }
 
     // Deterministic write for full-sync rebuilds: overwrite exact data range after clear.
+    await removeClosingRows(name);
     await dealerWrite(
         `/values/${quotedName}!A11:I${10 + rows.length}?valueInputOption=USER_ENTERED`,
         'PUT', { values: rows }
     );
 
-    console.log(`[SheetsDealers] Wrote ${rows.length} transactions for ${name}`);
+    const lastTxn = sortedTxns[sortedTxns.length - 1];
+    await appendClosingRow(name, runningBalance, lastTxn?.date, lastTxn?.createdAt);
+    await styleDealerLedgerRows(name);
+
+    console.log(`[SheetsDealers] Wrote ${rows.length} transactions + closing row for ${name}`);
     return true;
 }
 
-// ──────────── Rollover rows (DEPRECATED - balance now computed, not written) ────────────
-// This function is kept for backward compatibility but should not be used for new rollovers
-export async function appendRolloverRowsToDealerSheet(dealerName: string, _balance: number, closingDateStr: string, openingDateStr: string): Promise<void> {
-    console.log('[SheetsDealers] Skipping deprecated rollover row append to prevent duplicate balance rows', {
-        dealerName,
-        closingDateStr,
-        openingDateStr,
-    });
+// ──────────── Rollover rows (FY close/open markers) ────────────
+export async function appendRolloverRowsToDealerSheet(dealerName: string, balance: number, closingDateStr: string, openingDateStr: string): Promise<void> {
+    const name = sanitizeTabName(dealerName);
+    const quotedName = quoteSheetName(name);
+    const balanceAbs = formatAmount(Math.abs(balance));
+    const balanceType = balance >= 0 ? 'Dr' : 'Cr';
+
+    const closingDate = new Date(closingDateStr).toLocaleDateString('en-GB');
+    const openingDate = new Date(openingDateStr).toLocaleDateString('en-GB');
+
+    const rows = [
+        [closingDate, 'Closing Balance (Financial Year End)', 'CL-END', '', 'Closing', '', '', balanceAbs, balanceType],
+        [openingDate, 'Opening Balance (Forwarded)', 'BAL B/F', '', 'Opening', '', '', balanceAbs, balanceType],
+    ];
+
+    try {
+        if (!isKnownTab(name)) {
+            addKnownTab(name);
+        }
+        await dealerWrite(
+            `/values/${quotedName}!A11:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+            'POST',
+            { values: rows }
+        );
+        await styleDealerLedgerRows(name);
+        console.log('[SheetsDealers] Appended rollover rows', { dealerName, closingDateStr, openingDateStr, balance });
+    } catch (e) {
+        console.warn('[SheetsDealers] Failed to append rollover rows:', { dealerName, error: e });
+    }
 }
 
 // ──────────── Find transaction row (cached read) ────────────
@@ -595,6 +637,201 @@ function quoteSheetName(name: string): string {
         return `'${name.replace(/'/g, "''")}'`;
     }
     return name;
+}
+
+async function getDealerSheetIdByName(sheetName: string): Promise<number | null> {
+    try {
+        const data = await dealerRead('?fields=sheets.properties.title,sheets.properties.sheetId');
+        const target = sanitizeTabName(sheetName);
+        const sheet = (data?.sheets || []).find((s: any) => s.properties?.title === target);
+        return sheet?.properties?.sheetId ?? null;
+    } catch {
+        return null;
+    }
+}
+
+async function removeClosingRows(dealerName: string): Promise<void> {
+    const name = sanitizeTabName(dealerName);
+    const data = await dealerRead(`/values/${quoteSheetName(name)}!A11:I10000`);
+    const rows: any[][] = data?.values || [];
+
+    const rowsToDelete: number[] = [];
+    rows.forEach((row, idx) => {
+        const rowNo = idx + 11;
+        const particulars = String(row[1] || '').toLowerCase();
+        const invoiceRef = String(row[2] || '').trim();
+        const vchType = String(row[4] || '').toLowerCase();
+        if (invoiceRef === 'CL-END' || particulars.includes('closing balance') || vchType === 'closing') {
+            rowsToDelete.push(rowNo);
+        }
+    });
+
+    if (rowsToDelete.length === 0) return;
+
+    const sheetId = await getDealerSheetIdByName(name);
+    if (sheetId === null) return;
+
+    const requests = rowsToDelete
+        .sort((a, b) => b - a)
+        .map(rowNo => ({
+            deleteDimension: {
+                range: {
+                    sheetId,
+                    dimension: 'ROWS',
+                    startIndex: rowNo - 1,
+                    endIndex: rowNo,
+                }
+            }
+        }));
+
+    await dealerWrite(':batchUpdate', 'POST', { requests });
+}
+
+async function styleDealerLedgerRows(dealerName: string): Promise<void> {
+    const name = sanitizeTabName(dealerName);
+    const sheetId = await getDealerSheetIdByName(name);
+    if (sheetId === null) return;
+
+    const data = await dealerRead(`/values/${quoteSheetName(name)}!A10:I10000`);
+    const rows: any[][] = data?.values || [];
+    if (rows.length === 0) return;
+
+    const lastRowNumber = 9 + rows.length;
+    const dataStartRowIndex = 10; // row 11
+    const dataEndRowIndexExclusive = 10 + Math.max(0, rows.length - 1); // transaction rows only
+    let closingRowNumber: number | null = null;
+    rows.forEach((row, idx) => {
+        const rowNo = idx + 10;
+        const particulars = String(row[1] || '').toLowerCase();
+        const ref = String(row[2] || '').trim();
+        if (ref === 'CL-END' || particulars.includes('closing balance')) {
+            closingRowNumber = rowNo;
+        }
+    });
+
+    const requests: any[] = [
+        // Opening balance row (row 10) highlight
+        {
+            repeatCell: {
+                range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 0, endColumnIndex: 9 },
+                cell: {
+                    userEnteredFormat: {
+                        backgroundColor: { red: 0.87, green: 0.925, blue: 0.83 },
+                        textFormat: { bold: true, foregroundColor: { red: 0, green: 0, blue: 0 } },
+                        horizontalAlignment: 'CENTER'
+                    }
+                },
+                fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+            }
+        },
+    ];
+
+    if (dataEndRowIndexExclusive > dataStartRowIndex) {
+        requests.push(
+            // Center key ledger columns (Date and voucher columns)
+            {
+                repeatCell: {
+                    range: { sheetId, startRowIndex: dataStartRowIndex, endRowIndex: dataEndRowIndexExclusive, startColumnIndex: 0, endColumnIndex: 1 },
+                    cell: { userEnteredFormat: { horizontalAlignment: 'CENTER' } },
+                    fields: 'userEnteredFormat(horizontalAlignment)'
+                }
+            },
+            {
+                repeatCell: {
+                    range: { sheetId, startRowIndex: dataStartRowIndex, endRowIndex: dataEndRowIndexExclusive, startColumnIndex: 2, endColumnIndex: 5 },
+                    cell: { userEnteredFormat: { horizontalAlignment: 'CENTER' } },
+                    fields: 'userEnteredFormat(horizontalAlignment)'
+                }
+            },
+            {
+                repeatCell: {
+                    range: { sheetId, startRowIndex: dataStartRowIndex, endRowIndex: dataEndRowIndexExclusive, startColumnIndex: 8, endColumnIndex: 9 },
+                    cell: { userEnteredFormat: { horizontalAlignment: 'CENTER' } },
+                    fields: 'userEnteredFormat(horizontalAlignment)'
+                }
+            },
+            // Vch Type bold
+            {
+                repeatCell: {
+                    range: { sheetId, startRowIndex: dataStartRowIndex, endRowIndex: dataEndRowIndexExclusive, startColumnIndex: 4, endColumnIndex: 5 },
+                    cell: { userEnteredFormat: { textFormat: { bold: true } } },
+                    fields: 'userEnteredFormat(textFormat.bold)'
+                }
+            },
+            // Sales column in red + bold
+            {
+                repeatCell: {
+                    range: { sheetId, startRowIndex: dataStartRowIndex, endRowIndex: dataEndRowIndexExclusive, startColumnIndex: 5, endColumnIndex: 6 },
+                    cell: {
+                        userEnteredFormat: {
+                            textFormat: { bold: true, foregroundColor: { red: 0.8, green: 0, blue: 0 } },
+                            horizontalAlignment: 'CENTER'
+                        }
+                    },
+                    fields: 'userEnteredFormat(textFormat,horizontalAlignment)'
+                }
+            },
+            // Receipt column in green + bold
+            {
+                repeatCell: {
+                    range: { sheetId, startRowIndex: dataStartRowIndex, endRowIndex: dataEndRowIndexExclusive, startColumnIndex: 6, endColumnIndex: 7 },
+                    cell: {
+                        userEnteredFormat: {
+                            textFormat: { bold: true, foregroundColor: { red: 0, green: 0.5, blue: 0 } },
+                            horizontalAlignment: 'CENTER'
+                        }
+                    },
+                    fields: 'userEnteredFormat(textFormat,horizontalAlignment)'
+                }
+            }
+        );
+    }
+
+    if (closingRowNumber !== null) {
+        requests.push({
+            repeatCell: {
+                range: {
+                    sheetId,
+                    startRowIndex: closingRowNumber - 1,
+                    endRowIndex: closingRowNumber,
+                    startColumnIndex: 0,
+                    endColumnIndex: 9,
+                },
+                cell: {
+                    userEnteredFormat: {
+                        backgroundColor: { red: 1, green: 0.95, blue: 0.8 },
+                        textFormat: { bold: true, foregroundColor: { red: 0.25, green: 0.25, blue: 0.25 } },
+                        horizontalAlignment: 'CENTER'
+                    }
+                },
+                fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+            }
+        });
+    }
+
+    if (requests.length > 0) {
+        await dealerWrite(':batchUpdate', 'POST', { requests });
+    }
+}
+
+async function appendClosingRow(dealerName: string, runningBalance: number, dateValue?: any, createdAtValue?: any): Promise<void> {
+    const name = sanitizeTabName(dealerName);
+    const quotedName = quoteSheetName(name);
+    const balanceAbs = formatAmount(Math.abs(runningBalance));
+    const balanceType = runningBalance >= 0 ? 'Dr' : 'Cr';
+    const parsedDate = dateValue ? new Date(dateValue) : new Date();
+    const safeDate = isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+    const parsedCreated = createdAtValue ? new Date(createdAtValue) : safeDate;
+    const safeCreatedAt = isNaN(parsedCreated.getTime()) ? safeDate : parsedCreated;
+    const closingDateTime = formatTxnDateTime(safeDate, safeCreatedAt);
+
+    await dealerWrite(
+        `/values/${quotedName}!A11:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        'POST',
+        {
+            values: [[closingDateTime, 'Closing Balance', 'CL-END', '', 'Closing', '', '', balanceAbs, balanceType]]
+        }
+    );
 }
 
 // ──────────── Clear dealer transactions ────────────

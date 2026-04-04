@@ -31,7 +31,14 @@ import {
     forceSyncPurchases,
     suggestNextPaymentNumber
 } from '@/lib/purchaseService';
-import { createSupplierSheetTab, SupplierSheetDetails, CompanySheetDetails } from '@/lib/googleSheetSuppliers';
+import {
+    createSupplierSheetTab,
+    appendToSupplierSheetTab,
+    clearSupplierTransactionsForSync,
+    SupplierSheetDetails,
+    CompanySheetDetails,
+    SheetRowData
+} from '@/lib/googleSheetSuppliers';
 import { syncAllStatements } from '@/lib/folderSyncService';
 import { getISTDateString } from '@/lib/utils';
 import {
@@ -49,7 +56,8 @@ import {
     RefreshCw,
     Download,
     Clock,
-    ExternalLink
+    ExternalLink,
+    CloudUpload
 } from 'lucide-react';
 import SearchableSelect from '@/components/SearchableSelect';
 import { supabase } from '@/lib/supabase';
@@ -85,6 +93,8 @@ export default function PurchasesPage() {
     const [statementData, setStatementData] = useState<SupplierStatementEntry[]>([]);
     const [billAllocations, setBillAllocations] = useState<PurchaseAllocationData[]>([]);
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+    const [isSheetSyncing, setIsSheetSyncing] = useState(false);
+    const [syncingSupplierId, setSyncingSupplierId] = useState<string | null>(null);
     const [sheetTabStatus, setSheetTabStatus] = useState<string | null>(null);
 
     const [dateRangeModal, setDateRangeModal] = useState<{
@@ -658,6 +668,87 @@ export default function PurchasesPage() {
         setSuppliers(prev => prev.map(s => s.id === supplier.id ? { ...s, balance: newBalance } : s));
     };
 
+    const syncSupplierToSheet = async (supplier: SupplierData): Promise<boolean> => {
+        try {
+            if (!supplier?.name || supplier.name === 'Unknown') return false;
+
+            const company: CompanySheetDetails = {
+                companyName: companySettings.companyName,
+                address: [companySettings.addressLine1, companySettings.addressLine2].filter(Boolean).join(', '),
+                city: companySettings.city,
+                gstNumber: companySettings.gstNumber,
+                phone: companySettings.phone,
+                email: companySettings.email
+            };
+
+            const supplierDetails: SupplierSheetDetails = {
+                supplierName: supplier.name,
+                supplierAddress: supplier.address,
+                supplierCity: supplier.city,
+                supplierGst: supplier.gstNumber,
+                supplierPhone: supplier.phone,
+                supplierContactPerson: supplier.contactPerson,
+                openingBalance: supplier.openingBalance || 0,
+                openingBalanceDate: supplier.openingBalanceDate
+                    ? (typeof supplier.openingBalanceDate === 'string'
+                        ? supplier.openingBalanceDate
+                        : supplier.openingBalanceDate.toISOString().split('T')[0])
+                    : getISTDateString()
+            };
+
+            await createSupplierSheetTab(supplierDetails, company);
+            await clearSupplierTransactionsForSync(supplier.name);
+
+            const statement = await getSupplierStatement(supplier.id);
+            const rows = statement.filter(entry => entry.rowKind !== 'OPENING');
+
+            for (const entry of rows) {
+                const isClosing = entry.rowKind === 'CLOSING';
+                const row: SheetRowData = {
+                    date: new Date(entry.date).toISOString().split('T')[0],
+                    particulars: entry.notes || (isClosing ? 'Closing Balance' : entry.type === 'BILL' ? 'Purchase' : 'Payment'),
+                    vchType: isClosing ? 'Closing' : (entry.type === 'BILL' ? 'Purchase' : 'Payment'),
+                    vchRef: isClosing ? 'FY CLOSE' : (entry.type === 'BILL' ? 'PURCHASE' : 'Payment'),
+                    vchNo: entry.reference,
+                    debit: entry.debit,
+                    credit: entry.credit,
+                    balance: entry.balance,
+                    balanceType: entry.balance >= 0 ? 'Cr' : 'Dr'
+                };
+
+                await appendToSupplierSheetTab(supplier.name, row);
+            }
+
+            return true;
+        } catch (err) {
+            console.warn(`[Purchases] Supplier sheet sync failed for ${supplier.name}:`, err);
+            return false;
+        }
+    };
+
+    const handleSyncSupplierToSheet = async (supplier: SupplierData) => {
+        if (isSheetSyncing || syncingSupplierId) return;
+
+        setIsSheetSyncing(true);
+        setSyncingSupplierId(supplier.id);
+        setSheetTabStatus(`Syncing supplier: ${supplier.name}`);
+
+        try {
+            const ok = await syncSupplierToSheet(supplier);
+            if (ok) {
+                showToast(`Synced ${supplier.name} to sheet`, 'success');
+                setSheetTabStatus(`✓ Synced supplier: ${supplier.name}`);
+            } else {
+                showToast(`Failed to sync ${supplier.name}`, 'warning');
+                setSheetTabStatus(`⚠ Failed syncing supplier: ${supplier.name}`);
+            }
+        } finally {
+            setSyncingSupplierId(null);
+            setIsSheetSyncing(false);
+            setTimeout(() => setSheetTabStatus(null), 6000);
+        }
+    };
+
     const handleViewBill = async (bill: PurchaseBillData) => {
         setSelectedBill(bill);
         const allocations = await getBillAllocations(bill.id);
@@ -773,7 +864,11 @@ export default function PurchasesPage() {
             const tableColumn = ["Date", "Type", "Reference", "Particulars", "Debit (+)", "Credit (-)", "Balance"];
             const tableRows = statementData.map(entry => [
                 new Date(entry.date).toLocaleDateString(),
-                entry.reference?.toUpperCase() === 'BAL B/F' ? 'Balance' : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment'),
+                entry.rowKind === 'OPENING'
+                    ? 'Opening'
+                    : entry.rowKind === 'CLOSING'
+                        ? 'Closing'
+                        : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment'),
                 entry.reference,
                 entry.notes || '-',
                 entry.debit > 0 ? entry.debit.toLocaleString() : '-',
@@ -959,9 +1054,21 @@ export default function PurchasesPage() {
                                                     <button
                                                         onClick={() => handleRefreshBalance(s)}
                                                         className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                                                        title="Refresh Balance"
+                                                        title="Recalculate Balance"
+                                                        aria-label="Recalculate Balance"
                                                     >
                                                         <RefreshCw size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleSyncSupplierToSheet(s)}
+                                                        disabled={isSheetSyncing || syncingSupplierId === s.id}
+                                                        className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg disabled:opacity-50"
+                                                        title="Sync Supplier to Sheet"
+                                                        aria-label="Sync Supplier to Sheet"
+                                                    >
+                                                        {syncingSupplierId === s.id
+                                                            ? <RefreshCw size={16} className="animate-spin" />
+                                                            : <CloudUpload size={16} />}
                                                     </button>
                                                     <button
                                                         onClick={() => viewStatement(s)}
@@ -1806,7 +1913,7 @@ export default function PurchasesPage() {
                             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
                             onClick={() => setIsStatementModalOpen(false)}
                         />
-                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden z-10">
+                        <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden z-10">
                             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                                 <div>
                                     <h1 className="text-xl font-bold text-slate-800">
@@ -1829,56 +1936,86 @@ export default function PurchasesPage() {
                             </div>
 
                             <div className="p-6 overflow-y-auto max-h-[70vh]">
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                                    {(() => {
+                                        const openingBalance = statementData.find(e => e.rowKind === 'OPENING')?.balance || (selectedSupplier.openingBalance || 0);
+                                        const totalPurchases = statementData
+                                            .filter(e => e.type === 'BILL' && !e.rowKind)
+                                            .reduce((sum, e) => sum + e.credit, 0);
+                                        const totalPaid = statementData
+                                            .filter(e => e.type === 'PAYMENT' && !e.rowKind)
+                                            .reduce((sum, e) => sum + e.debit, 0);
+
+                                        return (
+                                            <>
+                                    <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
+                                        <p className="text-xs text-blue-500 uppercase font-semibold">Opening Balance</p>
+                                        <p className="text-lg font-bold text-blue-700">
+                                            ₹{openingBalance.toLocaleString()}
+                                        </p>
+                                    </div>
                                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                         <p className="text-xs text-slate-500 uppercase font-semibold">Total Purchases</p>
                                         <p className="text-lg font-bold text-slate-800">
-                                            ₹{statementData.reduce((sum, e) => sum + e.debit, 0).toLocaleString()}
+                                            ₹{totalPurchases.toLocaleString()}
                                         </p>
                                     </div>
                                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                         <p className="text-xs text-slate-500 uppercase font-semibold">Total Paid</p>
                                         <p className="text-lg font-bold text-emerald-600">
-                                            ₹{statementData.reduce((sum, e) => sum + e.credit, 0).toLocaleString()}
+                                            ₹{totalPaid.toLocaleString()}
                                         </p>
                                     </div>
                                     <div className="bg-red-50 p-4 rounded-xl border border-red-100">
                                         <p className="text-xs text-red-500 uppercase font-semibold">Current Balance</p>
                                         <p className="text-lg font-bold text-red-600">₹{(selectedSupplier.balance || 0).toLocaleString()}</p>
                                     </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
 
                                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                                    <table className="w-full text-sm text-left">
+                                    <table className="w-full table-fixed text-sm text-left">
                                         <thead className="bg-slate-50 text-slate-600 font-medium">
                                             <tr>
-                                                <th className="p-4 border-b">Date</th>
-                                                <th className="p-4 border-b">Type</th>
-                                                <th className="p-4 border-b">Reference</th>
-                                                <th className="p-4 border-b text-left">Particulars</th>
-                                                <th className="p-4 border-b text-right">Debit (+)</th>
-                                                <th className="p-4 border-b text-right">Credit (-)</th>
-                                                <th className="p-4 border-b text-right bg-slate-100/50">Balance</th>
+                                                <th className="p-3 border-b w-[110px]">Date</th>
+                                                <th className="p-3 border-b w-[90px]">Type</th>
+                                                <th className="p-3 border-b w-[120px]">Reference</th>
+                                                <th className="p-3 border-b text-left">Particulars</th>
+                                                <th className="p-3 border-b text-right w-[110px]">Debit (+)</th>
+                                                <th className="p-3 border-b text-right w-[110px]">Credit (-)</th>
+                                                <th className="p-3 border-b text-right bg-slate-100/50 w-[130px]">Balance</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {statementData.map((entry, idx) => (
-                                                <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="p-4 text-slate-600">{new Date(entry.date).toLocaleDateString()}</td>
-                                                    <td className="p-4">
-                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${entry.type === 'BILL' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                                                            {entry.type === 'BILL' ? 'BILL' : 'PAYMENT'}
+                                                <tr key={idx} className={`${entry.rowKind ? 'bg-emerald-50/60' : 'hover:bg-slate-50'} transition-colors`}>
+                                                    <td className="p-3 text-slate-600">{new Date(entry.date).toLocaleDateString()}</td>
+                                                    <td className="p-3">
+                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                                                            entry.rowKind === 'OPENING' || entry.rowKind === 'CLOSING'
+                                                                ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                                                                : entry.type === 'BILL'
+                                                                    ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                                                                    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                                        }`}>
+                                                            {entry.rowKind === 'OPENING'
+                                                                ? 'OPENING'
+                                                                : entry.rowKind === 'CLOSING'
+                                                                    ? 'CLOSING'
+                                                                    : (entry.type === 'BILL' ? 'BILL' : 'PAYMENT')}
                                                         </span>
                                                     </td>
-                                                    <td className="p-4 font-mono text-xs">{entry.reference}</td>
-                                                    <td className="p-4 text-slate-500 max-w-[200px] truncate" title={entry.notes}>{entry.notes || '-'}</td>
-                                                    <td className="p-4 text-right text-slate-800">
+                                                        <td className="p-3 font-mono text-xs truncate" title={entry.reference}>{entry.reference}</td>
+                                                        <td className="p-3 text-slate-500 truncate" title={entry.notes}>{entry.notes || '-'}</td>
+                                                        <td className="p-3 text-right text-slate-800 whitespace-nowrap">
                                                         {entry.debit > 0 ? `₹${entry.debit.toLocaleString()}` : '-'}
                                                     </td>
-                                                    <td className="p-4 text-right text-emerald-600">
+                                                        <td className="p-3 text-right text-emerald-600 whitespace-nowrap">
                                                         {entry.credit > 0 ? `₹${entry.credit.toLocaleString()}` : '-'}
                                                     </td>
-                                                    <td className="p-4 text-right font-bold bg-slate-50 text-slate-900 border-l border-slate-100">
+                                                        <td className="p-3 text-right font-bold bg-slate-50 text-slate-900 border-l border-slate-100 whitespace-nowrap">
                                                         ₹{(entry.balance || 0).toLocaleString()}
                                                     </td>
                                                 </tr>

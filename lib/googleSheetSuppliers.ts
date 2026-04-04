@@ -699,21 +699,28 @@ export async function appendToSupplierSheetTab(
             return false;
         }
 
-        const isOpeningBal = row.particulars.toLowerCase().includes('opening balance');
-        const isClosingBal = row.particulars.includes('CLOSED');
+        const particularsLc = row.particulars.toLowerCase();
+        const isOpeningBal = particularsLc.includes('opening balance');
+        const isClosingBal = particularsLc.includes('closed') || particularsLc.includes('closing balance') || row.vchNo === 'CL-END';
 
         const formatAmount = (val: number) => val === 0 ? '0' : val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const debitStr = formatAmount(row.debit);
         const creditStr = formatAmount(row.credit);
-        // Balance is intentionally left empty for transaction rows - computed from opening + bills - payments
-        const balStr = isOpeningBal ? formatAmount(Math.abs(row.balance)) : '';
+        const balStr = formatAmount(Math.abs(row.balance || 0));
 
         const dt = new Date(row.date);
         const dateStr = !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : row.date;
 
-        // Build the cells with explicit formatting (Light green for Opening balances, White otherwise)
+        const derivedBalanceType = (row.balance || 0) >= 0 ? 'Cr' : 'Dr';
+        const balanceType = row.balanceType || derivedBalanceType;
+
+        // Build the cells with explicit formatting (Opening/Closing highlighted for readability)
         const cellFormat = {
-            backgroundColor: isOpeningBal ? { red: 0.87, green: 0.925, blue: 0.83 } : { red: 1, green: 1, blue: 1 },
+            backgroundColor: isOpeningBal
+                ? { red: 0.87, green: 0.925, blue: 0.83 }
+                : isClosingBal
+                    ? { red: 1, green: 0.95, blue: 0.8 }
+                    : { red: 1, green: 1, blue: 1 },
             textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 }, bold: isOpeningBal || isClosingBal, fontSize: 10 },
             horizontalAlignment: 'LEFT' as const
         };
@@ -721,7 +728,6 @@ export async function appendToSupplierSheetTab(
         const debitFormat = isOpeningBal ? cellFormat : { ...cellFormat, textFormat: { ...cellFormat.textFormat, foregroundColor: {red: 0.8, green: 0, blue: 0} } };
         const creditFormat = isOpeningBal ? cellFormat : { ...cellFormat, textFormat: { ...cellFormat.textFormat, foregroundColor: {red: 0, green: 0.5, blue: 0} } };
 
-        // Balance column (H) is intentionally EMPTY for transaction rows - computed in UI from opening + bills - payments
         const rowData = {
             values: [
                 { userEnteredValue: { stringValue: dateStr }, userEnteredFormat: cellFormat },
@@ -731,8 +737,8 @@ export async function appendToSupplierSheetTab(
                 { userEnteredValue: { stringValue: row.vchNo }, userEnteredFormat: cellFormat },
                 { userEnteredValue: { stringValue: debitStr }, userEnteredFormat: { ...debitFormat, horizontalAlignment: 'RIGHT' } },
                 { userEnteredValue: { stringValue: creditStr }, userEnteredFormat: { ...creditFormat, horizontalAlignment: 'RIGHT' } },
-                { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: isOpeningBal } } },
-                { userEnteredValue: { stringValue: isOpeningBal ? row.balanceType : '' }, userEnteredFormat: cellFormat }
+                { userEnteredValue: { stringValue: balStr }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'RIGHT', textFormat: { ...cellFormat.textFormat, bold: isOpeningBal || isClosingBal } } },
+                { userEnteredValue: { stringValue: balanceType }, userEnteredFormat: { ...cellFormat, horizontalAlignment: 'CENTER' } }
             ]
         };
 
@@ -769,6 +775,36 @@ export async function appendToSupplierSheetTab(
         return true;
     } catch (error: unknown) {
         console.warn('[GoogleSheetSuppliers] appendToSupplierSheetTab error:', error);
+        return false;
+    }
+}
+
+export async function clearSupplierTransactionsForSync(supplierName: string): Promise<boolean> {
+    try {
+        await rateLimit();
+        const token = await getAccessToken();
+        const escapedName = supplierName.replace(/'/g, "''");
+
+        const res = await fetchWithRetry(`${SHEETS_API_BASE}/values:batchClear`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                ranges: [`'${escapedName}'!A12:I10000`]
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.text();
+            console.warn(`[GoogleSheetSuppliers] Failed to clear rows for "${supplierName}": ${err}`);
+            return false;
+        }
+
+        return true;
+    } catch (err) {
+        console.warn('[GoogleSheetSuppliers] clearSupplierTransactionsForSync error:', err);
         return false;
     }
 }
@@ -931,10 +967,8 @@ export async function validateSupplierLedger(supplierName: string): Promise<Supp
                 seenRefs.add(vchNo);
             }
 
-            // Balance column should be empty for transactions under new architecture
-            if (balance && balance !== '' && !particulars.includes('opening') && !particulars.includes('closing')) {
-                console.warn(`[GoogleSheetSuppliers] Legacy balance data in transaction row ${i + 10}`);
-            }
+            // Balance values are allowed in transaction rows for supplier ledgers.
+            void balance;
         }
 
         if (stats.openingBalanceCount === 0) {

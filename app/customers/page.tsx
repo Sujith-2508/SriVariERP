@@ -1178,6 +1178,45 @@ export default function DealerLedger() {
         ];
 
         const statementEntries = calculateRunningBalances(sortLedgerEntries(rawLedgerEntries as LedgerEntry[]));
+        const hasOpeningRow = statementEntries.some(e => e.reference === 'BAL B/F' || e.type === 'Opening Balance');
+        const openingDate = selectedDealer.openingBalanceDate
+            ? new Date(selectedDealer.openingBalanceDate)
+            : (statementEntries[0]?.date || new Date());
+
+        const normalizedEntries: LedgerEntry[] = hasOpeningRow
+            ? statementEntries
+            : [
+                {
+                    date: openingDate,
+                    createdAt: openingDate,
+                    reference: 'BAL B/F',
+                    type: 'Opening Balance',
+                    debit: summary.openingBalance || 0,
+                    credit: 0,
+                    balance: summary.openingBalance || 0,
+                },
+                ...statementEntries,
+            ];
+
+        const finalDealerBalance = normalizedEntries.length > 0
+            ? normalizedEntries[normalizedEntries.length - 1].balance
+            : (summary.openingBalance || 0);
+        const closingDate = normalizedEntries.length > 0
+            ? normalizedEntries[normalizedEntries.length - 1].date
+            : openingDate;
+
+        const statementEntriesWithClosing: LedgerEntry[] = [
+            ...normalizedEntries,
+            {
+                date: closingDate,
+                createdAt: closingDate,
+                reference: 'CL-END',
+                type: 'Closing Balance',
+                debit: 0,
+                credit: 0,
+                balance: finalDealerBalance,
+            },
+        ];
 
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
@@ -1324,7 +1363,7 @@ export default function DealerLedger() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {statementEntries.map((entry, idx) => (
+                                    {statementEntriesWithClosing.map((entry, idx) => (
                                         <tr key={idx} className="hover:bg-slate-50 transition-colors">
                                             <td className="p-4 text-slate-700">
                                                 <div className="font-medium">
@@ -1335,9 +1374,10 @@ export default function DealerLedger() {
                                                 </div>
                                             </td>
                                             <td className="p-4 font-medium text-slate-800">
-                                                {entry.type === 'Opening Balance' ? 'Opening Balance' : 
-                                                 entry.type === 'Invoice' ? `Sales - ${selectedDealer.businessName}` : 
-                                                 `Receipt - ${selectedDealer.businessName}`}
+                                                {entry.type === 'Opening Balance' ? 'Opening Balance' :
+                                                    entry.type === 'Closing Balance' ? 'Closing Balance' :
+                                                        entry.type === 'Invoice' ? `Sales - ${selectedDealer.businessName}` :
+                                                            `Receipt - ${selectedDealer.businessName}`}
                                             </td>
                                             <td className="p-4 text-slate-500 font-medium italic text-xs">
                                                 {entry.type}
@@ -1358,11 +1398,15 @@ export default function DealerLedger() {
                                             </td>
                                             <td className="p-4 text-center">
                                                 <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter ${
-                                                    entry.type === 'Payment'
-                                                        ? 'bg-emerald-100 text-emerald-700'
-                                                        : 'bg-red-100 text-red-700'
+                                                    entry.type === 'Closing Balance'
+                                                        ? (entry.balance >= 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700')
+                                                        : entry.type === 'Payment'
+                                                            ? 'bg-emerald-100 text-emerald-700'
+                                                            : 'bg-red-100 text-red-700'
                                                 }`}>
-                                                    {entry.type === 'Payment' ? 'Cr' : 'Dr'}
+                                                    {entry.type === 'Closing Balance'
+                                                        ? (entry.balance >= 0 ? 'Dr' : 'Cr')
+                                                        : (entry.type === 'Payment' ? 'Cr' : 'Dr')}
                                                 </span>
                                             </td>
                                             <td className="p-4 text-center">

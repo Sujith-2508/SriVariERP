@@ -876,10 +876,11 @@ export const generateSupplierStatementPDFBase64 = async (
     // 5. TRANSACTION TABLE
     const tableColumn = ["Date", "Type", "Reference", "Particulars", "Credit (Cr)", "Debit (Dr)", "Balance"];
     const tableRows = statementData.map(entry => {
-        const isOpening = entry.reference === 'Bal B/F';
+        const isOpening = entry.rowKind === 'OPENING' || entry.reference?.toUpperCase() === 'BAL B/F';
+        const isClosing = entry.rowKind === 'CLOSING' || entry.reference?.toUpperCase() === 'CL-END';
         return [
             new Date(entry.date).toLocaleDateString('en-GB'),
-            isOpening ? 'Opening' : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment'),
+            isOpening ? 'Opening' : (isClosing ? 'Closing' : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment')),
             entry.reference,
             entry.notes || '-',
             entry.credit > 0 ? entry.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
