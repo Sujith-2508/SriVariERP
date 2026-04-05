@@ -4,13 +4,14 @@ import { Dealer, InvoiceItem, Transaction, CompanySettings } from '@/types';
 
 /**
  * Generates an Invoice PDF and returns it as a Base64 string.
- * This is an absolute, pixel-perfect clone of the user's reference invoice template.
+ * Supports multiple identical copies.
  */
 export const generateInvoicePDFBase64 = async (
     invoice: Transaction,
     dealer: Dealer,
     items: InvoiceItem[] = [],
-    company: CompanySettings
+    company: CompanySettings,
+    numCopies: number = 1
 ): Promise<string> => {
     const doc = new jsPDF('p', 'mm', 'a4');
 
@@ -57,7 +58,7 @@ export const generateInvoicePDFBase64 = async (
         return words.trim() + ' Only';
     };
 
-    // Helper: clip text to fit within a given mm width at the current font/size
+    // Helper: clip text to fit within a given mm width
     const fitText = (text: string, maxWidthMm: number): string => {
         if (!text) return '';
         if (doc.getTextWidth(text) <= maxWidthMm) return text;
@@ -66,7 +67,7 @@ export const generateInvoicePDFBase64 = async (
         return t;
     };
 
-    // Helper: short date format DD/MM/YY to save space in narrow cells
+    // Helper: short date format DD/MM/YY
     const shortDate = (dateStr: string): string => {
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return dateStr;
@@ -77,22 +78,24 @@ export const generateInvoicePDFBase64 = async (
     };
 
     // --- Helper for drawing everything BUT the items table ---
-    const drawPageTemplate = (pageNum: number, totalPages: number) => {
-        // 1. OUTER BORDER BOX — drawn on EVERY page
+    const drawPageTemplate = (absolutePageNum: number, totalAbsolutePages: number, startPageOfCopy: number) => {
+        const pageNumInCopy = absolutePageNum - startPageOfCopy + 1;
+        
+        // 1. OUTER BORDER BOX
         doc.setDrawColor(0);
         doc.setLineWidth(0.5);
         doc.rect(10, 10, 190, 277);
 
-        // Page number at bottom of every page
+        // Page number at bottom
         const bY = 287;
         doc.setFontSize(6);
         doc.setFont('helvetica', 'italic');
-        doc.text(`Page ${pageNum} of ${totalPages}`, 195, bY - 2, { align: 'right' });
+        doc.text(`Page ${absolutePageNum} of ${totalAbsolutePages}`, 195, bY - 2, { align: 'right' });
 
-        // Pages 2+ — just the outer box, no header
-        if (pageNum > 1) return;
+        // Only draw header info on the FIRST page of each copy
+        if (pageNumInCopy > 1) return;
 
-        // 2. HEADER SECTION - Left Side (Company Info) — page 1 only
+        // 2. HEADER SECTION - Left Side (Company Info)
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.text(company.companyName.toUpperCase(), 12, 16);
@@ -105,20 +108,14 @@ export const generateInvoicePDFBase64 = async (
         doc.text(`Ph: ${company.phone || 'N/A'}  Email: ${company.email || 'N/A'}`, 12, 32);
         doc.text(`GST NO: ${company.gstNumber || 'N/A'}  PAN NO: ${company.panNumber || 'N/A'}`, 12, 36);
 
-        // Horizontal line after company details
         doc.line(10, 40, 105, 40);
 
         // Buyer Section
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold');
         doc.text('Buyer', 12, 45);
-
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9); doc.setFont('helvetica', 'bold');
         doc.text(dealer.businessName, 12, 50);
-
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal');
         const dealerAddressLines = doc.splitTextToSize(dealer.address || '', 90);
         let buyerY = 54;
         dealerAddressLines.forEach((line: string) => {
@@ -127,162 +124,86 @@ export const generateInvoicePDFBase64 = async (
         });
         doc.text(dealer.city || '', 12, buyerY);
         buyerY += 4;
-        if (dealer.gstNumber) {
-            doc.text(`GST IN: ${dealer.gstNumber}`, 12, buyerY);
-        }
+        if (dealer.gstNumber) doc.text(`GST IN: ${dealer.gstNumber}`, 12, buyerY);
 
         // 3. RIGHT SIDE - INVOICE METADATA TABLE
         const metadataStartX = 105;
         const metadataStartY = 10;
-
-        // Invoice title header
         doc.setFillColor(255, 255, 255);
         doc.setDrawColor(0);
         doc.rect(metadataStartX, metadataStartY, 95, 8);
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12); doc.setFont('helvetica', 'bold');
         doc.text('INVOICE', 152.5, metadataStartY + 5.5, { align: 'center' });
 
-        // Metadata rows
         const rowHeight = 6;
         let mY = metadataStartY + 8;
 
         // Row 1: Invoice No.
-        doc.rect(metadataStartX, mY, 40, rowHeight);
-        doc.rect(metadataStartX + 40, mY, 25, rowHeight);
-        doc.rect(metadataStartX + 65, mY, 15, rowHeight);
-        doc.rect(metadataStartX + 80, mY, 15, rowHeight);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Invoice No.', metadataStartX + 2, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(notes.manualInvoiceNo || invoice.referenceId || '', 23), metadataStartX + 42, mY + 4);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Dated', metadataStartX + 67, mY + 4);
-        doc.setFontSize(6);
-        doc.setFont('helvetica', 'bold');
-        doc.text(shortDate(invoice.date?.toString() || ''), metadataStartX + 82, mY + 4);
+        doc.rect(metadataStartX, mY, 40, rowHeight); doc.rect(metadataStartX + 40, mY, 25, rowHeight);
+        doc.rect(metadataStartX + 65, mY, 15, rowHeight); doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.text('Invoice No.', metadataStartX + 2, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(notes.manualInvoiceNo || invoice.referenceId || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFont('helvetica', 'normal'); doc.text('Dated', metadataStartX + 67, mY + 4);
+        doc.setFontSize(6); doc.setFont('helvetica', 'bold'); doc.text(shortDate(invoice.date?.toString() || ''), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 2: Delivery Note
-        doc.rect(metadataStartX, mY, 40, rowHeight);
-        doc.rect(metadataStartX + 40, mY, 25, rowHeight);
-        doc.rect(metadataStartX + 65, mY, 15, rowHeight);
-        doc.rect(metadataStartX + 80, mY, 15, rowHeight);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Delivery Note', metadataStartX + 2, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(notes.deliveryNote || '', 23), metadataStartX + 42, mY + 4);
-        doc.setFontSize(6);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Mode/Terms of', metadataStartX + 66, mY + 3);
-        doc.text('Payment', metadataStartX + 66, mY + 5.5);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(invoice.paymentTerms || 'Immediate', 13), metadataStartX + 82, mY + 4);
+        doc.rect(metadataStartX, mY, 40, rowHeight); doc.rect(metadataStartX + 40, mY, 25, rowHeight);
+        doc.rect(metadataStartX + 65, mY, 15, rowHeight); doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.text('Delivery Note', metadataStartX + 2, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(notes.deliveryNote || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.text('Mode/Terms of', metadataStartX + 66, mY + 3); doc.text('Payment', metadataStartX + 66, mY + 5.5);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(invoice.paymentTerms || 'Immediate', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 3: Supplier's Ref
-        doc.rect(metadataStartX, mY, 40, rowHeight);
-        doc.rect(metadataStartX + 40, mY, 25, rowHeight);
-        doc.rect(metadataStartX + 65, mY, 15, rowHeight);
-        doc.rect(metadataStartX + 80, mY, 15, rowHeight);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.text("Supplier's Ref.", metadataStartX + 2, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(notes.supplierRef || '', 23), metadataStartX + 42, mY + 4);
-        doc.setFontSize(5.5);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Other', metadataStartX + 67, mY + 2.5);
-        doc.text('Reference(s)', metadataStartX + 67, mY + 5);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(notes.otherRef || '', 13), metadataStartX + 82, mY + 4);
+        doc.rect(metadataStartX, mY, 40, rowHeight); doc.rect(metadataStartX + 40, mY, 25, rowHeight);
+        doc.rect(metadataStartX + 65, mY, 15, rowHeight); doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.text("Supplier's Ref.", metadataStartX + 2, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(notes.supplierRef || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.text('Other', metadataStartX + 67, mY + 2.5); doc.text('Ref(s)', metadataStartX + 67, mY + 5);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(notes.otherRef || '', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 4: Buyer's Order No
-        doc.rect(metadataStartX, mY, 40, rowHeight);
-        doc.rect(metadataStartX + 40, mY, 25, rowHeight);
-        doc.rect(metadataStartX + 65, mY, 15, rowHeight);
-        doc.rect(metadataStartX + 80, mY, 15, rowHeight);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.text("Buyer's Order No.", metadataStartX + 2, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(notes.buyerOrderNo || '', 23), metadataStartX + 42, mY + 4);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Dated', metadataStartX + 67, mY + 4);
-        doc.setFontSize(6);
-        doc.setFont('helvetica', 'bold');
-        doc.text(notes.buyerOrderDate ? shortDate(notes.buyerOrderDate) : '', metadataStartX + 82, mY + 4);
+        doc.rect(metadataStartX, mY, 40, rowHeight); doc.rect(metadataStartX + 40, mY, 25, rowHeight);
+        doc.rect(metadataStartX + 65, mY, 15, rowHeight); doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.text("Buyer's Order No.", metadataStartX + 2, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(notes.buyerOrderNo || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFont('helvetica', 'normal'); doc.text('Dated', metadataStartX + 67, mY + 4);
+        doc.setFontSize(6); doc.setFont('helvetica', 'bold'); doc.text(notes.buyerOrderDate ? shortDate(notes.buyerOrderDate) : '', metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 5: Despatch Doc No
-        doc.rect(metadataStartX, mY, 40, rowHeight);
-        doc.rect(metadataStartX + 40, mY, 25, rowHeight);
-        doc.rect(metadataStartX + 65, mY, 15, rowHeight);
-        doc.rect(metadataStartX + 80, mY, 15, rowHeight);
-        doc.setFontSize(6);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Despatch Document No.', metadataStartX + 2, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(notes.dispatchDocNo || '', 23), metadataStartX + 42, mY + 4);
-        doc.setFontSize(5.5);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Vehicle', metadataStartX + 67, mY + 2.5);
-        doc.text('Number', metadataStartX + 67, mY + 5);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(invoice.vehicleNumber || '', 13), metadataStartX + 82, mY + 4);
+        doc.rect(metadataStartX, mY, 40, rowHeight); doc.rect(metadataStartX + 40, mY, 25, rowHeight);
+        doc.rect(metadataStartX + 65, mY, 15, rowHeight); doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.text('Despatch Doc No.', metadataStartX + 2, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(notes.dispatchDocNo || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.text('Vehicle', metadataStartX + 67, mY + 2.5); doc.text('Number', metadataStartX + 67, mY + 5);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(invoice.vehicleNumber || '', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 6: Despatched through
-        doc.rect(metadataStartX, mY, 40, rowHeight);
-        doc.rect(metadataStartX + 40, mY, 25, rowHeight);
-        doc.rect(metadataStartX + 65, mY, 15, rowHeight);
-        doc.rect(metadataStartX + 80, mY, 15, rowHeight);
-        doc.setFontSize(6);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Despatched through', metadataStartX + 2, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(invoice.vehicleName || '', 23), metadataStartX + 42, mY + 4);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Destination', metadataStartX + 67, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(fitText(invoice.destination || dealer.city || '', 13), metadataStartX + 82, mY + 4);
+        doc.rect(metadataStartX, mY, 40, rowHeight); doc.rect(metadataStartX + 40, mY, 25, rowHeight);
+        doc.rect(metadataStartX + 65, mY, 15, rowHeight); doc.rect(metadataStartX + 80, mY, 15, rowHeight);
+        doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.text('Despatched through', metadataStartX + 2, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(invoice.vehicleName || '', 23), metadataStartX + 42, mY + 4);
+        doc.setFont('helvetica', 'normal'); doc.text('Destination', metadataStartX + 67, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(fitText(invoice.destination || dealer.city || '', 13), metadataStartX + 82, mY + 4);
         mY += rowHeight;
 
         // Row 7: Terms of Delivery
         doc.rect(metadataStartX, mY, 95, 10);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Terms of Delivery', metadataStartX + 2, mY + 4);
-        doc.setFont('helvetica', 'bold');
-        doc.text(notes.termsOfDelivery || '', metadataStartX + 2, mY + 8);
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.text('Terms of Delivery', metadataStartX + 2, mY + 4);
+        doc.setFont('helvetica', 'bold'); doc.text(notes.termsOfDelivery || '', metadataStartX + 2, mY + 8);
 
-        // Vertical divider for the header
         doc.line(105, 18, 105, mY + 10);
         doc.line(10, mY + 10, 200, mY + 10);
     };
 
-    // Prepare item rows
-    const bodyRows = items.map((item, idx) => [
-        (idx + 1).toString(),
-        item.productName,
-        item.hsnCode || '',
-        `${(item.cgst + item.sgst + item.igst).toFixed(0)}%`,
-        `${item.quantity.toFixed(3)} ${item.unit || 'nos'}`,
-        formatRate(item.unitPrice),
-        item.unit || 'nos',
-        '', // Disc %
-        formatAmount(item.unitPrice * item.quantity)
-    ]);
-
-    // Initial draw to get total pages if it spans
+    // Calculations
     const subtotal = items.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
-    const itemCGST = items.reduce((sum, i) => sum + (i.cgstAmount || 0), 0);
-    const itemSGST = items.reduce((sum, i) => sum + (i.sgstAmount || 0), 0);
-    const itemIGST = items.reduce((sum, i) => sum + (i.igstAmount || 0), 0);
-    const totalTax = itemCGST + itemSGST + itemIGST;
+    const itemTax = items.reduce((sum, i) => sum + (i.cgstAmount + i.sgstAmount + i.igstAmount), 0);
     const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
     const unit = items[0]?.unit || 'nos';
     const transportCharges = invoice.transportCharges || 0;
@@ -293,182 +214,114 @@ export const generateInvoicePDFBase64 = async (
     const globalSGSTAmount = (subtotal * globalSGST) / 100;
     const globalIGSTAmount = (subtotal * globalIGST) / 100;
     const roundOffAmount = parseFloat(notes.roundOff || '0');
-    const grandTotal = subtotal + totalTax + transportCharges + roundOffAmount +
+    const grandTotal = subtotal + itemTax + transportCharges + roundOffAmount +
         globalCGSTAmount + globalSGSTAmount + globalIGSTAmount;
 
-    // ------------------------------------------------------------------
-    // LAYOUT: calculate where buyer section ends so table starts below it
-    // Metadata right-side always ends at y≈64 (header 8 + 6 rows×6 + terms 10)
+    const bodyRows = items.map((item, idx) => [
+        (idx + 1).toString(), item.productName, item.hsnCode || '',
+        `${(item.cgst + item.sgst + item.igst).toFixed(0)}%`,
+        `${item.quantity.toFixed(3)} ${item.unit || 'nos'}`,
+        formatRate(item.unitPrice), item.unit || 'nos', '',
+        formatAmount(item.unitPrice * item.quantity)
+    ]);
+
+    // Metadata height calc
     const HEADER_BOTTOM_Y = 66;
     const buyerAddrLines = doc.splitTextToSize(dealer.address || '', 90);
     const estimatedBuyerBottom = 55 + (buyerAddrLines.length * 4) + 4 + (dealer.gstNumber ? 4 : 0);
     const tableStartY = Math.max(HEADER_BOTTOM_Y, estimatedBuyerBottom + 2);
-    // ------------------------------------------------------------------
 
-    autoTable(doc, {
-        startY: tableStartY,
-        head: [['Sl\nNo.', 'Description of Goods', 'HSN', 'GST', 'Quantity', 'Rate', 'per', 'Disc. %', 'Amount']],
-        body: bodyRows,
-        theme: 'grid',
-        headStyles: {
-            fillColor: [255, 255, 255],
-            textColor: [0, 0, 0],
-            fontStyle: 'bold',
-            lineWidth: 0.3,
-            lineColor: [0, 0, 0],
-            fontSize: 7,
-            halign: 'center',
-            valign: 'middle'
-        },
-        styles: {
-            fontSize: 8,
-            cellPadding: 2,
-            lineColor: [0, 0, 0],
-            lineWidth: 0.3,
-            textColor: [0, 0, 0]
-        },
-        columnStyles: {
-            0: { cellWidth: 10, halign: 'center' },
-            1: { cellWidth: 60, fontStyle: 'normal' },
-            2: { cellWidth: 15, halign: 'center' },
-            3: { cellWidth: 12, halign: 'center' },
-            4: { cellWidth: 18, halign: 'center' },
-            5: { cellWidth: 18, halign: 'right' },
-            6: { cellWidth: 12, halign: 'center' },
-            7: { cellWidth: 15, halign: 'center' },
-            8: { cellWidth: 30, halign: 'right' }
-        },
-        margin: { top: 15, bottom: 60, left: 10, right: 10 },
-        foot: [[
-            '',
-            'Total',
-            '',
-            '',
-            `${totalQty.toFixed(3)} ${unit}`,
-            '',
-            '',
-            '',
-            formatAmount(subtotal)
-        ]],
-        footStyles: {
-            fillColor: [255, 255, 255],
-            textColor: [0, 0, 0],
-            fontStyle: 'bold',
-            lineWidth: 0.3,
-            lineColor: [0, 0, 0],
-            fontSize: 8,
-            halign: 'right'
-        },
-        didDrawPage: (data) => {
-            // Draw header on every page
-            const totalPages = (doc as any).internal.getNumberOfPages();
-            drawPageTemplate(data.pageNumber, totalPages);
+    for (let i = 0; i < numCopies; i++) {
+        if (i > 0) doc.addPage();
+        const startPageOfCopy = doc.internal.pages.length - 1;
+
+        autoTable(doc, {
+            startY: tableStartY,
+            head: [['Sl\nNo.', 'Description of Goods', 'HSN', 'GST', 'Quantity', 'Rate', 'per', 'Disc. %', 'Amount']],
+            body: bodyRows,
+            theme: 'grid',
+            headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.3, lineColor: [0, 0, 0], fontSize: 7, halign: 'center', valign: 'middle' },
+            styles: { fontSize: 8, cellPadding: 2, lineColor: [0, 0, 0], lineWidth: 0.3, textColor: [0, 0, 0] },
+            columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 60 }, 2: { cellWidth: 15, halign: 'center' }, 3: { cellWidth: 12, halign: 'center' }, 4: { cellWidth: 18, halign: 'center' }, 5: { cellWidth: 18, halign: 'right' }, 6: { cellWidth: 12, halign: 'center' }, 7: { cellWidth: 15, halign: 'center' }, 8: { cellWidth: 30, halign: 'right' } },
+            margin: { top: 15, bottom: 60, left: 10, right: 10 },
+            foot: [['', 'Total', '', '', `${totalQty.toFixed(3)} ${unit}`, '', '', '', formatAmount(subtotal)]],
+            footStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.3, lineColor: [0, 0, 0], fontSize: 8, halign: 'right' },
+            didDrawPage: (data) => {
+                const totalPages = doc.internal.pages.length - 1;
+                drawPageTemplate(data.pageNumber, totalPages, startPageOfCopy);
+            }
+        });
+
+        let currentY = (doc as any).lastAutoTable.finalY + 2;
+        if (currentY > 210) { doc.addPage(); currentY = 60; drawPageTemplate(doc.internal.pages.length - 1, doc.internal.pages.length - 1, startPageOfCopy); }
+
+        const drawTotalRow = (label: string, value: string, isGrand = false) => {
+            doc.setLineWidth(0.3); doc.rect(10, currentY, 160, 7); doc.rect(170, currentY, 30, 7);
+            doc.setFont('helvetica', isGrand ? 'bold' : 'normal'); doc.setFontSize(isGrand ? 9 : 8);
+            doc.text(label, 165, currentY + 5, { align: 'right' }); doc.text(value, 198, currentY + 5, { align: 'right' });
+            currentY += 7;
+        };
+
+        if (transportCharges > 0) drawTotalRow(`Transport Charges (${invoice.vehicleName || 'Vehicle'})`, formatAmount(transportCharges));
+        if ((itemTax > 0 || globalCGSTAmount > 0) && !invoice.igst) {
+            const cgst = items.reduce((s, i) => s + i.cgstAmount, 0) + globalCGSTAmount;
+            const sgst = items.reduce((s, i) => s + i.sgstAmount, 0) + globalSGSTAmount;
+            drawTotalRow('CGST', formatAmount(cgst));
+            drawTotalRow('SGST', formatAmount(sgst));
+        } else if (invoice.igst > 0 || globalIGSTAmount > 0) {
+            const igst = items.reduce((s, i) => s + i.igstAmount, 0) + globalIGSTAmount;
+            drawTotalRow('IGST', formatAmount(igst));
         }
-    });
+        if (roundOffAmount !== 0) drawTotalRow('Round Off', (roundOffAmount >= 0 ? '+' : '') + formatAmount(roundOffAmount));
+        drawTotalRow('Total', formatAmount(grandTotal), true);
 
-    let currentY = (doc as any).lastAutoTable.finalY + 2;
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.text('Amount Chargeable (in words)', 12, currentY + 4);
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.text(`Rs. ${numberToWords(Math.round(grandTotal))}`, 12, currentY + 9);
+        currentY += 14; doc.line(10, currentY, 200, currentY);
 
-    // Check if footer can fit on this page, otherwise add page
-    if (currentY > 210) {
-        doc.addPage();
-        currentY = 60;
-        const totalPages = (doc as any).internal.getNumberOfPages();
-        drawPageTemplate(doc.internal.pages.length - 1, totalPages);
+        const taxSummaryData = Object.values(items.reduce((acc: any, item) => {
+            const tr = item.cgst + item.sgst + item.igst;
+            const k = `${item.hsnCode || ''}-${tr}`;
+            if (!acc[k]) acc[k] = { hsn: item.hsnCode || '', taxable: 0, cgstR: item.cgst, sgstR: item.sgst, totalR: tr, tax: 0 };
+            acc[k].taxable += (item.unitPrice * item.quantity);
+            acc[k].tax += (item.cgstAmount + item.sgstAmount + item.igstAmount);
+            return acc;
+        }, {}));
+
+        autoTable(doc, {
+            startY: currentY + 2,
+            head: [['HSN / SAC', 'Taxable Value', 'CGST %', 'SGST %', 'Total GST %', 'Tax Amount']],
+            body: [...taxSummaryData.map((r: any) => [r.hsn, formatAmount(r.taxable), `${r.cgstR}%`, `${r.sgstR}%`, `${r.totalR}%`, formatAmount(r.tax)]), ['Total', formatAmount(subtotal), '', '', '', formatAmount(itemTax)]],
+            theme: 'grid',
+            headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontSize: 7, lineWidth: 0.3, halign: 'center', fontStyle: 'bold' },
+            styles: { fontSize: 7, cellPadding: 1.5, lineColor: [0, 0, 0], lineWidth: 0.3, textColor: [0, 0, 0] },
+            columnStyles: { 1: { halign: 'right' }, 5: { halign: 'right' } },
+            margin: { left: 10, right: 10, bottom: 40, top: 15 },
+            didDrawPage: (data) => { drawPageTemplate(data.pageNumber, doc.internal.pages.length - 1, startPageOfCopy); }
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 5;
+        if (currentY > 230) { doc.addPage(); currentY = 60; drawPageTemplate(doc.internal.pages.length - 1, doc.internal.pages.length - 1, startPageOfCopy); }
+
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+        const bank = [`Account Type: ${company.accountType || 'Current'}`, `Bank: ${company.bankName}`, `A/c No: ${company.accountNumber}`, `IFSC: ${company.ifscCode}`, `Branch: ${company.bankBranch}`];
+        bank.forEach((l, idx) => doc.text(l, 12, currentY + (idx * 4)));
+
+        doc.line(10, currentY + 20, 130, currentY + 20);
+        doc.setFont('helvetica', 'bold'); doc.text('Declaration', 12, currentY + 24);
+        doc.setFontSize(6.5); doc.setFont('helvetica', 'normal');
+        doc.text('We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.', 12, currentY + 28, { maxWidth: 110 });
+
+        const footerBottom = currentY + 36;
+        doc.line(130, currentY - 3, 130, footerBottom);
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+        doc.text(`for ${company.companyName.toUpperCase()}`, 165, currentY + 2, { align: 'center' });
+        try { doc.addImage('/signature.png', 'PNG', 148, currentY + 6, 35, 15); } catch { }
+        doc.text('Authorised Signatory', 165, currentY + 24, { align: 'center' });
+        doc.setLineWidth(0.3); doc.line(10, footerBottom, 200, footerBottom); doc.line(10, currentY - 3, 200, currentY - 3);
+        doc.setFontSize(7); doc.setFont('helvetica', 'italic');
+        doc.text('This is a Computer Generated Invoice', 105, footerBottom + 4, { align: 'center' });
     }
-
-    // --- DRAW TOTALS SECTION ---
-    const drawTotalRow = (label: string, value: string, isGrand = false) => {
-        doc.setLineWidth(0.3);
-        doc.rect(10, currentY, 160, 7);
-        doc.rect(170, currentY, 30, 7);
-        doc.setFont('helvetica', isGrand ? 'bold' : 'normal');
-        doc.setFontSize(isGrand ? 9 : 8);
-        doc.text(label, 165, currentY + 5, { align: 'right' });
-        doc.text(value, 198, currentY + 5, { align: 'right' });
-        currentY += 7;
-    };
-
-    if (transportCharges > 0) drawTotalRow(`Transport Charges (${invoice.vehicleName || 'Car'})`, formatAmount(transportCharges));
-    if (itemCGST > 0 || globalCGSTAmount > 0) drawTotalRow(`CGST (${globalCGST.toFixed(2)}%)`, formatAmount(itemCGST + globalCGSTAmount));
-    if (itemSGST > 0 || globalSGSTAmount > 0) drawTotalRow(`SGST (${globalSGST.toFixed(2)}%)`, formatAmount(itemSGST + globalSGSTAmount));
-    if (roundOffAmount !== 0) drawTotalRow('Round Off', (roundOffAmount >= 0 ? '+' : '') + formatAmount(roundOffAmount));
-    drawTotalRow('Total', formatAmount(grandTotal), true);
-
-    // --- AMOUNT IN WORDS ---
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Amount Chargeable (in words)', 12, currentY + 4);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Rs. ${numberToWords(Math.round(grandTotal))}`, 12, currentY + 9);
-    currentY += 14;
-    doc.line(10, currentY, 200, currentY);
-
-    // --- TAX BREAKDOWN TABLE ---
-    const taxSummaryData = Object.values(items.reduce((acc: any, item) => {
-        const totalRate = item.cgst + item.sgst + item.igst;
-        const key = `${item.hsnCode || ''}-${totalRate}`;
-        if (!acc[key]) acc[key] = { hsn: item.hsnCode || '', taxable: 0, cgstR: item.cgst, sgstR: item.sgst, totalR: totalRate, tax: 0 };
-        acc[key].taxable += (item.unitPrice * item.quantity);
-        acc[key].tax += (item.cgstAmount + item.sgstAmount + item.igstAmount);
-        return acc;
-    }, {}));
-
-    autoTable(doc, {
-        startY: currentY + 2,
-        head: [['HSN / SAC', 'Taxable Value', 'CGST %', 'SGST %', 'Total GST %', 'Tax Amount']],
-        body: [
-            ...taxSummaryData.map((row: any) => [row.hsn, formatAmount(row.taxable), `${row.cgstR}%`, `${row.sgstR}%`, `${row.totalR}%`, formatAmount(row.tax)]),
-            ['Total', formatAmount(subtotal), '', '', '', formatAmount(totalTax)]
-        ],
-        theme: 'grid',
-        headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], fontSize: 7, lineWidth: 0.3, halign: 'center', fontStyle: 'bold' },
-        styles: { fontSize: 7, cellPadding: 1.5, lineColor: [0, 0, 0], lineWidth: 0.3, textColor: [0, 0, 0] },
-        columnStyles: { 1: { halign: 'right' }, 5: { halign: 'right' } },
-        margin: { left: 10, right: 10, bottom: 40, top: 15 }, // top: 15 = just inside outer border on page 2+
-        didDrawPage: (data) => {
-            // Ensure outer border + full header appear on every page this table spans
-            const totalPages = (doc as any).internal.getNumberOfPages();
-            drawPageTemplate(data.pageNumber, totalPages);
-        }
-    });
-
-    currentY = (doc as any).lastAutoTable.finalY + 5;
-
-    // --- FINAL FOOTER (Bank & Sign) ---
-    const fY = currentY;
-    if (fY > 230) { doc.addPage(); drawPageTemplate(doc.internal.pages.length - 1, (doc as any).internal.getNumberOfPages()); }
-
-    doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-    const bankDetails = [
-        `Account Type: ${company.accountType || 'Current A/c'}`,
-        `Bank: ${company.bankName}`,
-        `Account Number: ${company.accountNumber}`,
-        `IFSC: ${company.ifscCode}`,
-        `Branch: ${company.bankBranch}`
-    ];
-    bankDetails.forEach((line, i) => doc.text(line, 12, fY + (i * 4)));
-
-    doc.line(10, fY + 20, 130, fY + 20);
-    doc.setFont('helvetica', 'bold'); doc.text('Declaration', 12, fY + 24);
-    doc.setFontSize(6.5); doc.setFont('helvetica', 'normal');
-    doc.text('We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.', 12, fY + 28, { maxWidth: 110 });
-
-    const footerBottom = fY + 36; // total footer block height
-    doc.line(130, fY - 3, 130, footerBottom);   // vertical divider — only content height
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold');
-    doc.text(`for ${company.companyName.toUpperCase()}`, 165, fY + 2, { align: 'center' });
-    try { doc.addImage('/signature.png', 'PNG', 148, fY + 6, 35, 15); } catch { }
-    doc.text('Authorised Signatory', 165, fY + 24, { align: 'center' });  // just below signature
-
-    // Bottom border to close the footer box
-    doc.setLineWidth(0.3);
-    doc.line(10, footerBottom, 200, footerBottom);
-    doc.line(10, fY - 3, 200, fY - 3);
-
-    // Computer generated footer note
-    doc.setFontSize(7); doc.setFont('helvetica', 'italic');
-    doc.text('This is a Computer Generated Invoice', 105, footerBottom + 4, { align: 'center' });
 
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
@@ -487,7 +340,7 @@ export const generateReceiptPDFBase64 = async (
 ): Promise<string> => {
     const doc = new jsPDF('p', 'mm', 'a4');
 
-    // Number to words helper (Indian format) - Reusing or re-declaring for self-containment
+    // Number to words helper (Indian format)
     const numberToWords = (num: number): string => {
         const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
         const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
@@ -519,100 +372,33 @@ export const generateReceiptPDFBase64 = async (
         return words.trim() + ' Only';
     };
 
-    // 1. OUTER BORDER BOX
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(10, 10, 190, 140); // Half-page sized receipt
-
-    // 2. HEADER SECTION
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName.toUpperCase(), 105, 20, { align: 'center' });
-
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
+    doc.setDrawColor(0); doc.setLineWidth(0.5); doc.rect(10, 10, 190, 140);
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text(company.companyName.toUpperCase(), 105, 20, { align: 'center' });
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
     doc.text(`${company.addressLine1 || ''}, ${company.addressLine2 || ''}`, 105, 25, { align: 'center' });
     doc.text(`${company.city || ''} - ${company.pinCode || ''}`, 105, 29, { align: 'center' });
     doc.text(`GST NO: ${company.gstNumber || 'N/A'}`, 105, 33, { align: 'center' });
     doc.text(`Ph: ${company.phone || ''} | ${company.email || ''}`, 105, 36, { align: 'center' });
-
-    doc.setLineWidth(0.3);
     doc.line(10, 38, 200, 38);
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setFillColor(245, 245, 245);
+    doc.rect(75, 42, 60, 10, 'F'); doc.rect(75, 42, 60, 10, 'S'); doc.text('PAYMENT RECEIPT', 105, 49, { align: 'center' });
 
-    // 3. RECEIPT TITLE
-    doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    doc.setFillColor(245, 245, 245);
-    doc.rect(75, 42, 60, 10, 'F');
-    doc.rect(75, 42, 60, 10, 'S');
-    doc.text('PAYMENT RECEIPT', 105, 49, { align: 'center' });
-
-    // 4. RECEIPT DETAILS
-    let rY = 65;
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'normal');
-
-    // Receipt No & Date
-    doc.text('Receipt No:', 15, rY);
-    doc.setFont('helvetica', 'bold');
-    doc.text(receiptId, 45, rY);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Date:', 140, rY);
-    doc.setFont('helvetica', 'bold');
-    doc.text(new Date().toLocaleDateString('en-GB'), 160, rY);
-
-    rY += 12;
-
-    // Content
-    doc.setFont('helvetica', 'normal');
-    doc.text('Received with thanks from:', 15, rY);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.text(dealer.businessName, 68, rY);
-
-    rY += 8;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${dealer.address || ''}, ${dealer.city || ''}`, 68, rY, { maxWidth: 110 });
-
-    rY += 12;
-
-    doc.setFontSize(11);
-    doc.text('The sum of Rupees:', 15, rY);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Rs. ${numberToWords(Math.round(amount))}`, 55, rY, { maxWidth: 130 });
-
-    rY += 12;
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('By:', 15, rY);
-    doc.setFont('helvetica', 'bold');
-    doc.text(method, 25, rY);
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('Amount:', 80, rY);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text(`Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 100, rY);
-
-    // 5. FOOTER
-    rY = 130;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Collected by: ${agent}`, 15, rY);
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`for ${company.companyName.toUpperCase()}`, 155, rY, { align: 'center' });
-    doc.setLineWidth(0.2);
-    doc.line(135, rY + 12, 175, rY + 12);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Authorised Signatory', 155, rY + 16, { align: 'center' });
-
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'italic');
-    doc.text('This is a computer generated receipt and does not require a physical signature.', 105, 148, { align: 'center' });
+    let rY = 65; doc.setFontSize(11); doc.setFont('helvetica', 'normal');
+    doc.text('Receipt No:', 15, rY); doc.setFont('helvetica', 'bold'); doc.text(receiptId, 45, rY);
+    doc.setFont('helvetica', 'normal'); doc.text('Date:', 140, rY); doc.setFont('helvetica', 'bold'); doc.text(new Date().toLocaleDateString('en-GB'), 160, rY);
+    rY += 12; doc.setFont('helvetica', 'normal'); doc.text('Received with thanks from:', 15, rY);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(dealer.businessName, 68, rY);
+    rY += 8; doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.text(`${dealer.address || ''}, ${dealer.city || ''}`, 68, rY, { maxWidth: 110 });
+    rY += 12; doc.setFontSize(11); doc.text('The sum of Rupees:', 15, rY);
+    doc.setFont('helvetica', 'bold'); doc.text(`Rs. ${numberToWords(Math.round(amount))}`, 55, rY, { maxWidth: 130 });
+    rY += 12; doc.setFont('helvetica', 'normal'); doc.text('By:', 15, rY);
+    doc.setFont('helvetica', 'bold'); doc.text(method, 25, rY);
+    doc.setFont('helvetica', 'normal'); doc.text('Amount:', 80, rY);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text(`Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 100, rY);
+    rY = 130; doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text(`Collected by: ${agent}`, 15, rY);
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.text(`for ${company.companyName.toUpperCase()}`, 155, rY, { align: 'center' });
+    doc.line(135, rY + 12, 175, rY + 12); doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.text('Authorised Signatory', 155, rY + 16, { align: 'center' });
+    doc.setFontSize(7); doc.setFont('helvetica', 'italic'); doc.text('This is a computer generated receipt and does not require a physical signature.', 105, 148, { align: 'center' });
 
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
@@ -629,754 +415,50 @@ export const generateStatementPDFBase64 = async (
     summary: any
 ): Promise<string> => {
     const doc = new jsPDF('p', 'mm', 'a4');
-
-    const formatCurrencyPDF = (amount: number) => {
-        return `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-    };
-
-    // 1. BOX BORDER
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(10, 10, 190, 277);
-
-    // 2. PROFESSIONAL HEADER (Aligned with Invoice)
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName.toUpperCase(), 12, 18);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    const addr1 = (company.addressLine1 || '').toUpperCase();
-    const addr2 = (company.addressLine2 || '').toUpperCase();
-    const city = (company.city || '').toUpperCase();
-    const gst = (company.gstNumber || '').toUpperCase();
-
-    doc.text(addr1, 12, 24);
-    doc.text(addr2, 12, 29);
-    doc.text(city, 12, 34);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`GST NO: ${gst || 'N/A'}`, 12, 39);
-
-    // Right Side Header
-    doc.line(100, 10, 100, 45);
-    doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    doc.text('STATEMENT OF ACCOUNT', 150, 25, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}`, 150, 32, { align: 'center' });
-
+    const formatCurrencyPDF = (amount: number) => `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    doc.setDrawColor(0); doc.setLineWidth(0.5); doc.rect(10, 10, 190, 277);
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text((company.addressLine1 || '').toUpperCase(), 12, 24);
+    doc.text((company.addressLine2 || '').toUpperCase(), 12, 29);
+    doc.text((company.city || '').toUpperCase(), 12, 34);
+    doc.setFont('helvetica', 'bold'); doc.text(`GST NO: ${(company.gstNumber || '').toUpperCase()}`, 12, 39);
+    doc.line(100, 10, 100, 45); doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.text('STATEMENT OF ACCOUNT', 150, 25, { align: 'center' });
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}`, 150, 32, { align: 'center' });
     doc.line(10, 45, 200, 45);
-
-    // 3. DEALER INFO
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Statement For:', 12, 52);
-    doc.setFontSize(11);
-    doc.text(dealer.businessName, 12, 58);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(dealer.address || '', 12, 63, { maxWidth: 85 });
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.text('Statement For:', 12, 52);
+    doc.setFontSize(11); doc.text(dealer.businessName, 12, 58);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text(dealer.address || '', 12, 63, { maxWidth: 85 });
     doc.text(`${dealer.city || ''} | Phone: ${dealer.phone}`, 12, 72);
+    doc.setDrawColor(200); doc.setFillColor(245, 245, 245); doc.rect(110, 50, 85, 38, 'F'); doc.rect(110, 50, 85, 38, 'S');
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.text('Account Summary:', 115, 56);
+    doc.setFont('helvetica', 'normal'); doc.text('Opening Balance:', 115, 62); doc.text(formatCurrencyPDF(summary.openingBalance || 0), 190, 62, { align: 'right' });
+    doc.text('Total Invoiced:', 115, 68); doc.text(formatCurrencyPDF(summary.totalInvoiced), 190, 68, { align: 'right' });
+    doc.text('Total Collected:', 115, 74); doc.text(formatCurrencyPDF(summary.totalPaid), 190, 74, { align: 'right' });
+    doc.line(115, 77, 190, 77); doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(220, 38, 38); doc.text('Outstanding:', 115, 83);
+    doc.text(formatCurrencyPDF(summary.totalOutstanding) + (summary.totalOutstanding >= 0 ? ' (Cr)' : ' (Dr)'), 190, 83, { align: 'right' });
+    doc.setTextColor(0); doc.line(10, 93, 200, 93); doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.text('Transaction History', 12, 92);
 
-    // 4. SUMMARY BOXES
-    doc.setDrawColor(200);
-    doc.setFillColor(245, 245, 245);
-    // Increased height to 38 for extra row and better spacing
-    doc.rect(110, 50, 85, 38, 'F');
-    doc.rect(110, 50, 85, 38, 'S');
-
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Account Summary:', 115, 56);
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('Opening Balance:', 115, 62);
-    doc.text(formatCurrencyPDF(summary.openingBalance || 0), 190, 62, { align: 'right' });
-
-    doc.text('Total Invoiced:', 115, 68);
-    doc.text(formatCurrencyPDF(summary.totalInvoiced), 190, 68, { align: 'right' });
-
-    doc.text('Total Collected:', 115, 74);
-    doc.text(formatCurrencyPDF(summary.totalPaid), 190, 74, { align: 'right' });
-
-    doc.line(115, 77, 190, 77);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(220, 38, 38); // Red
-    doc.text('Outstanding:', 115, 83);
-    const outstandingStr = formatCurrencyPDF(summary.totalOutstanding);
-    const balanceType = summary.totalOutstanding >= 0 ? ' (Cr)' : ' (Dr)';
-    doc.text(outstandingStr + balanceType, 190, 83, { align: 'right' });
-    doc.setTextColor(0);
-
-    doc.line(10, 93, 200, 93);
-
-    // 5. COMBINED TRANSACTION HISTORY TABLE
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Transaction History', 12, 92);
-
-    // Combine and sort invoices and payments
-    const statementEntries = [
-        ...invoices.map(inv => ({
-            date: new Date(inv.date),
-            ref: inv.referenceId,
-            type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
-            amount: inv.amount,
-            paid: inv.paid,
-            balance: inv.balance,
-            notes: inv.originalTransaction?.notes || '',
-            agent: inv.originalTransaction?.agentName || '-',
-            createdAt: inv.originalTransaction?.createdAt
-        })),
-        ...payments.map(p => ({
-            date: new Date(p.date),
-            ref: p.referenceId,
-            type: 'Receipt',
-            amount: 0,
-            paid: p.amount,
-            balance: 0,
-            agent: p.agentName || 'Admin',
-            notes: (p as any).notes || '',
-            createdAt: (p as any).createdAt
-        }))
-    ].sort((a, b) => {
-        if (a.ref === 'BAL B/F') return -1;
-        if (b.ref === 'BAL B/F') return 1;
-
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        if (dateA !== dateB) return dateA - dateB;
-        const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    const statementEntries = [...invoices.map(inv => ({ date: new Date(inv.date), ref: inv.referenceId, type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice', amount: inv.amount, paid: inv.paid, balance: inv.balance, notes: inv.originalTransaction?.notes || '', agent: inv.originalTransaction?.agentName || '-', createdAt: inv.originalTransaction?.createdAt })), ...payments.map(p => ({ date: new Date(p.date), ref: p.referenceId, type: 'Receipt', amount: 0, paid: p.amount, balance: 0, agent: p.agentName || 'Admin', notes: (p as any).notes || '', createdAt: (p as any).createdAt }))].sort((a, b) => {
+        if (a.ref === 'BAL B/F') return -1; if (b.ref === 'BAL B/F') return 1;
+        const dateA = new Date(a.date).getTime(); const dateB = new Date(b.date).getTime(); if (dateA !== dateB) return dateA - dateB;
+        const createdA = a.createdAt ? new Date(a.createdAt).getTime() : 0; const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return createdA - createdB;
-    })
-        .map(entry => {
-            // Correctly label Cheque Returns in the type column
-            if (entry.type === 'Invoice') {
-                const notes = (entry as any).notes || '';
-                const isCheckReturn = notes.startsWith('Cheque Return') || notes.startsWith('Check Return') || notes.startsWith('Chq Return');
-                if (isCheckReturn) {
-                    return { ...entry, type: 'Cheque Return' };
-                }
-            }
-            // Correctly label Stock Returns in the type column
-            if (entry.type === 'Receipt') {
-                const notes = (entry as any).notes || '';
-                const isStockReturn = notes.includes('Stock Return');
-                if (isStockReturn) {
-                    return { ...entry, type: 'Stock Return' };
-                }
-            }
-            return entry;
-        });
+    }).map(entry => {
+        if (entry.type === 'Invoice') { const n = (entry as any).notes || ''; if (n.startsWith('Cheque Return') || n.startsWith('Check Return') || n.startsWith('Chq Return')) return { ...entry, type: 'Cheque Return' }; }
+        if (entry.type === 'Receipt') { const n = (entry as any).notes || ''; if (n.includes('Stock Return')) return { ...entry, type: 'Stock Return' }; }
+        return entry;
+    });
 
     autoTable(doc, {
         startY: 95,
         head: [['Date', 'Ref No', 'Type', 'Credit', 'Debit', 'Agent']],
-        body: statementEntries.map(entry => [
-            entry.date.toLocaleDateString('en-GB'),
-            entry.ref,
-            entry.type,
-            (entry.type === 'Invoice' || entry.type === 'Cheque Return' || entry.type === 'Opening Balance') ? formatCurrencyPDF(entry.amount) : '-',
-            (entry.type === 'Receipt' || entry.type === 'Stock Return' || (entry.type === 'Opening Balance' && entry.paid > 0)) ? formatCurrencyPDF(entry.paid) : '-',
-            (entry as any).agent || '-'
-        ]),
-        theme: 'grid',
-        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.1 },
-        styles: { fontSize: 8, cellPadding: 2, lineColor: [0, 0, 0], lineWidth: 0.1 },
-        margin: { left: 10, right: 10 }
+        body: statementEntries.map(entry => [entry.date.toLocaleDateString('en-GB'), entry.ref, entry.type, (entry.type === 'Invoice' || entry.type === 'Cheque Return' || entry.type === 'Opening Balance') ? formatCurrencyPDF(entry.amount) : '-', (entry.type === 'Receipt' || entry.type === 'Stock Return' || (entry.type === 'Opening Balance' && entry.paid > 0)) ? formatCurrencyPDF(entry.paid) : '-', (entry as any).agent || '-']),
+        theme: 'grid', headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.1 }, styles: { fontSize: 8, cellPadding: 2, lineColor: [0, 0, 0], lineWidth: 0.1 }, margin: { left: 10, right: 10 }
     });
 
     const finalY = (doc as any).lastAutoTable.finalY + 15;
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    doc.text('Note: This is an automatically generated account statement. Please contact us for any discrepancies.', 105, Math.min(finalY, 280), { align: 'center' });
-
+    doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.text('Note: This is an automatically generated account statement. Please contact us for any discrepancies.', 105, Math.min(finalY, 280), { align: 'center' });
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
-};
-
-/**
- * Generates a Supplier Statement PDF and returns it as a Base64 string.
- */
-export const generateSupplierStatementPDFBase64 = async (
-    supplier: { name: string; phone?: string; city?: string; balance: number },
-    statementData: any[],
-    company: CompanySettings
-): Promise<string> => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-
-    // 1. BOX BORDER
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(10, 10, 190, 277);
-
-    // 2. HEADER SECTION
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName.toUpperCase(), 12, 18);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    const addr1 = (company.addressLine1 || '').toUpperCase();
-    const addr2 = (company.addressLine2 || '').toUpperCase();
-    const city = (company.city || '').toUpperCase();
-    const gst = (company.gstNumber || '').toUpperCase();
-
-    doc.text(addr1, 12, 24);
-    doc.text(addr2, 12, 29);
-    doc.text(city, 12, 34);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`GST NO: ${gst || 'N/A'}`, 12, 39);
-
-    // Right Side Header
-    doc.line(100, 10, 100, 45);
-    doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    doc.text('SUPPLIER STATEMENT', 150, 25, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}`, 150, 32, { align: 'center' });
-
-    doc.line(10, 45, 200, 45);
-
-    // 3. SUPPLIER INFO
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Statement For:', 12, 52);
-    doc.setFontSize(11);
-    doc.text(supplier.name, 12, 58);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    if (supplier.phone) doc.text(`Phone: ${supplier.phone}`, 12, 63);
-    if (supplier.city) doc.text(`City: ${supplier.city}`, 12, 67);
-
-    // 4. SUMMARY BOX
-    doc.setDrawColor(200);
-    doc.setFillColor(245, 245, 245);
-    doc.rect(130, 48, 65, 30, 'F');
-    doc.rect(130, 48, 65, 30, 'S');
-
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100);
-    doc.text('Opening Balance:', 135, 54);
-    doc.text(`Rs. ${(supplier as any).openingBalance?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '0.00'}`, 190, 54, { align: 'right' });
-
-    doc.setTextColor(0);
-    doc.text('Current Balance:', 135, 62);
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    if (supplier.balance > 0) doc.setTextColor(220, 38, 38);
-    doc.text(`Rs. ${supplier.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, 135, 70);
-    doc.setTextColor(0);
-
-    doc.line(10, 80, 200, 80);
-
-    // 5. TRANSACTION TABLE
-    const tableColumn = ["Date", "Type", "Reference", "Particulars", "Credit (Cr)", "Debit (Dr)", "Balance"];
-    const tableRows = statementData.map(entry => {
-        const isOpening = entry.rowKind === 'OPENING' || entry.reference?.toUpperCase() === 'BAL B/F';
-        const isClosing = entry.rowKind === 'CLOSING' || entry.reference?.toUpperCase() === 'CL-END';
-        return [
-            new Date(entry.date).toLocaleDateString('en-GB'),
-            isOpening ? 'Opening' : (isClosing ? 'Closing' : (entry.type === 'BILL' ? 'Pur. Bill' : 'Payment')),
-            entry.reference,
-            entry.notes || '-',
-            entry.credit > 0 ? entry.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
-            entry.debit > 0 ? entry.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-',
-            entry.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })
-        ];
-    });
-
-    autoTable(doc, {
-        head: [tableColumn],
-        body: tableRows,
-        startY: 85,
-        theme: 'striped',
-        headStyles: { fillColor: [16, 185, 129] },
-        styles: { fontSize: 8 },
-        margin: { left: 10, right: 10 }
-    });
-
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    doc.text('Note: This is an automatically generated supplier statement.', 105, Math.min(finalY, 280), { align: 'center' });
-
-    const pdfOutput = doc.output('datauristring');
-    return pdfOutput.split(',')[1];
-};
-
-/**
- * Generates a Whole Company Statement PDF and returns it as a Base64 string.
- */
-export const generateWholeCompanyStatementPDFBase64 = async (
-    company: CompanySettings,
-    transactions: any[],
-    dateRangeLabel: string,
-    summary?: { totalPayables: number; totalReceivables: number }
-): Promise<string> => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-
-    const formatCurrencyPDF = (amount: number) => {
-        return `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-    };
-
-    // 1. BOX BORDER
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(10, 10, 190, 277);
-
-    // 2. HEADER SECTION
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName.toUpperCase(), 12, 18);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    const addr1 = (company.addressLine1 || '').toUpperCase();
-    const addr2 = (company.addressLine2 || '').toUpperCase();
-    const city = (company.city || '').toUpperCase();
-    const gst = (company.gstNumber || '').toUpperCase();
-
-    doc.text(addr1, 12, 24);
-    doc.text(addr2, 12, 29);
-    doc.text(city, 12, 34);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`GST NO: ${gst || 'N/A'}`, 12, 39);
-
-    // Right Side Header
-    doc.line(100, 10, 100, 45);
-    doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    // Moved up as requested
-    doc.text('COMPANY STATEMENT', 150, 22, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(dateRangeLabel, 150, 29, { align: 'center' });
-    // Line 954 removed (Generated date)
-
-    doc.line(10, 45, 200, 45);
-
-    // 3. TRANSACTION TABLE
-    const tableColumn = ["Date", "Business Name", "Type", "Credit", "Debit"];
-    const tableRows = transactions.map(t => [
-        new Date(t.date).toLocaleDateString('en-GB'),
-        t.businessName || '-',
-        t.type || '-',
-        t.credit > 0 ? formatCurrencyPDF(t.credit) : '-',
-        t.debit > 0 ? formatCurrencyPDF(t.debit) : '-'
-    ]);
-
-    autoTable(doc, {
-        head: [tableColumn],
-        body: tableRows,
-        startY: 55,
-        theme: 'grid',
-        headStyles: { fillColor: [59, 130, 246] },
-        styles: { fontSize: 8, cellPadding: 2 },
-        margin: { left: 10, right: 10, bottom: 40 }
-    });
-
-    let currentY = (doc as any).lastAutoTable.finalY + 10;
-
-    // Check if summary can fit on this page
-    if (currentY > 240) {
-        doc.addPage();
-        // Redraw border on new page
-        doc.setDrawColor(0);
-        doc.setLineWidth(0.5);
-        doc.rect(10, 10, 190, 277);
-        currentY = 20;
-    }
-
-    // 4. SUMMARY TOTALS (Payables & Receivables)
-    if (summary) {
-        doc.setDrawColor(200);
-        doc.setFillColor(245, 245, 245);
-        doc.rect(110, currentY, 85, 25, 'F');
-        doc.rect(110, currentY, 85, 25, 'S');
-
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(0);
-        doc.text('Summary (Current Balance):', 115, currentY + 6);
-
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Total Payables (To Suppliers):', 115, currentY + 12);
-        doc.text(formatCurrencyPDF(summary.totalPayables), 190, currentY + 12, { align: 'right' });
-
-        doc.text('Total Receivables (From Dealers):', 115, currentY + 18);
-        doc.text(formatCurrencyPDF(summary.totalReceivables), 190, currentY + 18, { align: 'right' });
-
-        currentY += 35;
-    }
-
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    doc.setTextColor(100);
-    doc.text('Note: This is a consolidated company-wide financial statement.', 105, currentY, { align: 'center' });
-
-    const pdfOutput = doc.output('datauristring');
-    return pdfOutput.split(',')[1];
-};
-
-/**
- * Generates an Agent Salary Report PDF.
- * Supports all agents or a specific agent, for a month or full year.
- */
-export const generateSalaryReportPDF = (
-    agents: { id: string; name: string; phone: string; division?: string }[],
-    salaries: {
-        agentId: string;
-        month: number;
-        year: number;
-        baseSalary: number;
-        travelExpense: number;
-        stayExpense: number;
-        foodExpense: number;
-        otherExpense: number;
-        totalExpense: number;
-        netSalary: number;
-        paymentStatus: string;
-    }[],
-    company: CompanySettings,
-    options: {
-        agentId?: string; // undefined = all agents
-        month?: number;   // undefined = all months (year report)
-        year: number;
-        customLabel?: string;
-    }
-): void => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-        'July', 'August', 'September', 'October', 'November', 'December'];
-
-    const filteredAgent = options.agentId ? agents.find(a => a.id === options.agentId) : null;
-
-    // Filter salaries
-    let filtered = salaries;
-    if (options.customLabel) {
-        // If custom label is provided, assume salaries are already filtered for the range
-        // but still filter by agent if needed
-        if (options.agentId) filtered = filtered.filter(s => s.agentId === options.agentId);
-    } else {
-        if (options.agentId) filtered = filtered.filter(s => s.agentId === options.agentId);
-        if (options.month) filtered = filtered.filter(s => s.month === options.month);
-        filtered = filtered.filter(s => s.year === options.year);
-    }
-
-    const periodLabel = options.customLabel || (options.month
-        ? `${monthNames[options.month - 1]} ${options.year}`
-        : `Year ${options.year}`);
-
-    // --- Header ---
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(10, 10, 190, 277);
-
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName.toUpperCase(), 12, 18);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${company.addressLine1 || ''} | GST: ${company.gstNumber || 'N/A'}`, 12, 23);
-
-    doc.line(100, 10, 100, 32);
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('SALARY REPORT', 150, 20, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(periodLabel, 150, 27, { align: 'center' });
-    if (filteredAgent) doc.text(`Agent: ${filteredAgent.name}`, 150, 32, { align: 'center' });
-
-    doc.line(10, 33, 200, 33);
-
-    // --- Table ---
-    const tableRows = filtered.map(s => {
-        const agent = agents.find(a => a.id === s.agentId);
-        return [
-            agent?.name || 'Unknown',
-            options.month ? '-' : monthNames[s.month - 1],
-            `Rs. ${s.baseSalary.toLocaleString('en-IN')}`,
-            `Rs. ${s.travelExpense.toLocaleString('en-IN')}`,
-            `Rs. ${s.stayExpense.toLocaleString('en-IN')}`,
-            `Rs. ${s.foodExpense.toLocaleString('en-IN')}`,
-            `Rs. ${s.otherExpense.toLocaleString('en-IN')}`,
-            `Rs. ${s.netSalary.toLocaleString('en-IN')}`,
-            s.paymentStatus,
-        ];
-    });
-
-    const headers = ['Agent', 'Month', 'Base Salary', 'Travel', 'Stay', 'Food', 'Other', 'Net Salary', 'Status'];
-
-    autoTable(doc, {
-        head: [headers],
-        body: tableRows,
-        startY: 36,
-        theme: 'grid',
-        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 },
-        styles: { fontSize: 7, cellPadding: 2 },
-        columnStyles: {
-            0: { halign: 'left' },
-            1: { halign: 'left' },
-            2: { halign: 'right' },
-            3: { halign: 'right' },
-            4: { halign: 'right' },
-            5: { halign: 'right' },
-            6: { halign: 'right' },
-            7: { halign: 'right' },
-            8: { halign: 'center' },
-        },
-        margin: { left: 10, right: 10 },
-        foot: [[
-            `Total (${filtered.length})`,
-            '',
-            `Rs. ${filtered.reduce((s, r) => s + r.baseSalary, 0).toLocaleString('en-IN')}`,
-            `Rs. ${filtered.reduce((s, r) => s + r.travelExpense, 0).toLocaleString('en-IN')}`,
-            `Rs. ${filtered.reduce((s, r) => s + r.stayExpense, 0).toLocaleString('en-IN')}`,
-            `Rs. ${filtered.reduce((s, r) => s + r.foodExpense, 0).toLocaleString('en-IN')}`,
-            `Rs. ${filtered.reduce((s, r) => s + r.otherExpense, 0).toLocaleString('en-IN')}`,
-            `Rs. ${filtered.reduce((s, r) => s + r.netSalary, 0).toLocaleString('en-IN')}`,
-            '',
-        ]],
-        footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold', fontSize: 7 },
-    });
-
-    const finalY = (doc as any).lastAutoTable.finalY + 8;
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'italic');
-    doc.text('This is a computer-generated salary report.', 105, Math.min(finalY, 280), { align: 'center' });
-
-    doc.save(`Salary_Report_${periodLabel.replace(/ /g, '_')}.pdf`);
-};
-
-/**
- * Generates a Company Expenses Report PDF.
- */
-export const generateExpenseReportPDF = (
-    expenses: {
-        id: string;
-        expenseType: string;
-        customName?: string;
-        amount: number;
-        date: Date;
-        notes?: string;
-    }[],
-    company: CompanySettings,
-    periodLabel: string
-): void => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-
-    const getExpenseLabel = (type: string) => {
-        switch (type) {
-            case 'GODOWN_RENT': return 'Godown Rent';
-            case 'ELECTRICITY_BILL': return 'Electricity Bill';
-            case 'OFFICE_RENT': return 'Office Rent';
-            case 'OTHER': return 'Other';
-            default: return type;
-        }
-    };
-
-    // --- Header ---
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(10, 10, 190, 277);
-
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName.toUpperCase(), 12, 18);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${company.addressLine1 || ''} | GST: ${company.gstNumber || 'N/A'}`, 12, 23);
-
-    doc.line(100, 10, 100, 32);
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('EXPENSE STATEMENT', 150, 20, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(periodLabel, 150, 27, { align: 'center' });
-    doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 150, 32, { align: 'center' });
-
-    doc.line(10, 33, 200, 33);
-
-    // --- Category Summary Boxes ---
-    const byType: Record<string, number> = {};
-    expenses.forEach(e => {
-        const label = getExpenseLabel(e.expenseType);
-        byType[label] = (byType[label] || 0) + e.amount;
-    });
-    const totalAmount = expenses.reduce((s, e) => s + e.amount, 0);
-
-    let boxX = 12;
-    const boxY = 36;
-    const categories = Object.entries(byType);
-    const boxW = categories.length > 0 ? Math.min(44, (188 / categories.length)) : 44;
-
-    categories.forEach(([label, amount]) => {
-        doc.setFillColor(240, 253, 244);
-        doc.setDrawColor(16, 185, 129);
-        doc.rect(boxX, boxY, boxW - 2, 16, 'FD');
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(16, 100, 60);
-        doc.text(label, boxX + (boxW - 2) / 2, boxY + 6, { align: 'center', maxWidth: boxW - 4 });
-        doc.setFontSize(8);
-        doc.text(`Rs. ${amount.toLocaleString('en-IN')}`, boxX + (boxW - 2) / 2, boxY + 12, { align: 'center' });
-        boxX += boxW;
-    });
-    doc.setTextColor(0);
-
-    // --- Table ---
-    const tableRows = expenses.map(e => [
-        new Date(e.date).toLocaleDateString('en-GB'),
-        getExpenseLabel(e.expenseType),
-        e.customName || '-',
-        e.notes || '-',
-        `Rs. ${e.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
-    ]);
-
-    autoTable(doc, {
-        head: [['Date', 'Type', 'Description', 'Notes', 'Amount']],
-        body: tableRows,
-        startY: boxY + 20,
-        theme: 'grid',
-        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-        styles: { fontSize: 8, cellPadding: 2 },
-        columnStyles: {
-            4: { halign: 'right' },
-        },
-        margin: { left: 10, right: 10 },
-        foot: [['', '', '', 'TOTAL', `Rs. ${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`]],
-        footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold', fontSize: 9 },
-    });
-
-    const finalY = (doc as any).lastAutoTable.finalY + 8;
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'italic');
-    doc.text('This is a computer-generated company expense statement.', 105, Math.min(finalY, 280), { align: 'center' });
-
-    doc.save(`Expenses_${periodLabel.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
-};
-
-/**
- * Generates a Profit Analysis PDF Report.
- */
-export const generateProfitAnalysisPDF = (
-    company: CompanySettings,
-    data: {
-        periodLabel: string;
-        revenue: number;
-        cogs: number;
-        discounts: number;
-        grossProfit: number;
-        netProfit: number;
-        margin: number;
-        agentSalariesTotal: number;
-        companyExpensesTotal: number;
-        invoiceCount: number;
-        dealerBreakdown: { name: string; revenue: number; cogs: number; grossProfit: number; count: number }[];
-    }
-): void => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-
-    const fmt = (n: number) => `Rs. ${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-
-    // Header
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(10, 10, 190, 277);
-
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(company.companyName.toUpperCase(), 12, 18);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${company.addressLine1 || ''} | GST: ${company.gstNumber || 'N/A'}`, 12, 23);
-
-    doc.line(100, 10, 100, 32);
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('PROFIT ANALYSIS', 150, 18, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(data.periodLabel, 150, 25, { align: 'center' });
-    doc.text(`Based on ${data.invoiceCount} invoices`, 150, 31, { align: 'center' });
-
-    doc.line(10, 33, 200, 33);
-
-    // Summary breakdown
-    const summaryRows = [
-        ['Total Sales Revenue', fmt(data.revenue), ''],
-        ['(-) Cost of Goods Sold (COGS)', fmt(data.cogs), `${data.revenue > 0 ? ((data.cogs / data.revenue) * 100).toFixed(1) : 0}%`],
-        ['= Gross Profit (Before Expenses)', fmt(data.grossProfit), `${data.revenue > 0 ? ((data.grossProfit / data.revenue) * 100).toFixed(1) : 0}%`],
-        ['(-) Operating Expenses (Salaries & Office)', fmt(data.agentSalariesTotal + data.companyExpensesTotal), ''],
-        ['= COMPANY NET PROFIT', fmt(data.netProfit), `${data.margin.toFixed(1)}%`],
-        ['Dealer Profit Share (Calculated separately)', fmt(data.discounts), ''],
-    ];
-
-    autoTable(doc, {
-        head: [['Item', 'Amount', 'Ratio']],
-        body: summaryRows,
-        startY: 36,
-        theme: 'grid',
-        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
-        styles: { fontSize: 9, cellPadding: 3 },
-        columnStyles: {
-            0: { cellWidth: 110 },
-            1: { cellWidth: 50, halign: 'right' },
-            2: { cellWidth: 30, halign: 'center' },
-        },
-        didParseCell: (data) => {
-            // Highlight net profit row
-            if (data.row.index === summaryRows.length - 1 && data.section === 'body') {
-                data.cell.styles.fillColor = [data.cell.raw?.toString().includes('NET') ? 230 : 255, 253, 244];
-                data.cell.styles.fontStyle = 'bold';
-                data.cell.styles.fontSize = 10;
-            }
-        },
-        margin: { left: 10, right: 10 },
-    });
-
-    // Dealer breakdown
-    if (data.dealerBreakdown.length > 0) {
-        const dealerRows = data.dealerBreakdown
-            .sort((a, b) => b.revenue - a.revenue)
-            .map(d => [
-                d.name,
-                d.count.toString(),
-                fmt(d.revenue),
-                fmt(d.cogs),
-                fmt(d.grossProfit),
-                `${d.revenue > 0 ? ((d.grossProfit / d.revenue) * 100).toFixed(1) : 0}%`,
-            ]);
-
-        autoTable(doc, {
-            head: [['Dealer', 'Inv.', 'Revenue', 'COGS', 'Gross Profit', 'Margin']],
-            body: dealerRows,
-            startY: (doc as any).lastAutoTable.finalY + 8,
-            theme: 'striped',
-            headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-            styles: { fontSize: 8, cellPadding: 2 },
-            columnStyles: {
-                0: { cellWidth: 50 },
-                1: { cellWidth: 12, halign: 'center' },
-                2: { cellWidth: 34, halign: 'right' },
-                3: { cellWidth: 34, halign: 'right' },
-                4: { cellWidth: 34, halign: 'right' },
-                5: { cellWidth: 26, halign: 'center' },
-            },
-            margin: { left: 10, right: 10 },
-        });
-    }
-
-    const finalY = (doc as any).lastAutoTable.finalY + 8;
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'italic');
-    doc.text('This is a computer-generated profit analysis report.', 105, Math.min(finalY, 280), { align: 'center' });
-
-    doc.save(`Profit_Analysis_${data.periodLabel.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
 };

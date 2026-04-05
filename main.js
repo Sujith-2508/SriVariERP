@@ -566,7 +566,7 @@ ipcMain.handle('printer:get-printers', async () => {
 });
 
 // Print the current invoice page to a selected printer (silent, no dialog)
-ipcMain.handle('printer:print', async (event, { printerName, silent }) => {
+ipcMain.handle('printer:print', async (event, { printerName, silent, numCopies }) => {
     try {
         if (!mainWindow) throw new Error('No main window');
         return await new Promise((resolve, reject) => {
@@ -577,7 +577,8 @@ ipcMain.handle('printer:print', async (event, { printerName, silent }) => {
                     deviceName: printerName || '', // '' = system default printer
                     pageSize: 'A4',
                     margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
-                    scaleFactor: 100
+                    scaleFactor: 100,
+                    copies: numCopies || 1
                 },
                 (success, failureReason) => {
                     if (success) resolve({ success: true });
@@ -587,6 +588,18 @@ ipcMain.handle('printer:print', async (event, { printerName, silent }) => {
         });
     } catch (err) {
         console.error('Print failed:', err);
+        throw err;
+    }
+});
+
+// ─── Clipboard IPC Handlers ──────────────────────────────────────────────────
+ipcMain.handle('clipboard:write', (event, text) => {
+    try {
+        const { clipboard } = require('electron');
+        clipboard.writeText(text);
+        return { success: true };
+    } catch (err) {
+        console.error('Clipboard write failed:', err);
         throw err;
     }
 });

@@ -647,10 +647,14 @@ export default function DealerLedger() {
             if (copyOnly) {
                 setCopyingWhatsappMessage(true);
                 try {
-                    if (!navigator.clipboard?.writeText) {
-                        throw new Error('Clipboard API unavailable');
+                    if (window.electron?.clipboard?.writeText) {
+                        await window.electron.clipboard.writeText(message);
+                    } else {
+                        if (!navigator.clipboard?.writeText) {
+                            throw new Error('Clipboard API unavailable');
+                        }
+                        await navigator.clipboard.writeText(message);
                     }
-                    await navigator.clipboard.writeText(message);
                     showToast('WhatsApp message copied. You can paste and send manually.', 'success');
                 } catch (copyError) {
                     console.warn('Clipboard copy failed:', copyError);

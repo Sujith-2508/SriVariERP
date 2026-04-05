@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('electron', {
     },
     printer: {
         getPrinters: () => ipcRenderer.invoke('printer:get-printers'),
-        print: (printerName) => ipcRenderer.invoke('printer:print', { printerName, silent: true })
+        print: (printerName, numCopies) => ipcRenderer.invoke('printer:print', { printerName, silent: true, numCopies })
     },
     drive: {
         isConnected: () => ipcRenderer.invoke('drive:is-connected'),
@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('electron', {
         connect: (clientId) => ipcRenderer.invoke('drive:connect', { clientId }),
         saveTokens: (tokens) => ipcRenderer.invoke('drive:save-tokens', tokens),
         disconnect: () => ipcRenderer.invoke('drive:disconnect')
+    },
+    clipboard: {
+        writeText: (text) => ipcRenderer.invoke('clipboard:write', text)
     }
 });
 
