@@ -6,7 +6,7 @@ import { useToast } from '@/contexts/ToastContext';
 import { useData } from '@/contexts/DataContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { TrendingUp, AlertCircle, IndianRupee, Package, Users, Calendar, DollarSign, TrendingDown, Clock, Percent, Wallet, Receipt, Download, RefreshCw, X, FileText, Search, ExternalLink } from 'lucide-react';
-import { calculateInvoiceProfit, formatCurrency } from '@/lib/utils';
+import { calculateDealerStatement, calculateInvoiceProfit, formatCurrency, isChequeReturnTransaction, isSalesInvoiceTransaction } from '@/lib/utils';
 import { TransactionType, SupplierData, PurchaseBillData, AgentSalaryData, PurchasePaymentData } from '@/types';
 import { getAllSuppliers, getPurchaseBills, getPurchasePayments } from '@/lib/purchaseService';
 import { getSalaryByMonth, getSalaryByRange } from '@/lib/salaryService';
@@ -48,6 +48,10 @@ export default function Home() {
     // Selected month and year for viewing historical data
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // 1-12
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+    const isSalesInvoice = (txn: any): boolean => {
+        return isSalesInvoiceTransaction(txn);
+    };
 
     // Load expenses and salaries when month/year changes or period changes
     useEffect(() => {
@@ -142,10 +146,14 @@ export default function Home() {
             transactions.forEach(t => {
                 const dDate = new Date(t.date);
                 if ((!start || dDate >= start) && (!end || dDate <= end)) {
+                    if (t.referenceId === 'BAL B/F') return;
+
                     const dealer = dealers.find(d => d.id === t.customerId);
                     const businessName = dealer?.businessName || 'Unknown Dealer';
 
-                    let type = t.type === 'INVOICE' ? 'Invoice' : 'Receipt';
+                    const isChequeReturn = isChequeReturnTransaction(t);
+                    const isSales = isSalesInvoice(t);
+                    let type = isSales ? 'Invoice' : 'Receipt';
                     const notes = t.notes || '';
                     if (notes.startsWith('Cheque Return') || notes.startsWith('Chq Return')) type = 'Cheque Return';
                     if (notes.includes('Stock Return')) type = 'Stock Return';
@@ -154,8 +162,8 @@ export default function Home() {
                         date: dDate,
                         businessName,
                         type,
-                        credit: (t.type === 'INVOICE' || type === 'Cheque Return') ? t.amount : 0,
-                        debit: (t.type === 'PAYMENT' || type === 'Stock Return') ? t.amount : 0
+                        credit: (isSales || isChequeReturn) ? t.amount : 0,
+                        debit: (!isSales && !isChequeReturn) ? t.amount : 0
                     });
                 }
             });
@@ -193,8 +201,8 @@ export default function Home() {
             allTransactions.sort((a, b) => a.date.getTime() - b.date.getTime());
 
             // Calculate current company summary (current health)
-            const totalReceivables = dealers.reduce((sum, d) => sum + (d.balance || 0), 0);
-            const totalPayables = suppliers.reduce((sum, s) => sum + (s.balance || 0), 0);
+            const totalReceivables = dealers.reduce((sum, d) => sum + Math.max(0, d.balance || 0), 0);
+            const totalPayables = suppliers.reduce((sum, s) => sum + Math.max(0, s.balance || 0), 0);
 
             const base64 = await generateWholeCompanyStatementPDFBase64(
                 company as any,
@@ -228,15 +236,15 @@ export default function Home() {
     // 1. FUNDAMENTAL STATS
     // ========================================================================
     const { totalOutstanding, totalPayables, lowStockItems, todaysSales, monthlySales, totalPurchases } = useMemo(() => {
-        const totalOutstanding = dealers.reduce((acc, d) => acc + d.balance, 0);
-        const totalPayables = suppliers.reduce((acc, s) => acc + (s.balance || 0), 0);
+        const totalOutstanding = dealers.reduce((acc, d) => acc + Math.max(0, d.balance || 0), 0);
+        const totalPayables = suppliers.reduce((acc, s) => acc + Math.max(0, s.balance || 0), 0);
         const lowStockItems = products.filter(p => p.stock < 50);
 
         const totalPurchases = purchaseBills.reduce((acc, b) => acc + b.amount, 0);
 
         const todayStr = new Date().toDateString();
         const todaysSales = transactions
-            .filter(t => t.type === 'INVOICE' && t.referenceId !== 'BAL B/F' && new Date(t.date).toDateString() === todayStr)
+            .filter(t => isSalesInvoice(t) && new Date(t.date).toDateString() === todayStr)
             .reduce((acc, t) => acc + t.amount, 0);
 
         const now = new Date();
@@ -246,8 +254,7 @@ export default function Home() {
         const monthlySales = transactions
             .filter(t => {
                 const txnDate = new Date(t.date);
-                return t.type === 'INVOICE' &&
-                    t.referenceId !== 'BAL B/F' &&
+                return isSalesInvoice(t) &&
                     txnDate.getMonth() === currentMonth &&
                     txnDate.getFullYear() === currentYear;
             })
@@ -271,8 +278,7 @@ export default function Home() {
             const daySales = transactions
                 .filter(t => {
                     const txnDate = new Date(t.date);
-                    return t.type === 'INVOICE' &&
-                        t.referenceId !== 'BAL B/F' &&
+                    return isSalesInvoice(t) &&
                         txnDate >= dayStart &&
                         txnDate <= dayEnd;
                 })
@@ -327,8 +333,7 @@ export default function Home() {
 
         const invoices = transactions.filter(t => {
             const txnDate = new Date(t.date);
-            return t.type === TransactionType.INVOICE &&
-                t.referenceId !== 'BAL B/F' &&
+            return isSalesInvoice(t) &&
                 txnDate >= startDate &&
                 txnDate <= endDate;
         });
@@ -343,7 +348,7 @@ export default function Home() {
             revenue += p.revenue;
             cogs += p.cogs;
             discounts += p.dealerDiscount;
-            profit += p.grossProfit; // Use grossProfit (Revenue - COGS) to follow new formula
+            profit += p.netProfit;
         });
 
         console.log(`[Dashboard] Period: ${label}`);
@@ -376,41 +381,24 @@ export default function Home() {
     // 3. OUTSTANDING ANALYSIS
     // ========================================================================
     const outstandingData = useMemo(() => {
-        const day0to30 = 0;
-        const day31to60 = 0;
-        const day61to90 = 0;
-        const overdue = 0;
-        const counts = { day0to30, day31to60, day61to90, overdue };
+        const counts = { day0to30: 0, day31to60: 0, day61to90: 0, overdue: 0 };
         const now = new Date();
-        const invoices = transactions.filter(t => t.type === TransactionType.INVOICE);
 
         dealers.forEach(dealer => {
-            if (dealer.balance > 0) {
-                const dealerInvoices = invoices
-                    .filter(inv => inv.customerId === dealer.id)
-                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            if ((dealer.balance || 0) <= 0) return;
 
-                let remainingBalance = dealer.balance;
+            const dealerTxns = transactions.filter(t => t.customerId === dealer.id);
+            const statement = calculateDealerStatement(dealerTxns, dealer.openingBalance || 0, dealer.openingBalanceDate);
 
-                for (const invoice of dealerInvoices) {
-                    if (remainingBalance <= 0) break;
-                    if (invoice.referenceId === 'BAL B/F') continue; // Skip opening balance in aging calculation
-
-                    const amount = Math.min(remainingBalance, invoice.amount);
-                    const invoiceDate = new Date(invoice.date);
-                    const ageDays = Math.ceil((now.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24));
-
-                    if (ageDays <= 30) counts.day0to30 += amount;
-                    else if (ageDays <= 60) counts.day31to60 += amount;
-                    else if (ageDays <= 90) counts.day61to90 += amount;
-                    else counts.overdue += amount;
-
-                    remainingBalance -= amount;
-                }
-                
-                // Note: leftover remainingBalance after checking all actual invoices is opening balance/unreconciled data, 
-                // which the user asked to exclude from aging breakdown.
-            }
+            statement.invoices
+                .filter(inv => inv.referenceId !== 'BAL B/F' && inv.balance > 0)
+                .forEach(inv => {
+                    const ageDays = Math.ceil((now.getTime() - new Date(inv.date).getTime()) / (1000 * 60 * 60 * 24));
+                    if (ageDays <= 30) counts.day0to30 += inv.balance;
+                    else if (ageDays <= 60) counts.day31to60 += inv.balance;
+                    else if (ageDays <= 90) counts.day61to90 += inv.balance;
+                    else counts.overdue += inv.balance;
+                });
         });
 
         return [
@@ -778,7 +766,7 @@ export default function Home() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {transactions
-                                .filter(t => t.type === 'INVOICE' && t.referenceId !== 'BAL B/F')
+                                .filter(t => isSalesInvoice(t))
                                 .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                                 .slice(0, 8)
                                 .map((invoice, idx) => {
@@ -816,7 +804,7 @@ export default function Home() {
                                         </tr>
                                     );
                                 })}
-                            {transactions.filter(t => t.type === 'INVOICE' && t.referenceId !== 'BAL B/F').length === 0 && (
+                            {transactions.filter(t => isSalesInvoice(t)).length === 0 && (
                                 <tr>
                                     <td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">No invoices found.</td>
                                 </tr>

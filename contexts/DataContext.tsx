@@ -51,11 +51,13 @@ interface DataContextType {
     getInvoicePaymentHistory: (invoiceId: string) => PaymentAllocation[];
     refreshData: () => Promise<void>;
     bulkSyncDealers: () => Promise<void>;
+    syncDealersIndexToSheet: () => Promise<void>;
     syncAllDealerTabs: () => Promise<{ created: number; skipped: number }>;
     importDealersFromSheet: () => Promise<{ added: number; updated: number }>;
     importDealersFromTally: () => Promise<{ added: number; updated: number }>;
     deleteDealerWithSheet: (id: string, sheetName: string, deleteTab: boolean) => Promise<void>;
     syncDealerLedgerToSheet: (dealerId: string) => Promise<void>;
+    syncSingleDealerToSheets: (dealerId: string) => Promise<void>;
     bulkSyncAllDealerLedgers: (onProgress?: (done: number, total: number, name: string) => void) => Promise<{ synced: number; errors: number }>;
     rollOverDealerYear: (dealerId: string, closingDateStr: string, openingDateStr: string) => Promise<boolean>;
     // Agent methods
@@ -1193,14 +1195,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 3. Update Transaction Details
         const creditDays = invoiceData?.creditDays || existingTxn.creditDays || 30;
-        const dueDate = new Date(existingTxn.date);
+        const invoiceDate = invoiceData?.invoiceDate || existingTxn.date;
+        const dueDate = new Date(invoiceDate);
         dueDate.setDate(dueDate.getDate() + creditDays);
 
         // Recalculate COGS and Profit metrics for the updated invoice
         let totalCOGS = 0;
         items.forEach(item => {
-            const product = products.find(p => p.id === item.productId || p.productId === item.productId);
-            const costPrice = Number(product?.costPrice) || 0;
+            const itemCostPrice = (item.costPrice !== undefined && item.costPrice > 0)
+                ? Number(item.costPrice)
+                : 0;
+            const product = products.find(p => p.id === item.productId || p.productId === item.productId || p.name?.toLowerCase() === item.productName?.toLowerCase());
+            const costPrice = itemCostPrice > 0 ? itemCostPrice : (Number(product?.costPrice) || 0);
             totalCOGS += (costPrice * item.quantity);
         });
 
@@ -1215,6 +1221,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .from('transactions')
             .update({
                 amount: totalAmount,
+                date: invoiceDate.toISOString(),
                 reference_id: nextReferenceId,
                 credit_days: creditDays,
                 due_date: dueDate.toISOString(),
@@ -1268,6 +1275,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return {
                     ...t,
                     amount: totalAmount,
+                    date: invoiceDate,
                     referenceId: nextReferenceId,
                     creditDays: creditDays,
                     dueDate: dueDate,
@@ -1526,6 +1534,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await fetchData(); // Final refresh
     };
 
+    const syncDealersIndexToSheet = async () => {
+        const { data: res, error: dealersError } = await supabase.from('dealers').select('*');
+        if (dealersError) throw dealersError;
+        const currentDealers = (res || []).map(transformDealer);
+        if (currentDealers.length === 0) return;
+        await bulkSyncDealersToSheet(currentDealers);
+    };
+
     const syncAllDealerTabs = async (): Promise<{ created: number; skipped: number }> => {
         if (dealers.length === 0) return { created: 0, skipped: 0 };
         return await bulkCreateDealerTabs(dealers, companySettings);
@@ -1695,6 +1711,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw new Error(`Dealer with ID ${dealerId} not found even after refresh`);
         }
 
+        // Ensure the individual ledger tab exists before clearing/writing rows.
+        await initializeDealerLedger(dealer, companySettings);
+
         // 1. Get all transactions for this dealer sorted by date
         const dealerTxns = getDealerTransactions(dealerId, customTxns);
 
@@ -1703,6 +1722,31 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 3. Re-append ALL transactions in ONE batch call
         await batchWriteTransactionsToDealerSheet(dealer.businessName, dealerTxns, dealer.openingBalance || 0);
+    };
+
+    const syncSingleDealerToSheets = async (dealerId: string): Promise<void> => {
+        const dealer = dealers.find(d => d.id === dealerId);
+        if (!dealer) {
+            throw new Error('Dealer not found for sync');
+        }
+
+        // 1) Sync master dealer index row
+        await syncDealerToSheet(dealer, companySettings);
+
+        // 2) Sync complete individual dealer ledger tab
+        await syncDealerLedgerToSheet(dealerId);
+
+        // 3) Mark DB sync flags for visibility/debugging
+        await Promise.all([
+            supabase
+                .from('transactions')
+                .update({ synced_to_sheet: true })
+                .eq('customer_id', dealerId),
+            supabase
+                .from('dealers')
+                .update({ synced_to_sheet: true })
+                .eq('id', dealerId)
+        ]);
     };
 
     /**
@@ -1907,11 +1951,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             getInvoicePaymentHistory,
             refreshData,
             bulkSyncDealers,
+            syncDealersIndexToSheet,
             syncAllDealerTabs,
             importDealersFromSheet,
             importDealersFromTally,
             deleteDealerWithSheet,
             syncDealerLedgerToSheet,
+            syncSingleDealerToSheets,
             bulkSyncAllDealerLedgers,
             rollOverDealerYear,
             addAgent,

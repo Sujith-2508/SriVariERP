@@ -54,7 +54,11 @@ export default function Collections() {
         if (!activeDealer) return [];
 
         const dealerTransactions = transactions.filter(t => t.customerId === activeDealer.id);
-        const { invoices } = calculateDealerStatement(dealerTransactions);
+        const { invoices } = calculateDealerStatement(
+            dealerTransactions,
+            activeDealer.openingBalance || 0,
+            activeDealer.openingBalanceDate
+        );
         return invoices;
     }, [activeDealer, transactions]);
 

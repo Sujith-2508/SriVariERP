@@ -710,6 +710,18 @@ async function styleDealerLedgerRows(dealerName: string): Promise<void> {
     });
 
     const requests: any[] = [
+        // Reset ledger body background first so stale highlights do not persist across resyncs.
+        {
+            repeatCell: {
+                range: { sheetId, startRowIndex: 9, endRowIndex: 10000, startColumnIndex: 0, endColumnIndex: 9 },
+                cell: {
+                    userEnteredFormat: {
+                        backgroundColor: { red: 1, green: 1, blue: 1 }
+                    }
+                },
+                fields: 'userEnteredFormat(backgroundColor)'
+            }
+        },
         // Opening balance row (row 10) highlight
         {
             repeatCell: {
