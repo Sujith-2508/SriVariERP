@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Dealer, InvoiceItem, Product, CompanySettings, TransactionType } from '@/types';
-import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2, Edit } from 'lucide-react';
+import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2, Edit, Copy } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
@@ -15,6 +15,7 @@ import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
 import { generateInvoicePDFBase64, generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { calculateDealerStatement } from '@/lib/utils';
 import { getISTDateString } from '@/lib/utils';
+import { shouldApplyIGST } from '@/lib/utils';
 import SearchableSelect from '@/components/SearchableSelect';
 import { uploadInvoicePDFByMonth, buildInvoiceFileName, uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 
@@ -37,6 +38,7 @@ export default function Billing() {
     const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
     const [whatsappSending, setWhatsappSending] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
+    const [copyingWhatsappMessage, setCopyingWhatsappMessage] = useState(false);
     const [showWhatsAppPreview, setShowWhatsAppPreview] = useState(false);
     const [previewData, setPreviewData] = useState<{ dealer: Dealer; invoiceData: any } | null>(null);
     const [showInvoicePreview, setShowInvoicePreview] = useState(false);
@@ -686,22 +688,20 @@ export default function Billing() {
         }
         setQtyError(null);
 
-        // State Detection for GST calculation
-        // - Kerala dealers: CGST + IGST (split by 2)
-        // - All other states (including Tamil Nadu): CGST + SGST (split by 2)
-        const dealerState = (selectedDealer.state || selectedDealer.district || selectedDealer.address || '').toLowerCase();
-        const isKerala = dealerState.includes('kerala') || dealerState.includes('kl');
+        // GST split is based on inter-state vs intra-state sale.
+        const companyState = companySettings?.state || DEFAULT_COMPANY_SETTINGS.state || '';
+        const dealerState = selectedDealer.state || selectedDealer.district || selectedDealer.address || '';
+        const useIGST = shouldApplyIGST(companyState, dealerState);
 
         // Products store GST as decimal (0.18 for 18%), convert to percentage
         const gstRatePercentage = itemProduct.gstRate < 1 ? itemProduct.gstRate * 100 : itemProduct.gstRate; // e.g., 18
         let cgst = 0, sgst = 0, igst = 0;
 
-        if (isKerala) {
-            // For Kerala dealers (inter-state): Use CGST + IGST (split the rate)
-            cgst = gstRatePercentage / 2;  // e.g., 9%
-            igst = gstRatePercentage / 2;  // e.g., 9%
+        if (useIGST) {
+            // Inter-state: full rate in IGST
+            igst = gstRatePercentage;
         } else {
-            // For all other states (intra-state): Use CGST + SGST (split the rate)
+            // Intra-state: split equally between CGST and SGST
             cgst = gstRatePercentage / 2;  // e.g., 9%
             sgst = gstRatePercentage / 2;  // e.g., 9%
         }
@@ -1038,14 +1038,20 @@ export default function Billing() {
         }
     };
 
-    const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any) => {
+    const handleSendWhatsApp = async (dealer: Dealer, invoiceData: any, options?: { copyOnly?: boolean }) => {
         if (!companySettings || !selectedDealer) return;
 
-        setWhatsappSending('sending');
+        const copyOnly = Boolean(options?.copyOnly);
+
+        if (copyOnly) {
+            setCopyingWhatsappMessage(true);
+        } else {
+            setWhatsappSending('sending');
+        }
         setWhatsappError(null);
 
         try {
-            if (window.electron?.whatsapp?.getStatus) {
+            if (!copyOnly && window.electron?.whatsapp?.getStatus) {
                 const status = await window.electron.whatsapp.getStatus();
                 if (status !== 'READY') {
                     throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
@@ -1065,13 +1071,13 @@ export default function Billing() {
             );
 
             const dealerTransactions = alreadyIncluded ? filteredTxns : [...filteredTxns, invoiceData];
-            const { invoices: stmtInvoices, payments: stmtPayments } = calculateDealerStatement(dealerTransactions);
-
-            // Calculate summary for statement
-            const totalInvoiced = stmtInvoices.reduce((sum, inv) => sum + inv.amount, 0);
-            const totalPaid = stmtPayments.reduce((sum, p) => sum + p.amount, 0);
-            const totalOutstanding = totalInvoiced - totalPaid;
-            const summary = { totalInvoiced, totalPaid, totalOutstanding };
+            const statement = calculateDealerStatement(
+                dealerTransactions,
+                selectedDealer.openingBalance || 0,
+                selectedDealer.openingBalanceDate
+            );
+            const { invoices: stmtInvoices, payments: stmtPayments, summary } = statement;
+            const totalOutstanding = summary.totalOutstanding;
 
             const statementBase64 = await generateStatementPDFBase64(
                 selectedDealer,
@@ -1081,20 +1087,59 @@ export default function Billing() {
                 summary
             );
 
+            const invoiceFileName = `Invoice_${invoiceData.referenceId}.pdf`;
+            const statementFileName = `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`;
+            const invoiceMessageBase = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`;
+            const statementMessageBase = `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`;
+
+            if (copyOnly) {
+                let invoiceLink = '';
+                let statementLink = '';
+
+                try {
+                    invoiceLink = await uploadToWhatsAppFolder(invoiceBase64, invoiceFileName);
+                } catch (e) {
+                    console.warn('[Billing] Invoice link generation failed for copy flow:', e);
+                }
+
+                try {
+                    statementLink = await uploadToWhatsAppFolder(statementBase64, statementFileName);
+                } catch (e) {
+                    console.warn('[Billing] Statement link generation failed for copy flow:', e);
+                }
+
+                const copyLines = [
+                    invoiceMessageBase,
+                    invoiceLink ? `View Invoice: ${invoiceLink}` : '',
+                    '',
+                    statementMessageBase,
+                    statementLink ? `View Statement: ${statementLink}` : ''
+                ].filter(Boolean);
+
+                if (!navigator.clipboard?.writeText) {
+                    throw new Error('Clipboard access is not available in this environment.');
+                }
+
+                await navigator.clipboard.writeText(copyLines.join('\n'));
+                showToast('WhatsApp message copied. Paste and send manually.', 'success');
+                setShowWhatsAppPreview(false);
+                return;
+            }
+
             // 3. Send Invoice
             if (window.electron?.whatsapp?.sendPDF) {
                 await window.electron.whatsapp.sendPDF(
                     selectedDealer.phone,
                     invoiceBase64,
-                    `Invoice_${invoiceData.referenceId}.pdf`,
-                    `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. Thank you for your business!`
+                    invoiceFileName,
+                    invoiceMessageBase
                 );
             } else {
                 // WEB FALLBACK: Upload to Drive and share Link
                 try {
                     setWhatsappSending('sending');
-                    const link = await uploadToWhatsAppFolder(invoiceBase64, `Invoice_${invoiceData.referenceId}.pdf`);
-                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}. \n\nView Invoice: ${link}`;
+                    const link = await uploadToWhatsAppFolder(invoiceBase64, invoiceFileName);
+                    const message = `${invoiceMessageBase}\n\nView Invoice: ${link}`;
                     const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
                     // Small delay to simulate sending
@@ -1102,7 +1147,7 @@ export default function Billing() {
                 } catch (err: any) {
                     console.error('Web WhatsApp share failed:', err);
                     // Fallback to text only if drive fails
-                    const message = `Hello ${selectedDealer.businessName}, please find your invoice ${invoiceData.referenceId} for ₹${invoiceData.amount.toLocaleString()}.`;
+                    const message = invoiceMessageBase;
                     const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
                 }
@@ -1116,14 +1161,14 @@ export default function Billing() {
                 await window.electron.whatsapp.sendPDF(
                     dealer.phone,
                     statementBase64,
-                    `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`,
-                    `Hello ${dealer.businessName}, please find your current account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}.`
+                    statementFileName,
+                    statementMessageBase
                 );
             } else {
                 // WEB FALLBACK: Send Statement Link
                 try {
-                    const stmtLink = await uploadToWhatsAppFolder(statementBase64, `Statement_${dealer.businessName.replace(/\s+/g, '_')}.pdf`);
-                    const msg = `Hello ${dealer.businessName}, please find your account statement. Total Outstanding: ₹${totalOutstanding.toLocaleString()}. \n\nView Statement: ${stmtLink}`;
+                    const stmtLink = await uploadToWhatsAppFolder(statementBase64, statementFileName);
+                    const msg = `${statementMessageBase}\n\nView Statement: ${stmtLink}`;
                     const waUrl = `https://wa.me/${dealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
                     window.open(waUrl, '_blank');
                 } catch (e) {
@@ -1140,8 +1185,16 @@ export default function Billing() {
             setTimeout(() => setWhatsappSending('idle'), 5000);
         } catch (err: any) {
             console.error('WhatsApp send failed', err);
-            setWhatsappSending('error');
-            setWhatsappError(err.message || 'Failed to send WhatsApp message');
+            if (copyOnly) {
+                showToast(err?.message || 'Failed to copy WhatsApp message', 'error');
+            } else {
+                setWhatsappSending('error');
+                setWhatsappError(err.message || 'Failed to send WhatsApp message');
+            }
+        } finally {
+            if (copyOnly) {
+                setCopyingWhatsappMessage(false);
+            }
         }
     };
 
@@ -1221,17 +1274,20 @@ export default function Billing() {
                         };
                         const filteredTxns = transactions.filter(t => t.customerId === crDealer.id);
                         const dealerTxns = [...filteredTxns, crTxn];
-                        const { invoices: stmtInvoices, payments: stmtPayments } = calculateDealerStatement(dealerTxns);
-                        const totalInvoiced = stmtInvoices.reduce((s, i) => s + i.amount, 0);
-                        const totalPaid = stmtPayments.reduce((s, p) => s + p.amount, 0);
-                        const totalOutstanding = totalInvoiced - totalPaid;
+                        const statement = calculateDealerStatement(
+                            dealerTxns,
+                            crDealer.openingBalance || 0,
+                            crDealer.openingBalanceDate
+                        );
+                        const { invoices: stmtInvoices, payments: stmtPayments, summary } = statement;
+                        const totalOutstanding = summary.totalOutstanding;
 
                         const statementBase64 = await generateStatementPDFBase64(
                             crDealer,
                             stmtInvoices,
                             stmtPayments,
                             companySettings,
-                            { totalInvoiced, totalPaid, totalOutstanding }
+                            summary
                         );
 
                         const msg = `Hello ${crDealer.businessName}, a cheque return of ₹${amountNum.toLocaleString()} has been recorded${refNote ? ` for ${crChequeNo}` : ''}. Your updated outstanding balance is ₹${totalOutstanding.toLocaleString()}.`;
@@ -1367,6 +1423,11 @@ export default function Billing() {
         setDealerSearch('');
         setDriveUploadStatus('idle');
         setDriveError(null);
+    };
+
+    const handleSuccessNewInvoice = () => {
+        resetForm();
+        router.push('/billing');
     };
 
     const handleNewInvoice = async () => {
@@ -2326,7 +2387,14 @@ export default function Billing() {
                 showSuccess && selectedDealer && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-300 print:hidden">
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
-                            <div className="bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center">
+                            <div className="relative bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center">
+                                <button
+                                    onClick={handleSuccessNewInvoice}
+                                    className="absolute top-3 right-3 w-9 h-9 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors flex items-center justify-center"
+                                    title="Close and start new invoice"
+                                >
+                                    <X size={18} />
+                                </button>
                                 <div className="w-20 h-20 bg-white rounded-full mx-auto flex items-center justify-center mb-4 animate-in zoom-in duration-500">
                                     <CheckCircle className="text-emerald-600" size={48} />
                                 </div>
@@ -2352,7 +2420,7 @@ export default function Billing() {
                                 </div>
 
                                 <div className="flex flex-col gap-3 pt-4">
-                                    <div className="flex gap-3">
+                                    <div className="grid grid-cols-3 gap-2">
                                         <button
                                             onClick={() => {
                                                 if (invoiceTotal <= 0.01) {
@@ -2361,20 +2429,17 @@ export default function Billing() {
                                                 }
                                                 handlePrint();
                                             }}
-                                            className="flex-1 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
+                                            className="h-11 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2 text-sm shadow-sm"
                                         >
-                                            <Printer size={20} />
-                                            Print Invoice
+                                            <Printer size={18} />
+                                            Print
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                resetForm();
-                                                router.push('/billing');
-                                            }}
-                                            className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
+                                            onClick={handleSuccessNewInvoice}
+                                            className="h-11 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 text-sm shadow-sm"
                                         >
-                                            <Plus size={20} />
-                                            New Invoice
+                                            <Plus size={18} />
+                                            New
                                         </button>
                                         <button
                                             onClick={() => {
@@ -2390,9 +2455,9 @@ export default function Billing() {
                                                 // So pushing router is the correct way to trigger 'edit mode'.
                                                 setShowSuccess(false);
                                             }}
-                                            className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                            className="h-11 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm shadow-sm"
                                         >
-                                            <Edit size={20} />
+                                            <Edit size={18} />
                                             Edit
                                         </button>
                                     </div>
@@ -2599,9 +2664,20 @@ export default function Billing() {
                             </button>
                             <button
                                 onClick={async () => {
+                                    await handleSendWhatsApp(previewData.dealer, previewData.invoiceData, { copyOnly: true });
+                                }}
+                                disabled={copyingWhatsappMessage || whatsappSending === 'sending'}
+                                className="px-6 py-2.5 border border-blue-200 bg-blue-50 text-blue-700 font-bold rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-2 disabled:opacity-60"
+                            >
+                                {copyingWhatsappMessage ? <Loader2 size={18} className="animate-spin" /> : <Copy size={18} />}
+                                {copyingWhatsappMessage ? 'Copying...' : 'Copy Message'}
+                            </button>
+                            <button
+                                onClick={async () => {
                                     setShowWhatsAppPreview(false);
                                     await handleSendWhatsApp(previewData.dealer, previewData.invoiceData);
                                 }}
+                                disabled={copyingWhatsappMessage}
                                 className="px-8 py-2.5 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-lg shadow-emerald-200"
                             >
                                 <MessageSquare size={20} />

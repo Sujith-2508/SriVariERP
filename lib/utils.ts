@@ -22,6 +22,69 @@ function normalizeReferenceId(value: unknown): string {
     return ref || 'N/A';
 }
 
+const STATE_ALIASES: Array<{ canonical: string; patterns: string[] }> = [
+    { canonical: 'TAMIL NADU', patterns: ['TAMILNADU', 'TAMIL NADU', 'TN'] },
+    { canonical: 'KERALA', patterns: ['KERALA', 'KL'] },
+    { canonical: 'KARNATAKA', patterns: ['KARNATAKA', 'KA'] },
+    { canonical: 'ANDHRA PRADESH', patterns: ['ANDHRAPRADESH', 'ANDHRA PRADESH', 'AP'] },
+    { canonical: 'TELANGANA', patterns: ['TELANGANA', 'TG', 'TS'] },
+    { canonical: 'MAHARASHTRA', patterns: ['MAHARASHTRA', 'MH'] },
+];
+
+function normalizeStateToken(value: unknown): string {
+    if (typeof value !== 'string') return '';
+    return value.toUpperCase().replace(/[^A-Z]/g, '');
+}
+
+export function normalizeIndianStateName(value: string | undefined | null): string {
+    const token = normalizeStateToken(value);
+    if (!token) return '';
+
+    for (const state of STATE_ALIASES) {
+        if (state.patterns.some(pattern => token.includes(normalizeStateToken(pattern)))) {
+            return state.canonical;
+        }
+    }
+
+    return token;
+}
+
+export function shouldApplyIGST(companyState?: string | null, dealerState?: string | null): boolean {
+    const normalizedCompany = normalizeIndianStateName(companyState || '');
+    const normalizedDealer = normalizeIndianStateName(dealerState || '');
+
+    if (!normalizedCompany || !normalizedDealer) return false;
+    return normalizedCompany !== normalizedDealer;
+}
+
+function isChequeReturnNotes(notes?: string): boolean {
+    const noteText = String(notes || '').trim();
+    if (!noteText) return false;
+
+    if (
+        noteText.startsWith('Cheque Return') ||
+        noteText.startsWith('Check Return') ||
+        noteText.startsWith('Chq Return')
+    ) {
+        return true;
+    }
+
+    try {
+        const parsed = JSON.parse(noteText);
+        return Boolean(parsed?.isChequeReturn);
+    } catch {
+        return false;
+    }
+}
+
+export function isChequeReturnTransaction(txn: Pick<Transaction, 'type' | 'notes'>): boolean {
+    return txn.type === TransactionType.INVOICE && isChequeReturnNotes(txn.notes);
+}
+
+export function isSalesInvoiceTransaction(txn: Pick<Transaction, 'type' | 'referenceId' | 'notes'>): boolean {
+    return txn.type === TransactionType.INVOICE && normalizeReferenceId(txn.referenceId) !== 'BAL B/F' && !isChequeReturnNotes(txn.notes);
+}
+
 /**
  * Returns today's date as a YYYY-MM-DD string in IST (Asia/Kolkata, UTC+5:30).
  * Use this everywhere you need "today's date" to avoid UTC date drift.
@@ -260,14 +323,7 @@ export function calculateInvoiceProfit(
     agentExpenses: number = 0
 ): ProfitCalculation {
     // Cheque returns are reversals of bounced payments — zero profit, zero revenue impact
-    const isChequeReturn = (() => {
-        const notes = invoice.notes || '';
-        if (notes.startsWith('Cheque Return')) return true;
-        try {
-            const parsed = JSON.parse(notes);
-            return typeof parsed === 'object' && String(parsed.isChequeReturn) === 'true';
-        } catch { return false; }
-    })();
+    const isChequeReturn = isChequeReturnTransaction(invoice);
 
     if (isChequeReturn) {
         return { revenue: 0, cogs: 0, serviceCharges: 0, agentExpenses: 0, grossProfit: 0, dealerDiscount: 0, netProfit: 0, profitPercentage: 0 };

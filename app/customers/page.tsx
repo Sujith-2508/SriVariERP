@@ -5,9 +5,10 @@ import { useData } from '@/contexts/DataContext';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
-import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye } from 'lucide-react';
-import { Transaction, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
+import { Phone, MapPin, Search, FileText, ArrowRight, X, Download, Calendar, IndianRupee, Clock, Trash2, Building2, MapPinned, AlertTriangle, ChevronLeft, Receipt, User, Printer, Edit, MessageSquare, Check, Loader2, CloudUpload, RefreshCw, Eye, Copy } from 'lucide-react';
+import { Transaction, TransactionType, PaymentAllocation, CompanySettings, InvoiceItem, Dealer } from '@/types';
 import { calculateDealerStatement, calculateInvoiceProfit, getDealerProfitSummary, formatCurrency, getISTDateString } from '@/lib/utils';
+import { LedgerEntry, sortLedgerEntries, calculateRunningBalances } from '@/lib/ledgerUtils';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
@@ -18,12 +19,14 @@ import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
 // ... existing imports
 
 export default function DealerLedger() {
-    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, products, bulkSyncDealers, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncDealerLedgerToSheet, syncAllDealerTabs, bulkSyncAllDealerLedgers, rollOverDealerYear } = useData();
+    const { dealers, transactions, addDealer, updateDealer, deleteDealer, deleteTransaction, getInvoicePaymentHistory, getDealerTransactions, products, syncDealersIndexToSheet, importDealersFromSheet, importDealersFromTally, deleteDealerWithSheet, syncSingleDealerToSheets, syncAllDealerTabs, bulkSyncAllDealerLedgers, rollOverDealerYear } = useData();
     const { showToast } = useToast();
     const { showConfirm } = useConfirm();
-    const [isSyncing, setIsSyncing] = useState(false);
+    const [syncingDealerId, setSyncingDealerId] = useState<string | null>(null);
     const [isImporting, setIsImporting] = useState(false);
     const [isTallyImporting, setIsTallyImporting] = useState(false);
+    const [syncAllRunning, setSyncAllRunning] = useState(false);
+    const [syncAllProgress, setSyncAllProgress] = useState<{ done: number; total: number; current: string }>({ done: 0, total: 0, current: '' });
     const [isSaving, setIsSaving] = useState(false);
     const router = useRouter();
     const [searchTerm, setSearchTerm] = useState('');
@@ -32,6 +35,7 @@ export default function DealerLedger() {
     const [whatsappSending, setWhatsappSending] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [exportingPdf, setExportingPdf] = useState(false);
+    const [copyingWhatsappMessage, setCopyingWhatsappMessage] = useState(false);
     const [bulkExporting, setBulkExporting] = useState(false);
 
     // Date range modal state
@@ -440,6 +444,62 @@ export default function DealerLedger() {
         return calculateDealerStatement(dealerTransactions, d?.openingBalance || 0, d?.openingBalanceDate);
     };
 
+    const getUnifiedLedgerEntries = (dealerId: string): { entries: LedgerEntry[]; closingBalance: number } => {
+        const dealer = dealers.find(d => d.id === dealerId);
+        const dealerTransactions = getDealerTransactions(dealerId);
+
+        const mapped: LedgerEntry[] = dealerTransactions.map((txn) => {
+            const ref = txn.referenceId || 'N/A';
+            const amount = Math.abs(Number(txn.amount) || 0);
+            const isOpening = ref === 'BAL B/F' || String(txn.notes || '').toLowerCase().includes('opening balance');
+            const isInvoice = txn.type === TransactionType.INVOICE;
+
+            let debit = 0;
+            let credit = 0;
+            let type = isInvoice ? 'Invoice' : 'Payment';
+
+            if (isOpening) {
+                type = 'Opening Balance';
+                if ((Number(txn.amount) || 0) >= 0) debit = amount;
+                else credit = amount;
+            } else if (isInvoice) {
+                debit = amount;
+            } else {
+                credit = amount;
+            }
+
+            return {
+                date: new Date(txn.date),
+                createdAt: txn.createdAt,
+                reference: ref,
+                type,
+                debit,
+                credit,
+                balance: 0,
+                originalTransaction: txn,
+            };
+        });
+
+        const hasOpening = mapped.some(e => e.reference === 'BAL B/F');
+        if (!hasOpening && dealer && (dealer.openingBalance || 0) !== 0) {
+            const openingAmount = Math.abs(dealer.openingBalance || 0);
+            mapped.push({
+                date: dealer.openingBalanceDate ? new Date(dealer.openingBalanceDate) : new Date(),
+                reference: 'BAL B/F',
+                type: 'Opening Balance',
+                debit: (dealer.openingBalance || 0) >= 0 ? openingAmount : 0,
+                credit: (dealer.openingBalance || 0) < 0 ? openingAmount : 0,
+                balance: 0,
+            });
+        }
+
+        const sorted = sortLedgerEntries(mapped);
+        const entries = calculateRunningBalances(sorted);
+        const closingBalance = entries.length ? entries[entries.length - 1].balance : 0;
+
+        return { entries, closingBalance };
+    };
+
     // ─── Date range helpers ────────────────────────────────────────────────
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
         'August', 'September', 'October', 'November', 'December'];
@@ -547,16 +607,19 @@ export default function DealerLedger() {
         }
     };
 
-    const handleSendWhatsAppStatement = async () => {
+    const handleSendWhatsAppStatement = async (options?: { copyOnly?: boolean }) => {
         setDateRangeModal(prev => ({ ...prev, open: false }));
         const selectedDealer = dealers.find(d => d.id === selectedDealerId);
         if (!selectedDealer) return;
 
-        setWhatsappSending('sending');
+        const copyOnly = Boolean(options?.copyOnly);
+        if (!copyOnly) {
+            setWhatsappSending('sending');
+        }
         setWhatsappError(null);
 
         try {
-            if (window.electron?.whatsapp?.getStatus) {
+            if (!copyOnly && window.electron?.whatsapp?.getStatus) {
                 const status = await window.electron.whatsapp.getStatus();
                 if (status !== 'READY') {
                     throw new Error('WhatsApp is not connected. Please go to Settings to link your account.');
@@ -569,30 +632,46 @@ export default function DealerLedger() {
             );
             const safeName = selectedDealer.businessName.replace(/[^a-zA-Z0-9]/g, '_');
             const rangeText = getWhatsAppRangeText();
+            const fileName = `${safeName}_Statement_${getPdfLabel()}.pdf`;
+            const normalizedPhone = selectedDealer.phone.replace(/\D/g, '');
+
+            let statementLink = '';
+            try {
+                statementLink = await uploadToWhatsAppFolder(base64Pdf, fileName);
+            } catch (linkError) {
+                console.warn('Could not upload statement to Drive before WhatsApp send:', linkError);
+            }
+
+            const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.${statementLink ? `\n\nView Statement PDF: ${statementLink}` : ''}`;
+
+            if (copyOnly) {
+                setCopyingWhatsappMessage(true);
+                try {
+                    if (!navigator.clipboard?.writeText) {
+                        throw new Error('Clipboard API unavailable');
+                    }
+                    await navigator.clipboard.writeText(message);
+                    showToast('WhatsApp message copied. You can paste and send manually.', 'success');
+                } catch (copyError) {
+                    console.warn('Clipboard copy failed:', copyError);
+                    showToast('Could not copy message automatically', 'warning');
+                } finally {
+                    setCopyingWhatsappMessage(false);
+                }
+                return;
+            }
 
             if (window.electron?.whatsapp?.sendPDF) {
                 await window.electron.whatsapp.sendPDF(
                     selectedDealer.phone,
                     base64Pdf,
-                    `${safeName}_Statement_${getPdfLabel()}.pdf`,
-                    `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}.`
+                    fileName,
+                    message
                 );
             } else {
-                // WEB FALLBACK: Upload to Drive and share Link
-                try {
-                    const stmtLink = await uploadToWhatsAppFolder(base64Pdf, `${safeName}_Statement_${getPdfLabel()}.pdf`);
-                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. \n\nView Statement PDF: ${stmtLink}`;
-                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                    window.open(whatsappUrl, '_blank');
-                    // Small delay to simulate sending
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                } catch (err: any) {
-                    console.error('Web WhatsApp share failed:', err);
-                    // Fallback to text only
-                    const message = `Hello ${selectedDealer.businessName}, please find your ${rangeText}. Outstanding balance: Rs. ${summary.totalOutstanding.toLocaleString()}. (Full statement available in office)`;
-                    const whatsappUrl = `https://wa.me/${selectedDealer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-                    window.open(whatsappUrl, '_blank');
-                }
+                const whatsappUrl = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`;
+                window.open(whatsappUrl, '_blank');
+                await new Promise(resolve => setTimeout(resolve, 1200));
             }
 
             setWhatsappSending('success');
@@ -604,24 +683,51 @@ export default function DealerLedger() {
         }
     };
 
-    const handleBulkSync = async () => {
+    const handleGlobalSheetSync = async () => {
         const confirmed = await showConfirm({
-            title: 'Bulk Sync Data',
-            message: 'This will re-sync ALL dealer data and individual ledgers to Google Sheets. This might take a few minutes. Continue?',
-            confirmLabel: 'Sync Now',
+            title: 'Sync All Dealer Sheets',
+            message: 'This will sync index sheet, ensure tabs exist, and then sync dealer ledgers one-by-one. Continue?',
+            confirmLabel: 'Start Sync',
             type: 'warning'
         });
         if (!confirmed) return;
 
-        setIsSyncing(true);
+        setSyncAllRunning(true);
+        setSyncAllProgress({ done: 0, total: dealers.length || 1, current: 'Syncing dealer index...' });
+
         try {
-            await bulkSyncDealers();
-            showToast('Full sync complete! All data and ledgers are now up-to-date.', 'success');
+            await syncDealersIndexToSheet();
+
+            setSyncAllProgress(prev => ({ ...prev, current: 'Ensuring dealer tabs...' }));
+            const tabResult = await syncAllDealerTabs();
+
+            const result = await bulkSyncAllDealerLedgers((done, total, name) => {
+                setSyncAllProgress({ done, total, current: name });
+            });
+
+            if (result.errors > 0) {
+                showToast(`Sync finished with ${result.errors} errors. Tabs created: ${tabResult.created}, Synced: ${result.synced}`, 'warning');
+            } else {
+                showToast(`All sheets synced. Tabs created: ${tabResult.created}, Dealers synced: ${result.synced}`, 'success');
+            }
         } catch (error) {
-            console.error('Core sync failed:', error);
-            showToast('Failed to sync. Please check your internet connection or Google Sheets connectivity.', 'error');
+            console.error('Global sheet sync failed:', error);
+            showToast('Failed to sync all dealer sheets', 'error');
         } finally {
-            setIsSyncing(false);
+            setSyncAllRunning(false);
+        }
+    };
+
+    const handleSyncDealer = async (dealerId: string, dealerName: string) => {
+        setSyncingDealerId(dealerId);
+        try {
+            await syncSingleDealerToSheets(dealerId);
+            showToast(`${dealerName} synced to Sheets successfully`, 'success');
+        } catch (error) {
+            console.error('Individual dealer sync failed:', error);
+            showToast(`Failed to sync ${dealerName}`, 'error');
+        } finally {
+            setSyncingDealerId(null);
         }
     };
 
@@ -982,56 +1088,15 @@ export default function DealerLedger() {
     if (selectedDealer && !mainContent) {
         const { invoices, payments, summary } = getDealerStatement(selectedDealer.id);
         const { totalInvoiced, totalPaid, totalOutstanding: totalBalance, overdueCount } = summary;
+        const { entries: statementEntries, closingBalance } = getUnifiedLedgerEntries(selectedDealer.id);
 
         // Profit Calculation
         const dealerProfitStats = getDealerProfitSummary(
             invoices.map(inv => inv.originalTransaction),
             products
         );
-
-        // Combine and sort invoices and payments for statement generation
-        let runningBalance = 0;
-        const statementEntries = [
-            ...invoices.map(inv => ({
-                date: inv.date,
-                reference: inv.referenceId,
-                type: inv.referenceId === 'BAL B/F' ? 'Opening Balance' : 'Invoice',
-                debit: inv.referenceId === 'BAL B/F' ? 0 : inv.amount,
-                credit: 0,
-                balance: 0,
-                originalTransaction: inv.originalTransaction
-            })),
-            ...payments.map(pay => ({
-                date: pay.date,
-                reference: pay.referenceId,
-                type: 'Payment',
-                debit: 0,
-                credit: pay.amount,
-                balance: 0,
-                originalTransaction: pay.originalTransaction
-            }))
-        ]
-        .sort((a, b) => {
-            const dateA = a.date.getTime();
-            const dateB = b.date.getTime();
-            if (dateA !== dateB) return dateA - dateB;
-            
-            // BAL B/F always first if dates match
-            if (a.reference === 'BAL B/F') return -1;
-            if (b.reference === 'BAL B/F') return 1;
-            
-            return 0;
-        })
-        .map((entry, idx) => {
-            if (idx === 0) {
-                runningBalance = entry.debit - entry.credit;
-                entry.balance = runningBalance;
-            } else {
-                runningBalance += entry.debit - entry.credit;
-                entry.balance = runningBalance;
-            }
-            return entry;
-        });
+        const closingType = closingBalance >= 0 ? 'Dr' : 'Cr';
+        const closingAbs = Math.abs(closingBalance);
 
         mainContent = (
             <div className="h-full overflow-y-auto bg-slate-50">
@@ -1062,6 +1127,15 @@ export default function DealerLedger() {
                                 </div>
                             )}
                             <button
+                                onClick={() => handleSyncDealer(selectedDealer.id, selectedDealer.businessName)}
+                                disabled={syncingDealerId === selectedDealer.id}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold transition-all bg-white border shadow-sm text-emerald-700 border-emerald-200 rounded-xl hover:bg-emerald-50 disabled:opacity-60"
+                                title="Sync this dealer index + ledger tab to Google Sheets"
+                            >
+                                {syncingDealerId === selectedDealer.id ? <Loader2 size={16} className="animate-spin" /> : <CloudUpload size={16} />}
+                                {syncingDealerId === selectedDealer.id ? 'Syncing...' : 'Sync Dealer'}
+                            </button>
+                            <button
                                 onClick={() => openDateModal('export')}
                                 disabled={exportingPdf}
                                 className="flex items-center gap-2 px-4 py-2 font-medium text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60">
@@ -1091,6 +1165,12 @@ export default function DealerLedger() {
                                     whatsappSending === 'success' ? 'Sent!' :
                                         whatsappSending === 'error' ? 'Retry' : 'WhatsApp'}
                             </button>
+                            {copyingWhatsappMessage && (
+                                <div className="px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold flex items-center gap-2">
+                                    <Copy size={12} />
+                                    Copying message...
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1111,8 +1191,9 @@ export default function DealerLedger() {
                             <p className="text-xl font-bold text-emerald-600">₹{totalPaid.toLocaleString()}</p>
                         </div>
                         <div className="p-4 bg-white border rounded-xl border-slate-200">
-                            <p className="mb-1 text-xs font-medium text-slate-500">Net Outstanding</p>
-                            <p className="text-xl font-bold text-red-600">₹{totalBalance.toLocaleString()}</p>
+                            <p className="mb-1 text-xs font-medium text-slate-500">Closing Balance</p>
+                            <p className="text-xl font-bold text-slate-800">₹{closingAbs.toLocaleString()}</p>
+                            <p className={`text-xs font-bold mt-1 ${closingType === 'Dr' ? 'text-red-600' : 'text-emerald-600'}`}>{closingType}</p>
                         </div>
                         <div className="p-4 bg-white border rounded-xl border-slate-200">
                             <p className="mb-1 text-xs font-medium text-slate-500">Total Profit</p>
@@ -1131,10 +1212,10 @@ export default function DealerLedger() {
                     <div className="p-4 mb-6 border border-blue-200 bg-blue-50 rounded-xl">
                         <h4 className="flex items-center gap-2 mb-1 font-semibold text-blue-800">
                             <Clock size={16} />
-                            FIFO Payment Logic • Click on any invoice to see payment details
+                            Chronological Ledger Logic • Click on invoices to see payment details
                         </h4>
                         <p className="text-sm text-blue-700">
-                            Payments are applied to oldest invoices first. Overdue invoices (past due date) are highlighted in red.
+                            Entries are shown in true date-time order, with opening balance first. Payments are applied to oldest invoices first.
                         </p>
                     </div>
 
@@ -1169,7 +1250,8 @@ export default function DealerLedger() {
                                     {statementEntries.map((entry, idx) => (
                                         <tr key={idx} className="transition-colors hover:bg-slate-50">
                                             <td className="p-4 text-slate-700">
-                                                {entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                <div className="font-medium">{entry.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                                                <div className="text-[10px] text-slate-400">{entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : entry.date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
                                             </td>
                                             <td className="p-4 font-medium text-slate-800">
                                                 {entry.type === 'Opening Balance' ? 'Opening Balance' : 
@@ -1194,34 +1276,53 @@ export default function DealerLedger() {
                                                 ₹{Math.abs(entry.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                             </td>
                                             <td className="p-4 text-center">
-                                                <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter ${
-                                                    entry.balance >= 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
-                                                }`}>
-                                                    {entry.balance >= 0 ? 'Dr' : 'Cr'}
-                                                </span>
+                                                {(() => {
+                                                    const entryType = entry.credit > 0 ? 'Cr' : 'Dr';
+                                                    return (
+                                                        <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter ${entryType === 'Cr' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                                            {entryType}
+                                                        </span>
+                                                    );
+                                                })()}
                                             </td>
                                             <td className="p-4 text-center">
                                                 {entry.originalTransaction && (
                                                     <div className="flex justify-center gap-1">
-                                                        <button
-                                                            onClick={() => setSelectedInvoice(entry.originalTransaction)}
-                                                            className="p-1.5 hover:bg-slate-200 rounded-full text-slate-400 hover:text-emerald-600 transition-colors"
-                                                            title="View Details"
-                                                        >
-                                                            <Eye size={14} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDeleteTransaction(entry.originalTransaction.id, entry.reference, entry.type === 'Invoice' ? 'Invoice' : 'Receipt')}
-                                                            className="p-1.5 hover:bg-red-50 rounded-full text-slate-400 hover:text-red-600 transition-colors"
-                                                            title="Delete"
-                                                        >
-                                                            <Trash2 size={14} />
-                                                        </button>
+                                                        {entry.originalTransaction.type === TransactionType.INVOICE && (
+                                                            <button
+                                                                onClick={() => setSelectedInvoice(entry.originalTransaction)}
+                                                                className="p-1.5 hover:bg-slate-200 rounded-full text-slate-400 hover:text-emerald-600 transition-colors"
+                                                                title="View Details"
+                                                            >
+                                                                <Eye size={14} />
+                                                            </button>
+                                                        )}
+                                                        {entry.reference !== 'BAL B/F' && (
+                                                            <button
+                                                                onClick={() => handleDeleteTransaction(entry.originalTransaction.id, entry.reference, entry.type === 'Invoice' ? 'Invoice' : 'Receipt')}
+                                                                className="p-1.5 hover:bg-red-50 rounded-full text-slate-400 hover:text-red-600 transition-colors"
+                                                                title="Delete"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 )}
                                             </td>
                                         </tr>
                                     ))}
+                                    <tr className="bg-slate-100/70 border-t-2 border-slate-300">
+                                        <td className="p-4 font-bold text-slate-700" colSpan={6}>Closing Balance</td>
+                                        <td className="p-4 font-black text-right text-slate-900">
+                                            ₹{closingAbs.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="p-4 text-center">
+                                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter ${closingType === 'Dr' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                {closingType}
+                                            </span>
+                                        </td>
+                                        <td className="p-4" />
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1229,14 +1330,8 @@ export default function DealerLedger() {
 
                     {/* Statement Footer */}
                     <div className="p-4 bg-white border rounded-xl border-slate-200">
-                        <div className="flex items-center justify-between">
-                            <div className="text-sm text-slate-500">
-                                Statement generated on {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
-                            </div>
-                            <div className="text-right">
-                                <p className="text-sm text-slate-500">Net Outstanding</p>
-                                <p className="text-2xl font-bold text-red-600">₹{totalBalance.toLocaleString()}</p>
-                            </div>
+                        <div className="text-sm text-slate-500">
+                            Statement generated on {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })} • {statementEntries.length} entries
                         </div>
                     </div>
                 </div>
@@ -1255,13 +1350,13 @@ export default function DealerLedger() {
                     </div>
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={handleBulkSync}
-                            disabled={isSyncing}
+                            onClick={handleGlobalSheetSync}
+                            disabled={syncAllRunning}
                             className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white transition-all shadow-lg bg-emerald-600/90 rounded-xl hover:bg-emerald-700 shadow-emerald-100 disabled:opacity-50"
-                            title="Re-sync all data correctly from Database to Google Sheets"
+                            title="Sync index + tabs + all dealer ledgers one-by-one"
                         >
-                            {isSyncing ? <RefreshCw size={16} className="animate-spin" /> : <CloudUpload size={16} />}
-                            {isSyncing ? 'Syncing...' : 'Sync to Sheets'}
+                            {syncAllRunning ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                            {syncAllRunning ? `Syncing ${Math.min(syncAllProgress.done + 1, syncAllProgress.total)}/${syncAllProgress.total}` : 'Sync All Sheets'}
                         </button>
                         <button
                             onClick={() => openDateModal('bulk-export')}
@@ -1283,6 +1378,13 @@ export default function DealerLedger() {
                         </div>
                     </div>
                 </div>
+
+                {syncAllRunning && (
+                    <div className="mb-4 p-3 rounded-xl border border-orange-200 bg-orange-50 text-orange-800 text-sm font-medium">
+                        Syncing sheets one-by-one: {syncAllProgress.done}/{syncAllProgress.total}
+                        {syncAllProgress.current ? ` • ${syncAllProgress.current}` : ''}
+                    </div>
+                )}
 
                 {/* Search */}
                 <div className="relative max-w-md mb-6">
@@ -1320,7 +1422,9 @@ export default function DealerLedger() {
                                 )}
                             </div>
                         ) : (
-                            filteredDealers.map(d => (
+                            filteredDealers.map(d => {
+                                const cardClosing = getDealerStatement(d.id).summary.totalOutstanding;
+                                return (
                                 <div key={d.id} className="p-5 transition-shadow bg-white border shadow-sm rounded-xl border-slate-200 hover:shadow-md">
                                     <div className="flex items-start justify-between mb-3">
                                         <div>
@@ -1329,8 +1433,8 @@ export default function DealerLedger() {
                                         </div>
                                         <div className="text-right">
                                             <p className="text-xs font-medium uppercase text-slate-400">Balance</p>
-                                            <p className={`font-bold text-lg ${d.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                                ₹{d.balance.toLocaleString()}
+                                            <p className={`font-bold text-lg ${cardClosing > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                ₹{Math.abs(cardClosing).toLocaleString()}
                                             </p>
                                         </div>
                                     </div>
@@ -1351,6 +1455,17 @@ export default function DealerLedger() {
                                         <div className="flex items-center gap-2">
                                             <Phone size={14} className="text-slate-400" />
                                             <span>{d.phone}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
+                                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-100">
+                                            <p className="text-slate-400 uppercase tracking-wide">Opening</p>
+                                            <p className="font-bold text-slate-700">₹{(d.openingBalance || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-100">
+                                            <p className="text-slate-400 uppercase tracking-wide">Closing</p>
+                                            <p className={`font-bold ${cardClosing >= 0 ? 'text-red-600' : 'text-emerald-600'}`}>₹{Math.abs(cardClosing).toLocaleString()} {cardClosing >= 0 ? 'Dr' : 'Cr'}</p>
                                         </div>
                                     </div>
 
@@ -1396,7 +1511,8 @@ export default function DealerLedger() {
                                         </button>
                                     )}
                                 </div>
-                            ))
+                            );
+                            })
                         )
                     }
                 </div >
@@ -1850,7 +1966,7 @@ export default function DealerLedger() {
             {/* ─── Date Range Modal ────────────────────────────────── */}
             {dateRangeModal.open && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                    <div className="w-full max-w-md mx-4 overflow-hidden bg-white shadow-2xl rounded-2xl">
+                    <div className={`w-full mx-4 overflow-hidden bg-white shadow-2xl rounded-2xl ${dateRangeModal.mode === 'whatsapp' ? 'max-w-lg' : 'max-w-md'}`}>
                         {/* Header */}
                         <div className="flex items-center justify-between px-6 py-4 text-white bg-slate-800">
                             <div className="flex items-center gap-3">
@@ -1953,27 +2069,35 @@ export default function DealerLedger() {
                             )}
 
                             {/* Action buttons */}
-                            <div className="flex gap-3 pt-2">
+                            <div className={`grid gap-3 pt-2 ${dateRangeModal.mode === 'whatsapp' ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
                                 <button
                                     onClick={() => setDateRangeModal(prev => ({ ...prev, open: false }))}
-                                    className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl font-medium text-sm hover:bg-slate-50 transition-colors"
+                                    className="h-12 border border-slate-200 text-slate-600 rounded-xl font-medium text-sm hover:bg-slate-50 transition-colors inline-flex items-center justify-center whitespace-nowrap"
                                 >
                                     Cancel
                                 </button>
+                                {dateRangeModal.mode === 'whatsapp' && (
+                                    <button
+                                        onClick={() => handleSendWhatsAppStatement({ copyOnly: true })}
+                                        className="h-12 border border-blue-200 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition-colors inline-flex items-center justify-center gap-2 whitespace-nowrap"
+                                    >
+                                        <Copy size={16} /> Copy Message
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => {
                                         if (dateRangeModal.mode === 'export') handleExportPDF();
                                         else if (dateRangeModal.mode === 'bulk-export') handleBulkExportPDF();
                                         else handleSendWhatsAppStatement();
                                     }}
-                                    className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
+                                    className="h-12 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors inline-flex items-center justify-center gap-2 shadow-lg shadow-emerald-100 whitespace-nowrap"
                                 >
                                     {dateRangeModal.mode === 'export' ? (
                                         <><Download size={16} /> Generate PDF</>
                                     ) : dateRangeModal.mode === 'bulk-export' ? (
                                         <><Download size={16} /> Export All Dealers</>
                                     ) : (
-                                        <><MessageSquare size={16} /> Send via WhatsApp</>
+                                        <><MessageSquare size={16} /> Send WhatsApp</>
                                     )}
                                 </button>
                             </div>

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { calculateCOGS, calculateInvoiceProfit, getDealerProfitSummary, getISTDateString } from '@/lib/utils';
+import {
+  calculateCOGS,
+  calculateInvoiceProfit,
+  getDealerProfitSummary,
+  getISTDateString,
+  isSalesInvoiceTransaction,
+  shouldApplyIGST,
+} from '@/lib/utils';
 import { type InvoiceItem, type Product, type Transaction, TransactionType } from '@/types';
 
 const products: Product[] = [
@@ -225,5 +232,34 @@ describe('getDealerProfitSummary', () => {
     expect(summary.totalProfit).toBe(460);
     expect(summary.averageProfitPerInvoice).toBe(230);
     expect(summary.overallProfitPercentage).toBe(30.67);
+  });
+});
+
+describe('isSalesInvoiceTransaction', () => {
+  it('returns true for normal invoice rows', () => {
+    const invoice = makeInvoice({ notes: 'Regular invoice' });
+    expect(isSalesInvoiceTransaction(invoice)).toBe(true);
+  });
+
+  it('returns false for opening balance and cheque return rows', () => {
+    const opening = makeInvoice({ referenceId: 'BAL B/F' });
+    const chequeReturn = makeInvoice({ notes: 'Cheque Return - bounced' });
+
+    expect(isSalesInvoiceTransaction(opening)).toBe(false);
+    expect(isSalesInvoiceTransaction(chequeReturn)).toBe(false);
+  });
+});
+
+describe('shouldApplyIGST', () => {
+  it('returns false for same state with different formats', () => {
+    expect(shouldApplyIGST('Tamil Nadu', 'TN')).toBe(false);
+  });
+
+  it('returns true for inter-state transactions', () => {
+    expect(shouldApplyIGST('Tamil Nadu', 'Kerala')).toBe(true);
+  });
+
+  it('falls back to intra-state when state metadata is missing', () => {
+    expect(shouldApplyIGST('', '')).toBe(false);
   });
 });
