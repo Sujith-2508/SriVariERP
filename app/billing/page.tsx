@@ -940,6 +940,7 @@ export default function Billing() {
 
         // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
         if (companySettings && selectedDealer) {
+            setDriveUploadStatus('uploading');
             // Background process to avoid blocking UI success screen
             (async () => {
                 try {
@@ -975,19 +976,35 @@ export default function Billing() {
                     const driveFileName = buildInvoiceFileName(
                         invoiceDataToSave.referenceId,
                         selectedDealer.businessName,
-                        new Date(invoiceDate) // use invoice date → correct month folder
+                        new Date(invoiceDate)
                     );
 
                     console.log('[Billing] Starting automatic Drive upload:', driveFileName);
-                    // Upload to ERP Invoices / {Month YYYY} / filename.pdf
-                    await uploadInvoicePDFByMonth(
+                    const { webViewLink } = await uploadInvoicePDFByMonth(
                         invoiceBase64,
                         driveFileName,
                         new Date(invoiceDate)
                     );
-                    console.log('[Billing] Automatic Drive upload success (month-wise)!');
-                } catch (driveErr) {
+                    
+                    if (webViewLink && finalId) {
+                        const { error: updateErr } = await supabase
+                            .from('transactions')
+                            .update({ drive_link: webViewLink })
+                            .eq('id', finalId);
+                        
+                        if (updateErr) {
+                            console.error('[Billing] Failed to save Drive link to DB:', updateErr);
+                        } else {
+                            console.log('[Billing] Drive link saved to DB:', webViewLink);
+                        }
+                    }
+
+                    setDriveUploadStatus('success');
+                    console.log('[Billing] Automatic Drive upload success!');
+                } catch (driveErr: any) {
                     console.error('[Billing] Automatic Drive upload failed:', driveErr);
+                    setDriveUploadStatus('error');
+                    setDriveError(driveErr.message || 'Drive sync failed');
                 }
             })();
         }

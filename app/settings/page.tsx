@@ -28,6 +28,7 @@ export default function SettingsPage() {
     const [driveConnecting, setDriveConnecting] = useState(false);
     const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [isElectron, setIsElectron] = useState(false);
+    const [driveFolderId, setDriveFolderId] = useState('');
 
     useEffect(() => {
         setIsElectron(!!(window as any).electron);
@@ -94,6 +95,7 @@ export default function SettingsPage() {
             // (Recovery info removal)
         }
 
+
         // Check if Drive is already connected via Electron IPC
         const electron = (window as any).electron;
         if (electron?.drive?.isConnected) {
@@ -137,6 +139,12 @@ export default function SettingsPage() {
             }
         };
         loadCompany();
+
+        // Load Service Account Folder ID from localStorage
+        const savedFolderId = localStorage.getItem('googleDriveFolderId');
+        if (savedFolderId) {
+            setDriveFolderId(savedFolderId);
+        }
     }, []);
 
     // Real-time password matching
@@ -208,24 +216,28 @@ export default function SettingsPage() {
     };
 
     const handleDisconnectDrive = async () => {
-        const electron = (window as any).electron;
-        if (!electron?.drive?.disconnect) {
-            localStorage.removeItem('drive_token');
-            setDriveStatus('not_connected');
-            setDriveMessage({ type: 'success', text: `Disconnected from Google Drive ${!isElectron ? '(Web Mode)' : ''}.` });
-            return;
-        }
-
         try {
-            const success = await electron.drive.disconnect();
-            if (success) {
+            const electron = (window as any).electron;
+            if (electron?.drive?.disconnect) {
+                await electron.drive.disconnect();
                 setDriveStatus('not_connected');
-                setDriveMessage({ type: 'success', text: 'Disconnected from Google Drive successfully.' });
+                setDriveMessage({ type: 'success', text: 'Google Drive disconnected successfully.' });
+            } else {
+                localStorage.removeItem('drive_token');
+                setDriveStatus('not_connected');
+                setDriveMessage({ type: 'success', text: `Disconnected from Google Drive ${!isElectron ? '(Web Mode)' : ''}.` });
             }
         } catch (err: any) {
             setDriveMessage({ type: 'error', text: 'Failed to disconnect Drive: ' + err.message });
         }
     };
+
+    const handleSaveFolderId = () => {
+        localStorage.setItem('googleDriveFolderId', driveFolderId.trim());
+        showToast('Drive Folder ID saved successfully. This will be used as a reliable fallback.', 'success');
+        setDriveMessage({ type: 'success', text: 'Backup Folder ID saved. Every bill generated will now be synced here if OAuth fails.' });
+    };
+
 
     const handleConnectDrive = async () => {
         const electron = (window as any).electron;
@@ -746,6 +758,48 @@ export default function SettingsPage() {
                             {driveMessage.text}
                         </p>
                     )}
+                </div>
+
+                {/* Reliable Connection Fallback */}
+                <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center">
+                            <Check className="text-amber-600" size={20} />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-slate-800">Reliable Drive Connection (Fallback)</h2>
+                            <p className="text-xs text-slate-500">Use this if the primary connection shows "Access Blocked"</p>
+                        </div>
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
+                        <p className="text-[10px] text-blue-700 leading-relaxed font-medium">
+                            <strong>Note:</strong> This uses a shared folder method which bypasses 
+                            embedded browser blocks. In your Google Drive, create a folder, 
+                            right-click it &gt; Share &gt; Add <strong>srivari-erp-service@erp-project-417112.iam.gserviceaccount.com</strong> as 
+                            'Editor'. Then paste the Folder ID below.
+                        </p>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div>
+                            <label className={labelCls}>Google Drive Folder ID</label>
+                            <input
+                                type="text"
+                                value={driveFolderId}
+                                onChange={(e) => setDriveFolderId(e.target.value)}
+                                className={inputCls}
+                                placeholder="Paste the folder ID here"
+                            />
+                        </div>
+                        <button
+                            onClick={handleSaveFolderId}
+                            className="bg-slate-800 hover:bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 shadow-md active:scale-95"
+                        >
+                            <Check size={18} />
+                            Save Reliable Connection
+                        </button>
+                    </div>
                 </div>
 
 

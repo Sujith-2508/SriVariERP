@@ -462,3 +462,229 @@ export const generateStatementPDFBase64 = async (
     const pdfOutput = doc.output('datauristring');
     return pdfOutput.split(',')[1];
 };
+
+/**
+ * Generates a Profit Analysis PDF report and downloads it.
+ */
+export const generateProfitAnalysisPDF = (
+    company: CompanySettings,
+    data: {
+        periodLabel: string;
+        revenue: number;
+        cogs: number;
+        discounts: number;
+        grossProfit: number;
+        netProfit: number;
+        margin: number;
+        agentSalariesTotal: number;
+        companyExpensesTotal: number;
+        invoiceCount: number;
+        dealerBreakdown: any[];
+    }
+) => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const formatCurrencyPDF = (amount: number) => `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+    // Border
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    // Header
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const headerLines = [
+        (company.addressLine1 || '').toUpperCase(),
+        (company.addressLine2 || '').toUpperCase(),
+        (company.city || '').toUpperCase() + (company.pinCode ? ` - ${company.pinCode}` : ''),
+        `GST NO: ${(company.gstNumber || '').toUpperCase()}`
+    ];
+    headerLines.forEach((line, i) => doc.text(line, 12, 24 + (i * 5)));
+
+    doc.line(105, 10, 105, 45);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PROFIT ANALYSIS REPORT', 152, 22, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Period: ${data.periodLabel}`, 152, 30, { align: 'center' });
+    doc.text(`Date of Export: ${new Date().toLocaleDateString('en-GB')}`, 152, 36, { align: 'center' });
+    doc.line(10, 45, 200, 45);
+
+    // Summary Cards Section
+    let currentY = 55;
+    doc.setFillColor(245, 245, 250);
+    doc.rect(12, currentY, 43, 20, 'F');
+    doc.rect(58, currentY, 43, 20, 'F');
+    doc.rect(104, currentY, 43, 20, 'F');
+    doc.rect(150, currentY, 43, 20, 'F');
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100);
+    doc.text('TOTAL REVENUE', 33.5, currentY + 6, { align: 'center' });
+    doc.text('COST OF GOODS', 79.5, currentY + 6, { align: 'center' });
+    doc.text('GROSS PROFIT', 125.5, currentY + 6, { align: 'center' });
+    doc.text('NET PROFIT', 171.5, currentY + 6, { align: 'center' });
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text(formatCurrencyPDF(data.revenue), 33.5, currentY + 14, { align: 'center' });
+    doc.setTextColor(180, 0, 0);
+    doc.text(formatCurrencyPDF(data.cogs), 79.5, currentY + 14, { align: 'center' });
+    doc.setTextColor(0, 120, 0);
+    doc.text(formatCurrencyPDF(data.grossProfit), 125.5, currentY + 14, { align: 'center' });
+    doc.text(formatCurrencyPDF(data.netProfit), 171.5, currentY + 14, { align: 'center' });
+
+    // Breakdown List
+    currentY += 30;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Financial Breakdown', 12, currentY);
+    doc.line(12, currentY + 2, 60, currentY + 2);
+    
+    currentY += 10;
+    const breakdown = [
+        ['Total Sales Revenue', formatCurrencyPDF(data.revenue), 'bold'],
+        ['(-) Cost of Goods Sold (COGS)', formatCurrencyPDF(data.cogs), 'normal'],
+        ['(-) Agent Salaries', formatCurrencyPDF(data.agentSalariesTotal), 'normal'],
+        ['(-) Company Expenses', formatCurrencyPDF(data.companyExpensesTotal), 'normal'],
+        ['Company Net Profit', formatCurrencyPDF(data.netProfit), 'bold'],
+        ['Profit Margin %', `${data.margin.toFixed(2)}%`, 'bold'],
+    ];
+
+    breakdown.forEach(([label, value, style]) => {
+        doc.setFont('helvetica', style === 'bold' ? 'bold' : 'normal');
+        doc.text(label, 15, currentY);
+        doc.text(value, 190, currentY, { align: 'right' });
+        doc.line(15, currentY + 2, 190, currentY + 2, 'S');
+        currentY += 8;
+    });
+
+    // Dealer Breakdown Table
+    currentY += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Dealer Performance Summary', 12, currentY);
+    
+    autoTable(doc, {
+        startY: currentY + 5,
+        head: [['Dealer Name', 'Bills', 'Revenue', 'COGS', 'Gross Profit', 'Margin %']],
+        body: data.dealerBreakdown.map(d => [
+            d.name,
+            d.count.toString(),
+            formatCurrencyPDF(d.revenue),
+            formatCurrencyPDF(d.cogs),
+            formatCurrencyPDF(d.grossProfit),
+            `${((d.grossProfit / (d.revenue || 1)) * 100).toFixed(1)}%`
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [50, 50, 50], textColor: [255, 255, 255], fontSize: 8 },
+        styles: { fontSize: 8 },
+        columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'center' } },
+        margin: { left: 12, right: 12 }
+    });
+
+    // Footer
+    const finalY = (doc as any).lastAutoTable.finalY + 15;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(150);
+    doc.text('This is an executive financial summary generated by Sri Vari ERP System.', 105, 280, { align: 'center' });
+    doc.text('Confidential - Intellectual Property of Sri Vari Enterprises.', 105, 284, { align: 'center' });
+
+    doc.save(`Profit_Analysis_${data.periodLabel.replace(/\s+/g, '_')}.pdf`);
+};
+
+/**
+ * Generates an Expense Report PDF and downloads it.
+ */
+export const generateExpenseReportPDF = (
+    expenses: any[],
+    company: CompanySettings,
+    periodLabel: string
+) => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const formatCurrencyPDF = (amount: number) => `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+    // Border
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    // Header
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const headerLines = [
+        (company.addressLine1 || '').toUpperCase(),
+        (company.addressLine2 || '').toUpperCase(),
+        (company.city || '').toUpperCase() + (company.pinCode ? ` - ${company.pinCode}` : ''),
+        `GST NO: ${(company.gstNumber || '').toUpperCase()}`
+    ];
+    headerLines.forEach((line, i) => doc.text(line, 12, 24 + (i * 5)));
+
+    doc.line(100, 10, 100, 45);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('EXPENSE REPORT', 150, 25, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Period: ${periodLabel}`, 150, 32, { align: 'center' });
+    doc.text(`Date of Export: ${new Date().toLocaleDateString('en-GB')}`, 150, 38, { align: 'center' });
+    doc.line(10, 45, 200, 45);
+
+    // Summary Section
+    const totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Summary:', 12, 53);
+    
+    doc.setDrawColor(200);
+    doc.setFillColor(245, 245, 245);
+    doc.rect(12, 56, 80, 15, 'F');
+    doc.rect(12, 56, 80, 15, 'S');
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Total Expenses:', 15, 62);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(220, 38, 38);
+    doc.text(formatCurrencyPDF(totalAmount), 90, 66, { align: 'right' });
+    doc.setTextColor(0);
+
+    // Table
+    autoTable(doc, {
+        startY: 75,
+        head: [['Date', 'Type', 'Description / Manual Name', 'Amount', 'Notes']],
+        body: expenses.map(e => [
+            new Date(e.date).toLocaleDateString('en-GB'),
+            e.expenseType.replace(/_/g, ' '),
+            e.customName || '-',
+            formatCurrencyPDF(e.amount),
+            e.notes || '-'
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.1 },
+        styles: { fontSize: 8, cellPadding: 2, lineColor: [0, 0, 0], lineWidth: 0.1 },
+        columnStyles: { 3: { halign: 'right' } },
+        margin: { left: 10, right: 10 }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 15;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Note: This is an automatically generated expense report from Sri Vari ERP.', 105, Math.min(finalY, 280), { align: 'center' });
+
+    doc.save(`Expense_Report_${periodLabel.replace(/\s+/g, '_')}.pdf`);
+};

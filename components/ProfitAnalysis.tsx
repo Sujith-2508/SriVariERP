@@ -9,11 +9,15 @@ import { getExpensesByRange } from '@/lib/expenseService';
 import { generateProfitAnalysisPDF } from '@/lib/pdfGenerator';
 import { TrendingUp, TrendingDown, Calendar, ArrowLeft, ArrowRight, DollarSign, Percent, Package, Users, Download, X, FileText, Clock, Search, RefreshCw } from 'lucide-react';
 import { DEFAULT_COMPANY_SETTINGS } from '@/constants';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/contexts/ToastContext';
+import { findLinkForInvoice } from '@/lib/googleDriveService';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export function ProfitAnalysis() {
-    const { transactions, products, dealers, companySettings } = useData();
+    const { transactions, products, dealers, companySettings, refreshData } = useData();
+    const { showToast } = useToast();
     const effectiveCompanySettings = companySettings ?? DEFAULT_COMPANY_SETTINGS;
     const [period, setPeriod] = useState<Period>('monthly');
     const [date, setDate] = useState(new Date());
@@ -32,6 +36,50 @@ export function ProfitAnalysis() {
         endDate: new Date().toISOString().slice(0, 10)
     });
     const [selectedDealerInvoices, setSelectedDealerInvoices] = useState<{ name: string; invoices: any[] } | null>(null);
+    const [isOpeningBill, setIsOpeningBill] = useState<string | null>(null);
+
+    const handleOpenInvoiceBill = async (inv: any) => {
+        // If link exists, just open it
+        if (inv.driveLink) {
+            window.open(inv.driveLink, '_blank');
+            return;
+        }
+
+        if (!inv.referenceId) return;
+        setIsOpeningBill(inv.id);
+        
+        try {
+            const link = await findLinkForInvoice(inv.referenceId);
+            if (link) {
+                // Update DB silently
+                await supabase
+                    .from('transactions')
+                    .update({ drive_link: link })
+                    .eq('id', inv.id);
+                
+                // Update local state so it shows green and stays green
+                if (selectedDealerInvoices) {
+                    const updatedInvoices = selectedDealerInvoices.invoices.map(i => 
+                        i.id === inv.id ? { ...i, driveLink: link } : i
+                    );
+                    setSelectedDealerInvoices({ ...selectedDealerInvoices, invoices: updatedInvoices });
+                }
+                
+                // Open it immediately
+                window.open(link, '_blank');
+                
+                // Silently refresh global data for other components
+                refreshData();
+            } else {
+                showToast('Could not find the PDF on Google Drive.', 'error');
+            }
+        } catch (err: any) {
+            console.error('[ProfitAnalysis] Dynamic retrieval failed:', err);
+            showToast('Failed to retrieve bill from Drive', 'error');
+        } finally {
+            setIsOpeningBill(null);
+        }
+    };
 
     // --- DATA CALCULATION ---
 
@@ -710,17 +758,22 @@ export function ProfitAnalysis() {
                                             </div>
                                             <div className="flex items-center gap-4">
                                                 <span className="text-sm font-black text-slate-700">{formatCurrency(inv.amount)}</span>
-                                                {inv.driveLink ? (
-                                                    <button 
-                                                        onClick={() => window.open(inv.driveLink, '_blank')}
-                                                        className="p-2 bg-emerald-600 text-white rounded-lg shadow-md shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center gap-2 text-xs font-bold"
-                                                    >
+                                                <button 
+                                                    onClick={() => handleOpenInvoiceBill(inv)}
+                                                    disabled={isOpeningBill === inv.id}
+                                                    className={`p-2 rounded-lg shadow-md transition-all flex items-center gap-2 text-xs font-bold active:scale-95 ${
+                                                        isOpeningBill === inv.id 
+                                                            ? 'bg-slate-100 text-slate-400 cursor-wait' 
+                                                            : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-100'
+                                                    }`}
+                                                >
+                                                    {isOpeningBill === inv.id ? (
+                                                        <RefreshCw size={14} className="animate-spin" />
+                                                    ) : (
                                                         <Download size={14} />
-                                                        View PDF
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-[10px] text-slate-400 italic">No Drive Link</span>
-                                                )}
+                                                    )}
+                                                    {isOpeningBill === inv.id ? 'Finding...' : 'View PDF'}
+                                                </button>
                                             </div>
                                         </div>
                                     ))}

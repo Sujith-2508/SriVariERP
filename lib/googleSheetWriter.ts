@@ -10,9 +10,10 @@
 
 import { Product } from '@/types';
 import { enqueueOp, cachedRead, clearReadCache } from './sheetsQueue';
+import { invalidateLocalCache as invalidateProductsLocalCache } from './googleSheetProducts';
 
-const SPREADSHEET_ID = '1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0';
-let  SHEET_NAME = 'CurrentProducts';
+const SPREADSHEET_ID = process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID || '1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0';
+const SHEET_NAME = process.env.NEXT_PUBLIC_GOOGLE_SHEET_TAB_NAME || 'CurrentProducts';
 const HEADER_ROW = ['Product ID','Product Name','HSN Code','Unit','Cost Price','Selling Price','GST%','Stock','Category'];
 
 // ──────────── In-memory product cache ────────────
@@ -21,7 +22,8 @@ const CACHE_TTL_MS = 5 * 60_000; // 5 minutes
 
 export function invalidateProductsCache(): void {
     productsCache = null;
-    clearReadCache('/values/');          // also wipe HTTP read cache
+    clearReadCache();
+    invalidateProductsLocalCache(); // Also clear the product service's in-memory and local storage cache
     console.log('[SheetsWriter] Product cache invalidated');
 }
 
@@ -70,44 +72,65 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
     try {
         const data = await cachedRead(`/values/${SHEET_NAME}!A:I`);
         const rows: string[][] = data.values || [];
-        if (rows.length < 2) return { products: [], format: 'empty' };
+        if (rows.length === 0) return { products: [], format: 'empty' };
 
-        let headerIndex = 0;
-        for (let i = 0; i < Math.min(rows.length, 5); i++) {
-            const lower = rows[i].map((c: string) => (c || '').toLowerCase().trim());
-            if (lower.some((c: string) => c.includes('product name') || c.includes('product id'))) {
-                headerIndex = i; break;
+        // 4. Find header row (search first 10 rows for standard keywords)
+        let headerIndex = -1;
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+            const lower = (rows[i] || []).map((c: string) => (c || '').toLowerCase().trim());
+            if (lower.some((c: string) => c.includes('product name') || c.includes('product id') || (c.includes('selling') && c.includes('price')))) {
+                headerIndex = i;
+                break;
             }
         }
 
-        const headers = (rows[headerIndex] || []).map((c: string) => (c || '').toLowerCase().trim());
-        const col = {
+        const headers = headerIndex >= 0 ? 
+            (rows[headerIndex] || []).map((c: string) => (c || '').toLowerCase().trim()) : 
+            [];
+
+        const col = headerIndex >= 0 ? {
             productId: headers.findIndex(h => h.includes('product id')),
             name:      headers.findIndex(h => h.includes('product name') || h === 'name'),
             hsn:       headers.findIndex(h => h.includes('hsn')),
             unit:      headers.findIndex(h => h === 'unit'),
             cost:      headers.findIndex(h => h.includes('cost')),
-            price:     headers.findIndex(h => h.includes('selling')),
+            price:     headers.findIndex(h => h.includes('selling') || h.includes('price')),
             gst:       headers.findIndex(h => h.includes('gst')),
             stock:     headers.findIndex(h => h === 'stock'),
             category:  headers.findIndex(h => h.includes('category')),
+        } : {
+            // FALLBACK MAPPING (based on detected user layout: A=ID, B=Name, C=HSN, D=Unit, E=Cost, F=Price, G=GST, H=Stock, I=Category)
+            productId: 0, name: 1, hsn: 2, unit: 3, cost: 4, price: 5, gst: 6, stock: 7, category: 8
         };
 
-        const parseNum = (v: string) => parseFloat((v || '').replace(/,/g, '')) || 0;
+        const parseNum = (v: any) => {
+            if (v === undefined || v === null) return 0;
+            const s = String(v).replace(/[^0-9.-]/g, '');
+            return parseFloat(s) || 0;
+        };
+        
         const products: Product[] = [];
         let num = 1;
 
-        for (let i = headerIndex + 1; i < rows.length; i++) {
-            const row = rows[i];
+        // 5. Build products array
+        const startRow = headerIndex >= 0 ? headerIndex + 1 : 0;
+        for (let i = startRow; i < rows.length; i++) {
+            const row = rows[i] || [];
             const name = col.name >= 0 ? (row[col.name] || '').trim() : '';
             if (!name) continue;
-            const hasData = (col.unit  >= 0 && (row[col.unit]  || '').trim())
-                         || (col.price >= 0 && (row[col.price] || '').trim())
-                         || (col.category >= 0 && (row[col.category] || '').trim());
-            if (!hasData) continue;
 
-            const sheetPid = col.productId >= 0 ? (row[col.productId] || '').trim() : '';
-            const productId = sheetPid || `P${String(num).padStart(3,'0')}`;
+            // Skip title rows/category-only rows (detect by missing unit/price/id or starting with "RAJA" etc.)
+            const idValue = col.productId >= 0 ? (row[col.productId] || '').trim() : '';
+            const unitValue = col.unit >= 0 ? (row[col.unit] || '').trim().toLowerCase() : '';
+            
+            // Heuristic for data-row: must have a unit OR a numeric ID OR a price
+            const isDataRow = (unitValue && unitValue.length <= 4) || 
+                              (idValue && (idValue.startsWith('P') || /\d/.test(idValue))) ||
+                              (col.price >= 0 && parseNum(row[col.price]) > 0);
+            
+            if (!isDataRow) continue;
+
+            const productId = idValue || `P${String(num).padStart(3,'0')}`;
             const rawGst = col.gst >= 0 ? parseNum(row[col.gst]) : 0;
             const gstRate = rawGst > 0 && rawGst < 1 ? rawGst * 100 : rawGst;
 
@@ -119,7 +142,7 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
                 costPrice: col.cost     >= 0 ? parseNum(row[col.cost])                       : 0,
                 price:     col.price    >= 0 ? parseNum(row[col.price])                      : 0,
                 gstRate,
-                stock:     col.stock    >= 0 ? parseInt((row[col.stock] || '').replace(/,/g,'')) || 0 : 0,
+                stock:     col.stock    >= 0 ? parseFloat(String(row[col.stock]).replace(/[^0-9.-]/g,'')) || 0 : 0,
                 rowIndex: i + 1,
             } as Product & { rowIndex: number });
             num++;
@@ -156,7 +179,7 @@ export async function addProductToSheet(product: Product | any): Promise<boolean
         const row = productToRow(product);
         // Simple append — safest for quota (no extra reads needed)
         enqueueOp(
-            `/values/${SHEET_NAME}!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+            `/values/${SHEET_NAME}!A:Z:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
             'POST',
             { values: [row] }
         );
@@ -181,7 +204,7 @@ export async function updateProductInSheet(rowIndex: number, product: Product | 
         } else {
             // No rowIndex — queue an append (safe fallback)
             enqueueOp(
-                `/values/${SHEET_NAME}!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+                `/values/${SHEET_NAME}!A:Z:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
                 'POST',
                 { values: [productToRow(product)] }
             );
@@ -202,7 +225,7 @@ export async function deleteProductFromSheet(rowIndex: number, productName?: str
             // Clear the row contents (safe, no row-shift)
             const empty = Array(9).fill('');
             enqueueOp(
-                `/values/${SHEET_NAME}!A${rowIndex}:I${rowIndex}?valueInputOption=USER_ENTERED`,
+                `/values/${SHEET_NAME}!A${rowIndex}:Z${rowIndex}?valueInputOption=USER_ENTERED`,
                 'PUT',
                 { values: [empty] }
             );

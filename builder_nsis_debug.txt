@@ -1,0 +1,136 @@
+  • electron-builder  version=24.13.3 os=10.0.26200
+  • loaded configuration  file=package.json ("build" field)
+  • packaging       platform=win32 arch=x64 electron=33.4.11 appOutDir=dist\win-unpacked
+[afterPack] ✅ Running custom icon & version stamping...
+[afterPack] Found rcedit at: C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\998521923\rcedit-x64.exe
+[afterPack] ✅ Custom icon and version info successfully stamped into EXE!
+[afterPack]    Icon: public/icon.ico
+[afterPack]    EXE:  C:\Users\sujit\Documents\GitHub\Sri Vari project\SriVariERP\dist\win-unpacked\Sri Vari ERP.exe
+  • downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+  • downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=1.322s
+  ⨯ cannot execute  cause=exit status 2
+                    out=
+    7-Zip (a) 21.07 (x64) : Copyright (c) 1999-2021 Igor Pavlov : 2021-12-26
+    
+    Scanning the drive for archives:
+    1 file, 5635384 bytes (5504 KiB)
+    
+    Extracting archive: C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\930915647.7z
+    --
+    Path = C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\930915647.7z
+    Type = 7z
+    Physical Size = 5635384
+    Headers Size = 1492
+    Method = LZMA2:24m LZMA:20 BCJ2
+    Solid = +
+    Blocks = 2
+    
+    
+    Sub items Errors: 2
+    
+    Archives with Errors: 1
+    
+    Sub items Errors: 2
+    
+                    errorOut=ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\930915647\darwin\10.12\lib\libcrypto.dylib
+    ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\930915647\darwin\10.12\lib\libssl.dylib
+    
+                    command='C:\Users\sujit\Documents\GitHub\Sri Vari project\SriVariERP\node_modules\7zip-bin\win\x64\7za.exe' x -bd 'C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\930915647.7z' '-oC:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\930915647'
+                    workingDir=C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign
+  • Above command failed, retrying 3 more times
+  • downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+  • downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=1.061s
+  ⨯ cannot execute  cause=exit status 2
+                    out=
+    7-Zip (a) 21.07 (x64) : Copyright (c) 1999-2021 Igor Pavlov : 2021-12-26
+    
+    Scanning the drive for archives:
+    1 file, 5635384 bytes (5504 KiB)
+    
+    Extracting archive: C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\216542567.7z
+    --
+    Path = C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\216542567.7z
+    Type = 7z
+    Physical Size = 5635384
+    Headers Size = 1492
+    Method = LZMA2:24m LZMA:20 BCJ2
+    Solid = +
+    Blocks = 2
+    
+    
+    Sub items Errors: 2
+    
+    Archives with Errors: 1
+    
+    Sub items Errors: 2
+    
+                    errorOut=ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\216542567\darwin\10.12\lib\libcrypto.dylib
+    ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\216542567\darwin\10.12\lib\libssl.dylib
+    
+                    command='C:\Users\sujit\Documents\GitHub\Sri Vari project\SriVariERP\node_modules\7zip-bin\win\x64\7za.exe' x -bd 'C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\216542567.7z' '-oC:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\216542567'
+                    workingDir=C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign
+  • Above command failed, retrying 2 more times
+  • downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+  • downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=979ms
+  ⨯ cannot execute  cause=exit status 2
+                    out=
+    7-Zip (a) 21.07 (x64) : Copyright (c) 1999-2021 Igor Pavlov : 2021-12-26
+    
+    Scanning the drive for archives:
+    1 file, 5635384 bytes (5504 KiB)
+    
+    Extracting archive: C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\834503679.7z
+    --
+    Path = C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\834503679.7z
+    Type = 7z
+    Physical Size = 5635384
+    Headers Size = 1492
+    Method = LZMA2:24m LZMA:20 BCJ2
+    Solid = +
+    Blocks = 2
+    
+    
+    Sub items Errors: 2
+    
+    Archives with Errors: 1
+    
+    Sub items Errors: 2
+    
+                    errorOut=ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\834503679\darwin\10.12\lib\libcrypto.dylib
+    ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\834503679\darwin\10.12\lib\libssl.dylib
+    
+                    command='C:\Users\sujit\Documents\GitHub\Sri Vari project\SriVariERP\node_modules\7zip-bin\win\x64\7za.exe' x -bd 'C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\834503679.7z' '-oC:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\834503679'
+                    workingDir=C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign
+  • Above command failed, retrying 1 more times
+  • downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+  • downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=1.134s
+  ⨯ cannot execute  cause=exit status 2
+                    out=
+    7-Zip (a) 21.07 (x64) : Copyright (c) 1999-2021 Igor Pavlov : 2021-12-26
+    
+    Scanning the drive for archives:
+    1 file, 5635384 bytes (5504 KiB)
+    
+    Extracting archive: C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\837827731.7z
+    --
+    Path = C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\837827731.7z
+    Type = 7z
+    Physical Size = 5635384
+    Headers Size = 1492
+    Method = LZMA2:24m LZMA:20 BCJ2
+    Solid = +
+    Blocks = 2
+    
+    
+    Sub items Errors: 2
+    
+    Archives with Errors: 1
+    
+    Sub items Errors: 2
+    
+                    errorOut=ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\837827731\darwin\10.12\lib\libcrypto.dylib
+    ERROR: Cannot create symbolic link : A required privilege is not held by the client. : C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\837827731\darwin\10.12\lib\libssl.dylib
+    
+                    command='C:\Users\sujit\Documents\GitHub\Sri Vari project\SriVariERP\node_modules\7zip-bin\win\x64\7za.exe' x -bd 'C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\837827731.7z' '-oC:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign\837827731'
+                    workingDir=C:\Users\sujit\AppData\Local\electron-builder\Cache\winCodeSign
+  • Above command failed, retrying 0 more times

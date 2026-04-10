@@ -56,11 +56,18 @@ exports.default = async function afterPack(context) {
     }
 
     // ── Locate the EXE ────────────────────────────────────────────────────────
-    const exeName = 'Sri Vari ERP.exe';
+    const exeName = 'Sri Vari ERP Updated Version.exe';
     const exePath = path.join(appOutDir, exeName);
 
     if (!fs.existsSync(exePath)) {
         console.error('[afterPack] ❌ EXE not found at:', exePath);
+        console.log('[afterPack] Available files in', appOutDir, ':');
+        try {
+            const files = fs.readdirSync(appOutDir);
+            files.forEach(f => console.log('  -', f));
+        } catch (e) {
+            console.error('[afterPack] Error listing directory:', e.message);
+        }
         return;
     }
 
@@ -78,14 +85,14 @@ exports.default = async function afterPack(context) {
         execFileSync(rceditPath, [
             exePath,
             '--set-icon', icoPath,
-            '--set-version-string', 'ProductName', 'Sri Vari ERP',
-            '--set-version-string', 'FileDescription', 'Sri Vari Enterprises - Billing ERP System',
+            '--set-version-string', 'ProductName', 'Sri Vari ERP Updated',
+            '--set-version-string', 'FileDescription', 'Sri Vari Enterprises - Billing ERP System Updated Version',
             '--set-version-string', 'CompanyName', 'Sri Vari Enterprises',
             '--set-version-string', 'LegalCopyright', 'Copyright 2025 Sri Vari Enterprises',
             '--set-version-string', 'InternalName', 'SriVariERP',
             '--set-version-string', 'OriginalFilename', 'Sri Vari ERP.exe',
-            '--set-file-version', '1.0.0.0',
-            '--set-product-version', '1.0.0',
+            '--set-file-version', '2.0.0.0',
+            '--set-product-version', '2.0.0',
         ]);
         console.log('[afterPack] ✅ Custom icon and version info successfully stamped into EXE!');
         console.log('[afterPack]    Icon: public/icon.ico');

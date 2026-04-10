@@ -25,7 +25,7 @@ const CACHE_TTL_MS    = 5 * 60_000; // 5-minute read cache
 // ────────── Types ──────────
 export interface QueuedOp {
   id: string;         // unique op id
-  path: string;       // e.g. '/values/CurrentProducts!A5:I5'
+  path: string;       // e.g. '/values/ProdData!A5:I5'
   method: string;     // GET | PUT | POST
   body?: any;
   isLog?: boolean;    // → use LOG spreadsheet

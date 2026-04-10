@@ -1,7 +1,8 @@
 {
   "name": "sri-vari-enterprises",
-  "version": "1.0.0",
-  "description": "Billing and Collections ERP System",
+  "productName": "Sri Vari ERP Updated Version",
+  "version": "2.0.0",
+  "description": "Billing and Collections ERP System - Updated Version",
   "author": "Sri Vari Enterprises",
   "private": true,
   "main": "main.js",
@@ -44,6 +45,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -53,7 +60,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Sri Vari ERP",
-      "artifactName": "${productName} v${version} ${arch}.${ext}"
+      "artifactName": "${productName} Updated v${version} ${arch}.${ext}"
     },
     "portable": {
       "artifactName": "${productName} Portable ${version} ${arch}.${ext}"

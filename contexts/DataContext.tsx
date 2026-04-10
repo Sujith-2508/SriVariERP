@@ -588,10 +588,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet (search by name if rowIndex missing), then re-read
+        // Sync to Google Sheet (strict row identification), then re-read
         try {
-            const productIndex = products.findIndex(p => p.id === updatedProduct.id);
-            const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
+            const rowIndex = (updatedProduct as any).rowIndex || 0;
+            if (rowIndex <= 0) {
+                console.warn('[DataContext] Warning: Product update called without a valid rowIndex. Falling back to append to avoid overwriting headers.', updatedProduct.name);
+            }
             await updateProductInSheet(rowIndex, updatedProduct);
             const { products: sheetProducts } = await readProductsFromSheet();
             if (sheetProducts.length > 0) {

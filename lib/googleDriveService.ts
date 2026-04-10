@@ -28,6 +28,7 @@ const SUPPLIER_STATEMENTS_FOLDER = 'Supplier Statements';
 const DEALER_STATEMENTS_FOLDER = 'Dealer Statements';
 const WHATSAPP_UPLOADS_FOLDER = 'WhatsApp Documents';
 const DRIVE_EMAIL_KEY = 'googleDriveEmail';
+const DRIVE_FOLDER_ID_KEY = 'googleDriveFolderId';
 
 // --- Auth helpers (same pattern as googleSheetWriter.ts) ---
 
@@ -226,29 +227,38 @@ function isDriveTransientError(err: any): boolean {
 
 async function withOAuthDriveRetry<T>(
     label: string,
-    operation: (oauthToken: string) => Promise<T>
+    operation: (token: string, isServiceAccount?: boolean) => Promise<T>
 ): Promise<T> {
     let lastError: any;
 
-    for (let attempt = 1; attempt <= DRIVE_MAX_RETRIES; attempt++) {
-        try {
-            const token = await getOAuthAccessToken();
-            if (!token) {
-                throw new Error('Google Drive not connected. Please connect it in Settings.');
+    try {
+        // 1. Try OAuth first (user's own account)
+        const oauthToken = await getOAuthAccessToken();
+        if (oauthToken) {
+            try {
+                return await operation(oauthToken, false);
+            } catch (err: any) {
+                if (!isDriveAuthError(err)) throw err;
+                console.warn(`[DriveService] OAuth ${label} failed with auth error, checking Service Account fallback...`);
             }
-            return await operation(token);
-        } catch (err: any) {
-            lastError = err;
-            const authError = isDriveAuthError(err);
-            const transientError = isDriveTransientError(err);
-            const canRetry = attempt < DRIVE_MAX_RETRIES && (authError || transientError);
-
-            if (!canRetry) break;
-
-            const delay = authError ? 500 : 800 * Math.pow(2, attempt - 1);
-            console.warn(`[DriveService] ${label} retry ${attempt}/${DRIVE_MAX_RETRIES}:`, err?.message || err);
-            await sleep(delay);
         }
+
+        // 2. Fallback to Service Account if Folder ID is configured
+        if (typeof window !== 'undefined') {
+            const folderId = localStorage.getItem(DRIVE_FOLDER_ID_KEY);
+            if (folderId) {
+                console.log(`[DriveService] Using Service Account fallback for ${label}`);
+                const serviceToken = await getDriveAccessToken();
+                return await operation(serviceToken, true);
+            }
+        }
+
+        if (!oauthToken) {
+            throw new Error('Google Drive not connected. Please connect it or configure a Service Account Folder ID in Settings.');
+        }
+    } catch (err: any) {
+        lastError = err;
+        console.error(`[DriveService] ${label} failed:`, err?.message || err);
     }
 
     throw lastError;
@@ -428,70 +438,74 @@ export async function getSyncFolderId(name: string): Promise<string> {
 
 /** List all files in a folder */
 export async function listFiles(folderId: string): Promise<any[]> {
-    const token = await getDriveAccessToken();
-    const query = `'${folderId}' in parents and trashed = false`;
-    const url = `${DRIVE_API}?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime,webViewLink)`;
+    return withOAuthDriveRetry('listFiles', async (token) => {
+        const query = `'${folderId}' in parents and trashed = false`;
+        const url = `${DRIVE_API}?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime,webViewLink)`;
 
-    const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        const res = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+            throw new Error(`Failed to list files: ${await res.text()}`);
+        }
+
+        const data = await res.json();
+        return data.files || [];
     });
-
-    if (!res.ok) {
-        throw new Error(`Failed to list files: ${await res.text()}`);
-    }
-
-    const data = await res.json();
-    return data.files || [];
 }
 
 /** Search for files by name (supports partial matches and across all drives) */
 export async function findFilesByName(name: string): Promise<any[]> {
-    const token = await getDriveAccessToken();
-    const query = `name contains '${name}' and trashed = false`;
-    const url = `${DRIVE_API}?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime,webViewLink)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+    return withOAuthDriveRetry(`findFilesByName:${name}`, async (token) => {
+        const query = `name contains '${name}' and trashed = false`;
+        const url = `${DRIVE_API}?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime,webViewLink)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
 
-    const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        const res = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+            throw new Error(`Failed to find files: ${await res.text()}`);
+        }
+
+        const data = await res.json();
+        return data.files || [];
     });
-
-    if (!res.ok) {
-        throw new Error(`Failed to find files: ${await res.text()}`);
-    }
-
-    const data = await res.json();
-    return data.files || [];
 }
 
 /** Download a binary file (Excel) */
 export async function downloadFile(fileId: string): Promise<ArrayBuffer> {
-    const token = await getDriveAccessToken();
-    const url = `${DRIVE_API}/${fileId}?alt=media`;
+    return withOAuthDriveRetry('downloadFile', async (token) => {
+        const url = `${DRIVE_API}/${fileId}?alt=media`;
 
-    const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        const res = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+            throw new Error(`Failed to download file: ${await res.text()}`);
+        }
+
+        return res.arrayBuffer();
     });
-
-    if (!res.ok) {
-        throw new Error(`Failed to download file: ${await res.text()}`);
-    }
-
-    return res.arrayBuffer();
 }
 
 /** Export a Google Doc (Sheet) as a specific format (.xlsx) */
 export async function exportFile(fileId: string, mimeType: string = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'): Promise<ArrayBuffer> {
-    const token = await getDriveAccessToken();
-    const url = `${DRIVE_API}/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`;
+    return withOAuthDriveRetry('exportFile', async (token) => {
+        const url = `${DRIVE_API}/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`;
 
-    const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        const res = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+            throw new Error(`Failed to export file: ${await res.text()}`);
+        }
+
+        return res.arrayBuffer();
     });
-
-    if (!res.ok) {
-        throw new Error(`Failed to export file: ${await res.text()}`);
-    }
-
-    return res.arrayBuffer();
 }
 
 // --- Upload ---
@@ -600,11 +614,12 @@ export async function uploadTextFile(
 }
 
 /**
- * Get or create the root "ERP Invoices" folder (shared with configured email).
+ * Get or create the root "ERP Invoices" folder.
+ * If parentId is provided (e.g. from Service Account config), it looks inside that folder.
  */
-async function getErpInvoicesFolder(token: string): Promise<string> {
+async function getErpInvoicesFolder(token: string, parentId: string | null = null): Promise<string> {
     if (cachedErpInvoicesFolderId) return cachedErpInvoicesFolderId;
-    cachedErpInvoicesFolderId = await findOrCreateSubFolder(token, ERP_INVOICES_FOLDER, null);
+    cachedErpInvoicesFolderId = await findOrCreateSubFolder(token, ERP_INVOICES_FOLDER, parentId);
     await shareFolderWithEmail(token, cachedErpInvoicesFolderId);
     return cachedErpInvoicesFolderId;
 }
@@ -617,17 +632,16 @@ const MONTH_NAMES = [
 
 /**
  * Get or create the month subfolder inside ERP Invoices.
- * Folder name format: "February 2026", "March 2026", etc.
  * Uses the invoice date (not today) so backdated invoices land in the right month.
  */
-async function getMonthFolderId(token: string, invoiceDate: Date): Promise<string> {
+async function getMonthFolderId(token: string, invoiceDate: Date, parentId: string | null = null): Promise<string> {
     const monthName = MONTH_NAMES[invoiceDate.getMonth()];
     const year = invoiceDate.getFullYear();
     const folderLabel = `${monthName} ${year}`; // e.g. "February 2026"
 
     if (monthFolderCache[folderLabel]) return monthFolderCache[folderLabel];
 
-    const erpRoot = await getErpInvoicesFolder(token);
+    const erpRoot = await getErpInvoicesFolder(token, parentId);
     const monthId = await findOrCreateSubFolder(token, folderLabel, erpRoot);
     monthFolderCache[folderLabel] = monthId;
     console.log(`[DriveService] Month folder '${folderLabel}':`, monthId);
@@ -647,12 +661,26 @@ export async function uploadInvoicePDFByMonth(
     fileName: string,
     invoiceDate: Date
 ): Promise<{ id: string; webViewLink: string }> {
-    return withOAuthDriveRetry('uploadInvoicePDFByMonth', async (oauthToken) => {
-        console.log(`[DriveService] Starting upload for ${fileName}...`);
-        const monthFolderId = await getMonthFolderId(oauthToken, invoiceDate);
-        console.log(`[DriveService] Using month folder ID: ${monthFolderId}`);
-        const result = await uploadPdfToFolder(oauthToken, base64Data, fileName, monthFolderId);
-        console.log(`[DriveService] Upload successful! Link: ${result.webViewLink}`);
+    return withOAuthDriveRetry('uploadInvoicePDFByMonth', async (token, isServiceAccount) => {
+        console.log(`[DriveService] Starting upload for ${fileName} (Service Account: ${!!isServiceAccount})...`);
+        
+        let targetFolderId: string;
+        if (isServiceAccount) {
+            const configuredId = localStorage.getItem(DRIVE_FOLDER_ID_KEY);
+            if (!configuredId) throw new Error('Service Account Folder ID not configured');
+            
+            try {
+                // Look for or create month folder INSIDE the configured backup folder
+                targetFolderId = await getMonthFolderId(token, invoiceDate, configuredId);
+            } catch (e) {
+                console.warn('[DriveService] Could not create/find month folder with service account, using root:', e);
+                targetFolderId = configuredId;
+            }
+        } else {
+            targetFolderId = await getMonthFolderId(token, invoiceDate);
+        }
+
+        const result = await uploadPdfToFolder(token, base64Data, fileName, targetFolderId);
         return result;
     });
 }
@@ -672,6 +700,27 @@ export function buildInvoiceFileName(
     const yyyy = date.getFullYear();
     return `${invoiceNo}_${sanitizedDealer}_${dd}-${mm}-${yyyy}.pdf`;
 }
+/**
+ * Search Drive specifically for an invoice PDF by its bill number (referenceId).
+ * Example: if looking for "INV012", it will find 
+ * "INV012_DealerName_Date.pdf"
+ */
+export async function findLinkForInvoice(invoiceNo: string): Promise<string | null> {
+    try {
+        const files = await findFilesByName(invoiceNo);
+        // Find the best match: must be a PDF and must start with the invoiceNo
+        const match = files.find(f => 
+            f.mimeType === 'application/pdf' && 
+            f.name.toLowerCase().startsWith(invoiceNo.toLowerCase())
+        );
+        
+        return match ? match.webViewLink : null;
+    } catch (e) {
+        console.error(`[DriveService] Failed to find link for ${invoiceNo}:`, e);
+        return null;
+    }
+}
+
 /**
  * Upload a PDF specifically for sharing via WhatsApp.
  * Returns the webViewLink for the message.
