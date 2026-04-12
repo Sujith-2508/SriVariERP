@@ -92,12 +92,12 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
             productId: headers.findIndex(h => h.includes('product id')),
             name:      headers.findIndex(h => h.includes('product name') || h === 'name'),
             hsn:       headers.findIndex(h => h.includes('hsn')),
-            unit:      headers.findIndex(h => h === 'unit'),
+            unit:      headers.findIndex(h => h === 'unit' || (h.includes('unit') && !h.includes('cost'))),
             cost:      headers.findIndex(h => h.includes('cost')),
-            price:     headers.findIndex(h => h.includes('selling') || h.includes('price')),
+            price:     headers.findIndex(h => (h.includes('selling') || h.includes('sell')) || (h.includes('price') && !h.includes('cost'))),
             gst:       headers.findIndex(h => h.includes('gst')),
-            stock:     headers.findIndex(h => h === 'stock'),
-            category:  headers.findIndex(h => h.includes('category')),
+            stock:     headers.findIndex(h => h.includes('stock')),
+            category:  headers.findIndex(h => h === 'category' || (h.includes('category') && !h.includes('unit'))),
         } : {
             // FALLBACK MAPPING (based on detected user layout: A=ID, B=Name, C=HSN, D=Unit, E=Cost, F=Price, G=GST, H=Stock, I=Category)
             productId: 0, name: 1, hsn: 2, unit: 3, cost: 4, price: 5, gst: 6, stock: 7, category: 8

@@ -1,8 +1,8 @@
 {
   "name": "sri-vari-enterprises",
-  "productName": "Sri Vari ERP Updated Version",
-  "version": "2.0.0",
-  "description": "Billing and Collections ERP System - Updated Version",
+  "productName": "Sri Vari ERP 12-04-2026",
+  "version": "2.12.1",
+  "description": "Billing and Collections ERP System - Updated Version 11-04-2026",
   "author": "Sri Vari Enterprises",
   "private": true,
   "main": "main.js",

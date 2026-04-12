@@ -993,7 +993,15 @@ export default function Billing() {
                             .eq('id', finalId);
                         
                         if (updateErr) {
-                            console.error('[Billing] Failed to save Drive link to DB:', updateErr);
+                            // PostgrestError properties are non-enumerable — log them explicitly
+                            console.warn(
+                                '[Billing] Drive link save skipped (non-critical):',
+                                updateErr.message || '(no message)',
+                                '| code:', updateErr.code,
+                                '| details:', updateErr.details,
+                                '| hint:', updateErr.hint
+                            );
+                            // This is non-critical — PDF is already saved to Drive successfully
                         } else {
                             console.log('[Billing] Drive link saved to DB:', webViewLink);
                         }

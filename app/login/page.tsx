@@ -17,6 +17,13 @@ export default function LoginPage() {
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+
+        // CHECK CONNECTIVITY FIRST
+        if (!navigator.onLine) {
+            setError('No Internet Connection. Please check your network and try again.');
+            return;
+        }
+
         setIsLoading(true);
 
         try {

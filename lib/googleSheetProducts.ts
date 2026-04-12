@@ -229,12 +229,12 @@ const parseStructuredFormat = (rows: string[][], headerIndex: number): Product[]
         productId: headers.findIndex(h => h.includes('product id')),
         productName: headers.findIndex(h => h.includes('product name') || h === 'name'),
         hsnCode: headers.findIndex(h => h.includes('hsn')),
-        unit: headers.findIndex(h => h === 'unit'),
+        unit: headers.findIndex(h => h === 'unit' || (h.includes('unit') && !h.includes('cost'))),
         costPrice: headers.findIndex(h => h.includes('cost')),
-        sellingPrice: headers.findIndex(h => h.includes('selling') || h.includes('price')),
+        sellingPrice: headers.findIndex(h => (h.includes('selling') || h.includes('sell')) || (h.includes('price') && !h.includes('cost'))),
         gstRate: headers.findIndex(h => h.includes('gst')),
-        stock: headers.findIndex(h => h === 'stock'),
-        category: headers.findIndex(h => h.includes('category')),
+        stock: headers.findIndex(h => h.includes('stock')),
+        category: headers.findIndex(h => h === 'category' || (h.includes('category') && !h.includes('unit'))),
     } : {
         // FALLBACK MAPPING (matches googleSheetWriter.ts fallback)
         productId: 0, productName: 1, hsnCode: 2, unit: 3, costPrice: 4, sellingPrice: 5, gstRate: 6, stock: 7, category: 8

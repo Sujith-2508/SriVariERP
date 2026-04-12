@@ -56,18 +56,19 @@ exports.default = async function afterPack(context) {
     }
 
     // ── Locate the EXE ────────────────────────────────────────────────────────
-    const exeName = 'Sri Vari ERP Updated Version.exe';
-    const exePath = path.join(appOutDir, exeName);
+    // Dynamically find the EXE to avoid hardcoded name breaking after version bumps
+    const files = fs.readdirSync(appOutDir);
+    const exeFile = files.find(f => f.endsWith('.exe'));
+    if (!exeFile) {
+        console.error('[afterPack] ❌ No .exe found in:', appOutDir);
+        console.log('[afterPack] Available files:', files.join(', '));
+        return;
+    }
+    const exePath = path.join(appOutDir, exeFile);
+    console.log('[afterPack] Found EXE:', exeFile);
 
     if (!fs.existsSync(exePath)) {
-        console.error('[afterPack] ❌ EXE not found at:', exePath);
-        console.log('[afterPack] Available files in', appOutDir, ':');
-        try {
-            const files = fs.readdirSync(appOutDir);
-            files.forEach(f => console.log('  -', f));
-        } catch (e) {
-            console.error('[afterPack] Error listing directory:', e.message);
-        }
+        console.error('[afterPack] ❌ EXE path not accessible:', exePath);
         return;
     }
 
@@ -88,11 +89,11 @@ exports.default = async function afterPack(context) {
             '--set-version-string', 'ProductName', 'Sri Vari ERP Updated',
             '--set-version-string', 'FileDescription', 'Sri Vari Enterprises - Billing ERP System Updated Version',
             '--set-version-string', 'CompanyName', 'Sri Vari Enterprises',
-            '--set-version-string', 'LegalCopyright', 'Copyright 2025 Sri Vari Enterprises',
+            '--set-version-string', 'LegalCopyright', 'Copyright 2026 Sri Vari Enterprises',
             '--set-version-string', 'InternalName', 'SriVariERP',
             '--set-version-string', 'OriginalFilename', 'Sri Vari ERP.exe',
-            '--set-file-version', '2.0.0.0',
-            '--set-product-version', '2.0.0',
+            '--set-file-version', '2.12.1.0',
+            '--set-product-version', '2.12.1',
         ]);
         console.log('[afterPack] ✅ Custom icon and version info successfully stamped into EXE!');
         console.log('[afterPack]    Icon: public/icon.ico');

@@ -8,6 +8,7 @@ import { DataProvider } from '@/contexts/DataContext';
 import { ToastProvider } from '@/contexts/ToastContext';
 import { ConfirmationProvider } from '@/contexts/ConfirmationContext';
 import { ToastContainer } from '@/components/ToastContainer';
+import { ConnectivityBanner } from '@/components/ConnectivityBanner';
 import { ViewState } from '@/types';
 
 export function ClientLayout({ children }: { children: React.ReactNode }) {
@@ -140,6 +141,7 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
                     </div>
 
                     <ToastContainer />
+                    <ConnectivityBanner />
 
                     {/* Global Map Preloader - Loads tiles and assets in the background */}
                     {mounted && (

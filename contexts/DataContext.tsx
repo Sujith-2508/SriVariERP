@@ -9,6 +9,9 @@ import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readPr
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
 import { useToast } from './ToastContext';
 
+// Helper to ignore empty object errors returned by some Supabase contexts
+const isRealError = (err: any) => err && (err.message || Object.keys(err).length > 0);
+
 interface InvoiceData {
     vehicleName?: string;
     vehicleNumber?: string;
@@ -307,8 +310,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .select('*')
                 .order('business_name');
 
-            if (dealersError) {
-                console.error('[DataContext] Error fetching dealers:', dealersError);
+            if (isRealError(dealersError)) {
+                console.error('[DataContext] Error fetching dealers:', dealersError?.message || dealersError);
                 throw dealersError;
             }
 
@@ -321,12 +324,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const { data: transactionsData, error: transactionsError } = transactionsResult;
             const { data: itemsData, error: itemsError } = itemsResult;
 
-            if (transactionsError) {
-                console.error('[DataContext] Error fetching transactions:', transactionsError);
+            if (isRealError(transactionsError)) {
+                console.error('[DataContext] Error fetching transactions:', transactionsError?.message || transactionsError);
                 throw transactionsError;
             }
-            if (itemsError) {
-                console.error('[DataContext] Error fetching invoice items:', itemsError);
+            if (isRealError(itemsError)) {
+                console.error('[DataContext] Error fetching invoice items:', itemsError?.message || itemsError);
                 // We can continue if only items fail, but let's log it
             }
 
@@ -338,8 +341,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .from('payment_allocations')
                 .select('*');
 
-            if (allocationsError) {
-                console.error('[DataContext] Error fetching allocations:', allocationsError);
+            if (isRealError(allocationsError)) {
+                console.error('[DataContext] Error fetching allocations:', allocationsError?.message || allocationsError);
                 throw allocationsError;
             }
 
@@ -357,8 +360,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .select('*')
                 .order('name');
 
-            if (agentsError) {
-                console.error('[DataContext] Error fetching agents:', agentsError);
+            if (isRealError(agentsError)) {
+                console.error('[DataContext] Error fetching agents:', agentsError?.message || agentsError);
                 throw agentsError;
             }
 

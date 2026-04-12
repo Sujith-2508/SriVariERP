@@ -111,7 +111,12 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         },
         title: 'Sri Vari Enterprises - Billing ERP',
-        icon: path.join(__dirname, 'public', process.platform === 'win32' ? 'icon.ico' : 'icon.png')
+        icon: (() => {
+            const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+            const devPath = path.join(__dirname, 'public', iconName);
+            const prodPath = path.join(__dirname, iconName); // in asar root often
+            return fs.existsSync(devPath) ? devPath : (fs.existsSync(prodPath) ? prodPath : undefined);
+        })()
     })
 
     logToFile('[Main] Initializing BrowserWindow...');

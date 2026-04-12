@@ -201,8 +201,11 @@ export const generateInvoicePDFBase64 = async (
         doc.line(10, mY + 10, 200, mY + 10);
     };
 
-    // Calculations
+    // Calculations — match exactly the billing UI formula
     const subtotal = items.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
+    const itemDiscounts = items.reduce((sum, item) => sum + (item.discountAmount || 0), 0);
+    // itemTax is used ONLY for the HSN/taxable summary table (compliance display)
+    // It is NOT added to the grand total — that is intentional design
     const itemTax = items.reduce((sum, i) => sum + (i.cgstAmount + i.sgstAmount + i.igstAmount), 0);
     const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
     const unit = items[0]?.unit || 'nos';
@@ -210,12 +213,21 @@ export const generateInvoicePDFBase64 = async (
     const globalCGST = parseFloat(notes.globalCGST || '0');
     const globalSGST = parseFloat(notes.globalSGST || '0');
     const globalIGST = parseFloat(notes.globalIGST || '0');
+    const globalDiscount = parseFloat(notes.globalDiscount || String(invoice.discountPercent || '0'));
+    const globalDiscountAmount = (subtotal * globalDiscount) / 100;
+    // Global GST: calculated as (subtotal × percent / 100)
     const globalCGSTAmount = (subtotal * globalCGST) / 100;
     const globalSGSTAmount = (subtotal * globalSGST) / 100;
     const globalIGSTAmount = (subtotal * globalIGST) / 100;
     const roundOffAmount = parseFloat(notes.roundOff || '0');
-    const grandTotal = subtotal + itemTax + transportCharges + roundOffAmount +
-        globalCGSTAmount + globalSGSTAmount + globalIGSTAmount;
+    // Grand total = matches billing UI exactly:
+    //   subtotal - itemDiscounts - globalDiscountAmount + globalGST + transport + roundOff
+    //   NOTE: per-item itemTax is for HSN/taxable summary ONLY — NOT added to invoice total
+    const grandTotal = subtotal
+        - itemDiscounts
+        - globalDiscountAmount
+        + globalCGSTAmount + globalSGSTAmount + globalIGSTAmount
+        + transportCharges + roundOffAmount;
 
     const bodyRows = items.map((item, idx) => [
         (idx + 1).toString(), item.productName, item.hsnCode || '',
@@ -263,14 +275,15 @@ export const generateInvoicePDFBase64 = async (
         };
 
         if (transportCharges > 0) drawTotalRow(`Transport Charges (${invoice.vehicleName || 'Vehicle'})`, formatAmount(transportCharges));
-        if ((itemTax > 0 || globalCGSTAmount > 0) && !invoice.igst) {
-            const cgst = items.reduce((s, i) => s + i.cgstAmount, 0) + globalCGSTAmount;
-            const sgst = items.reduce((s, i) => s + i.sgstAmount, 0) + globalSGSTAmount;
-            drawTotalRow('CGST', formatAmount(cgst));
-            drawTotalRow('SGST', formatAmount(sgst));
-        } else if (invoice.igst > 0 || globalIGSTAmount > 0) {
-            const igst = items.reduce((s, i) => s + i.igstAmount, 0) + globalIGSTAmount;
-            drawTotalRow('IGST', formatAmount(igst));
+        if (itemDiscounts > 0) drawTotalRow('Item Discounts', `- ${formatAmount(itemDiscounts)}`);
+        if (globalDiscountAmount > 0) drawTotalRow(`Global Discount (${globalDiscount}%)`, `- ${formatAmount(globalDiscountAmount)}`);
+        // Show only global GST (per-item GST goes into HSN summary table but is NOT part of invoice total)
+        if (globalCGSTAmount > 0) {
+            drawTotalRow(`CGST (${globalCGST}%)`, formatAmount(globalCGSTAmount));
+            drawTotalRow(`SGST (${globalSGST}%)`, formatAmount(globalSGSTAmount));
+        }
+        if (globalIGSTAmount > 0) {
+            drawTotalRow(`IGST (${globalIGST}%)`, formatAmount(globalIGSTAmount));
         }
         if (roundOffAmount !== 0) drawTotalRow('Round Off', (roundOffAmount >= 0 ? '+' : '') + formatAmount(roundOffAmount));
         drawTotalRow('Total', formatAmount(grandTotal), true);
@@ -687,4 +700,113 @@ export const generateExpenseReportPDF = (
     doc.text('Note: This is an automatically generated expense report from Sri Vari ERP.', 105, Math.min(finalY, 280), { align: 'center' });
 
     doc.save(`Expense_Report_${periodLabel.replace(/\s+/g, '_')}.pdf`);
+};
+
+/**
+ * Generates an Agent Salary Report PDF and downloads it.
+ */
+export const generateSalaryReportPDF = (
+    agents: any[],
+    salaries: any[],
+    company: CompanySettings,
+    opts: { agentId?: string; month?: number; year: number; customLabel?: string }
+) => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const formatCurrencyPDF = (amount: number) => `Rs. ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+    const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    // Border
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    // Header
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    const headerLines = [
+        (company.addressLine1 || '').toUpperCase(),
+        (company.addressLine2 || '').toUpperCase(),
+        (company.city || '').toUpperCase() + (company.pinCode ? ` - ${company.pinCode}` : ''),
+        `GST NO: ${(company.gstNumber || '').toUpperCase()}`
+    ];
+    headerLines.forEach((line, i) => doc.text(line, 12, 24 + (i * 5)));
+
+    doc.line(100, 10, 100, 45);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('AGENT SALARY REPORT', 150, 25, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    let periodText = opts.customLabel || (opts.month ? `${monthNames[opts.month - 1]} ${opts.year}` : `Year ${opts.year}`);
+    doc.text(`Period: ${periodText}`, 150, 32, { align: 'center' });
+    doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}`, 150, 38, { align: 'center' });
+    doc.line(10, 45, 200, 45);
+
+    // Summary Section
+    const totalNet = salaries.reduce((sum, s) => sum + s.netSalary, 0);
+    const totalBase = salaries.reduce((sum, s) => sum + s.baseSalary, 0);
+    const totalExp = salaries.reduce((sum, s) => sum + (s.travelExpense + s.stayExpense + s.foodExpense + s.otherExpense), 0);
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Payout Summary:', 12, 53);
+    
+    doc.setDrawColor(200);
+    doc.setFillColor(245, 245, 245);
+    doc.rect(12, 56, 186, 18, 'F');
+    doc.rect(12, 56, 186, 18, 'S');
+    
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Total base Salary:', 15, 62);
+    doc.text('Total Expenses:', 70, 62);
+    doc.text('NET PAYABLE:', 130, 62);
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(formatCurrencyPDF(totalBase), 15, 68);
+    doc.text(formatCurrencyPDF(totalExp), 70, 68);
+    doc.setTextColor(0, 120, 0);
+    doc.text(formatCurrencyPDF(totalNet), 130, 68);
+    doc.setTextColor(0);
+
+    // Table
+    autoTable(doc, {
+        startY: 80,
+        head: [['Month/Year', 'Agent Name', 'Base Sal', 'Trav/Stay', 'Food/Oth', 'Net Salary', 'Status']],
+        body: salaries.map(s => {
+            const agent = agents.find(a => a.id === s.agentId);
+            return [
+                `${monthNames[s.month - 1].slice(0, 3)} ${s.year}`,
+                agent?.name || 'Unknown',
+                formatCurrencyPDF(s.baseSalary),
+                formatCurrencyPDF(s.travelExpense + s.stayExpense),
+                formatCurrencyPDF(s.foodExpense + s.otherExpense),
+                formatCurrencyPDF(s.netSalary),
+                s.paymentStatus
+            ];
+        }),
+        theme: 'grid',
+        headStyles: { fillColor: [50, 50, 50], textColor: [255, 255, 255], fontSize: 8 },
+        styles: { fontSize: 8 },
+        columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+        margin: { left: 12, right: 12 }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 15;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(150);
+    doc.text('This is an automatically generated salary report from Sri Vari ERP.', 105, 280, { align: 'center' });
+
+    doc.save(`Salary_Report_${periodText.replace(/\s+/g, '_')}.pdf`);
 };
