@@ -14,7 +14,7 @@ import { invalidateLocalCache as invalidateProductsLocalCache } from './googleSh
 
 const SPREADSHEET_ID = process.env.NEXT_PUBLIC_GOOGLE_SHEET_ID || '1ksFhdJK6-sQxVBIkqqJdRKPhm--_SfzpJeuC2GHR2y0';
 const SHEET_NAME = process.env.NEXT_PUBLIC_GOOGLE_SHEET_TAB_NAME || 'CurrentProducts';
-const HEADER_ROW = ['Product ID','Product Name','HSN Code','Unit','Cost Price','Selling Price','GST%','Stock','Category'];
+const HEADER_ROW = ['Product ID','Product Name','HSN Code','Unit','Cost Price','Selling Price','GST%','Stock','Category','Avg Cost','Inventory Value'];
 
 // ──────────── In-memory product cache ────────────
 let productsCache: { products: Product[]; timestamp: number } | null = null;
@@ -41,7 +41,94 @@ function productToRow(product: Product | any): string[] {
         String(gst),
         String(product.stock || 0),
         product.category || 'General',
+        String(product.avgCost || product.costPrice || 0),       // Col J — Avg Cost
+        String(product.inventoryValue || 0),                      // Col K — Inventory Value
     ];
+}
+
+// Tab names for transaction logs
+const PURCHASES_LOG_TAB = 'Purchases';
+const SALES_LOG_TAB = 'Sales';
+const PURCHASES_HEADER = ['Timestamp', 'PurchaseId', 'Supplier', 'ProductId', 'ProductName', 'Qty', 'UnitCost', 'TotalCost', 'StockBefore', 'StockAfter', 'AvgCostAfter', 'InventoryValueAfter'];
+const SALES_HEADER = ['Timestamp', 'InvoiceId', 'Dealer', 'ProductId', 'ProductName', 'Qty', 'UnitPrice', 'AvgCostAtSale', 'COGS', 'StockBefore', 'StockAfter', 'InventoryValueAfter'];
+
+/** Ensure the Purchases log tab exists with its header row (safe to call multiple times). */
+export function ensurePurchasesTabExists(): void {
+    ensureTabExistsWithName(PURCHASES_LOG_TAB, PURCHASES_HEADER);
+}
+
+/** Ensure the Sales log tab exists with its header row (safe to call multiple times). */
+export function ensureSalesTabExists(): void {
+    ensureTabExistsWithName(SALES_LOG_TAB, SALES_HEADER);
+}
+
+/** Log a single purchase line-item to the Purchases tab. */
+export function logPurchaseItemToSheet(params: {
+    purchaseId: string;
+    supplierName: string;
+    productId: string;
+    productName: string;
+    qty: number;
+    unitCost: number;
+    stockBefore: number;
+    stockAfter: number;
+    avgCostAfter: number;
+    inventoryValueAfter: number;
+}): void {
+    const row = [
+        new Date().toISOString(),
+        params.purchaseId,
+        params.supplierName,
+        params.productId,
+        params.productName,
+        String(params.qty),
+        String(params.unitCost),
+        String(params.qty * params.unitCost),
+        String(params.stockBefore),
+        String(params.stockAfter),
+        String(params.avgCostAfter),
+        String(params.inventoryValueAfter),
+    ];
+    enqueueOp(
+        `/values/${PURCHASES_LOG_TAB}!A:L:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        'POST',
+        { values: [row] }
+    );
+}
+
+/** Log a single sale line-item to the Sales tab. */
+export function logSaleItemToSheet(params: {
+    invoiceId: string;
+    dealerName: string;
+    productId: string;
+    productName: string;
+    qty: number;
+    unitPrice: number;
+    avgCostAtSale: number;
+    cogs: number;
+    stockBefore: number;
+    stockAfter: number;
+    inventoryValueAfter: number;
+}): void {
+    const row = [
+        new Date().toISOString(),
+        params.invoiceId,
+        params.dealerName,
+        params.productId,
+        params.productName,
+        String(params.qty),
+        String(params.unitPrice),
+        String(params.avgCostAtSale),
+        String(params.cogs),
+        String(params.stockBefore),
+        String(params.stockAfter),
+        String(params.inventoryValueAfter),
+    ];
+    enqueueOp(
+        `/values/${SALES_LOG_TAB}!A:L:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        'POST',
+        { values: [row] }
+    );
 }
 
 // ──────────── READ — served from cache, real API only when needed ────────────
@@ -70,7 +157,7 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
 
     // 3. Hit the real API (rate-limited via cachedRead)
     try {
-        const data = await cachedRead(`/values/${SHEET_NAME}!A:I`);
+        const data = await cachedRead(`/values/${SHEET_NAME}!A:K`);
         const rows: string[][] = data.values || [];
         if (rows.length === 0) return { products: [], format: 'empty' };
 
@@ -98,9 +185,11 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
             gst:       headers.findIndex(h => h.includes('gst')),
             stock:     headers.findIndex(h => h.includes('stock')),
             category:  headers.findIndex(h => h === 'category' || (h.includes('category') && !h.includes('unit'))),
+            avgCost:   headers.findIndex(h => h.includes('avg cost') || h === 'avgcost'),
+            inventoryValue: headers.findIndex(h => h.includes('inventory value') || h === 'inventoryvalue'),
         } : {
-            // FALLBACK MAPPING (based on detected user layout: A=ID, B=Name, C=HSN, D=Unit, E=Cost, F=Price, G=GST, H=Stock, I=Category)
-            productId: 0, name: 1, hsn: 2, unit: 3, cost: 4, price: 5, gst: 6, stock: 7, category: 8
+            // FALLBACK MAPPING (based on detected user layout: A=ID, B=Name, C=HSN, D=Unit, E=Cost, F=Price, G=GST, H=Stock, I=Category, J=Avg Cost, K=Inventory Value)
+            productId: 0, name: 1, hsn: 2, unit: 3, cost: 4, price: 5, gst: 6, stock: 7, category: 8, avgCost: 9, inventoryValue: 10
         };
 
         const parseNum = (v: any) => {
@@ -113,7 +202,8 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
         let num = 1;
 
         // 5. Build products array
-        const startRow = headerIndex >= 0 ? headerIndex + 1 : 0;
+        // Explicitly start from the 4th row (index 3) as requested
+        const startRow = 3;
         for (let i = startRow; i < rows.length; i++) {
             const row = rows[i] || [];
             const name = col.name >= 0 ? (row[col.name] || '').trim() : '';
@@ -141,6 +231,8 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
                 hsnCode:   col.hsn      >= 0 ? (row[col.hsn]      || '').trim()              : '',
                 costPrice: col.cost     >= 0 ? parseNum(row[col.cost])                       : 0,
                 price:     col.price    >= 0 ? parseNum(row[col.price])                      : 0,
+                avgCost:   (col as any).avgCost >= 0 ? parseNum(row[(col as any).avgCost])   : undefined,
+                inventoryValue: (col as any).inventoryValue >= 0 ? parseNum(row[(col as any).inventoryValue]) : undefined,
                 gstRate,
                 stock:     col.stock    >= 0 ? parseFloat(String(row[col.stock]).replace(/[^0-9.-]/g,'')) || 0 : 0,
                 rowIndex: i + 1,
@@ -197,7 +289,7 @@ export async function updateProductInSheet(rowIndex: number, product: Product | 
     try {
         if (rowIndex > 0) {
             enqueueOp(
-                `/values/${SHEET_NAME}!A${rowIndex}:I${rowIndex}?valueInputOption=USER_ENTERED`,
+                `/values/${SHEET_NAME}!A${rowIndex}:K${rowIndex}?valueInputOption=USER_ENTERED`,
                 'PUT',
                 { values: [productToRow(product)] }
             );
@@ -223,7 +315,7 @@ export async function deleteProductFromSheet(rowIndex: number, productName?: str
     try {
         if (rowIndex > 0) {
             // Clear the row contents (safe, no row-shift)
-            const empty = Array(9).fill('');
+            const empty = Array(11).fill('');
             enqueueOp(
                 `/values/${SHEET_NAME}!A${rowIndex}:Z${rowIndex}?valueInputOption=USER_ENTERED`,
                 'PUT',
@@ -346,6 +438,40 @@ export async function logToApplicationSheet(action: string, details: string, amo
         return appendRowsToSheet('Application Log', [row], true);
     } catch (err: any) {
         console.error('[SheetsWriter] logToApplicationSheet failed:', err.message);
+        return false;
+    }
+}
+
+// ──────────── Stock-only update (by productId/name, no rowIndex needed) ────────────
+/**
+ * Update only the Stock column (H) for a product, found by productId (col A) or name (col B).
+ * Use this as a fallback when rowIndex is 0 / unavailable.
+ */
+export async function updateProductStockByProductId(
+    productId: string,
+    productName: string,
+    newStock: number
+): Promise<boolean> {
+    try {
+        // 1. Search by productId in column A
+        let row = await findRowByValue(SHEET_NAME, 0, productId);
+        // 2. Fallback: search by name in column B
+        if (row < 0 && productName) {
+            row = await findRowByValue(SHEET_NAME, 1, productName);
+        }
+        if (row > 0) {
+            enqueueOp(
+                `/values/${SHEET_NAME}!H${row}?valueInputOption=USER_ENTERED`,
+                'PUT',
+                { values: [[String(newStock)]] }
+            );
+            console.log('[SheetsWriter] Stock-only update queued for', productId, '→ row', row, '=', newStock);
+            return true;
+        }
+        console.warn('[SheetsWriter] updateProductStockByProductId: product not found in sheet:', productId, productName);
+        return false;
+    } catch (err: any) {
+        console.error('[SheetsWriter] updateProductStockByProductId failed:', err.message);
         return false;
     }
 }

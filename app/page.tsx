@@ -404,7 +404,7 @@ export default function Home() {
             { name: '0-30 Days', value: counts.day0to30, color: '#10b981' },
             { name: '31-60 Days', value: counts.day31to60, color: '#f59e0b' },
             { name: '61-90+ Days', value: counts.day61to90, color: '#ef4444' },
-        ].filter(d => d.value > 0);
+        ];
     }, [dealers, transactions]);
 
     // ========================================================================

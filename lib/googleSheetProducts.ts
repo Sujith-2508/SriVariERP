@@ -230,14 +230,16 @@ const parseStructuredFormat = (rows: string[][], headerIndex: number): Product[]
         productName: headers.findIndex(h => h.includes('product name') || h === 'name'),
         hsnCode: headers.findIndex(h => h.includes('hsn')),
         unit: headers.findIndex(h => h === 'unit' || (h.includes('unit') && !h.includes('cost'))),
-        costPrice: headers.findIndex(h => h.includes('cost')),
+        costPrice: headers.findIndex(h => h.includes('cost price') || (h.includes('cost') && !h.includes('avg'))),
         sellingPrice: headers.findIndex(h => (h.includes('selling') || h.includes('sell')) || (h.includes('price') && !h.includes('cost'))),
         gstRate: headers.findIndex(h => h.includes('gst')),
         stock: headers.findIndex(h => h.includes('stock')),
         category: headers.findIndex(h => h === 'category' || (h.includes('category') && !h.includes('unit'))),
+        avgCost: headers.findIndex(h => h.includes('avg cost') || h === 'avgcost'),
+        inventoryValue: headers.findIndex(h => h.includes('inventory value') || h === 'inventoryvalue'),
     } : {
-        // FALLBACK MAPPING (matches googleSheetWriter.ts fallback)
-        productId: 0, productName: 1, hsnCode: 2, unit: 3, costPrice: 4, sellingPrice: 5, gstRate: 6, stock: 7, category: 8
+        // FALLBACK MAPPING (matches googleSheetWriter.ts layout)
+        productId: 0, productName: 1, hsnCode: 2, unit: 3, costPrice: 4, sellingPrice: 5, gstRate: 6, stock: 7, category: 8, avgCost: 9, inventoryValue: 10
     };
 
     console.log('[GoogleSheet] Column mapping:', colMap);
@@ -249,7 +251,8 @@ const parseStructuredFormat = (rows: string[][], headerIndex: number): Product[]
     };
 
     const products: Product[] = [];
-    const startRow = hasHeader ? headerIndex + 1 : 0;
+    // Explicitly start from the 4th row (index 3) as requested
+    const startRow = 3;
     for (let i = startRow; i < rows.length; i++) {
         const row = rows[i] || [];
         const productName = colMap.productName >= 0 ? row[colMap.productName]?.trim() : '';
@@ -274,6 +277,8 @@ const parseStructuredFormat = (rows: string[][], headerIndex: number): Product[]
             category: colMap.category >= 0 ? row[colMap.category]?.trim() || 'General' : 'General',
             price: colMap.sellingPrice >= 0 ? parseNum(row[colMap.sellingPrice]) : 0,
             costPrice: colMap.costPrice >= 0 ? parseNum(row[colMap.costPrice]) : 0,
+            avgCost: (colMap as any).avgCost >= 0 ? parseNum(row[(colMap as any).avgCost]) : undefined,
+            inventoryValue: (colMap as any).inventoryValue >= 0 ? parseNum(row[(colMap as any).inventoryValue]) : undefined,
             stock: colMap.stock >= 0 ? parseFloat(String(row[colMap.stock]).replace(/[^0-9.-]/g,'')) || 0 : 0,
             gstRate: (() => {
                 const rawGst = colMap.gstRate >= 0 ? parseNum(row[colMap.gstRate]) : 0;

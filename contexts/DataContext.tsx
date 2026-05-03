@@ -5,7 +5,7 @@ import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, Paym
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
-import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
+import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet, updateProductStockByProductId, logSaleItemToSheet, ensureSalesTabExists } from '@/lib/googleSheetWriter';
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
 import { useToast } from './ToastContext';
 
@@ -435,9 +435,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fetchData();
         loadTrackingData();
 
-        // Listen for local storage product updates from purchase service
+        // Listen for local storage product updates from purchase service.
+        // IMPORTANT: Do NOT call fetchData() here — that re-fetches from Google Sheets
+        // which is still serving the OLD cached data (the queue write hasn't flushed yet).
+        // Instead, read directly from localStorage which has the fresh stock values.
         const handleStorageUpdate = () => {
-            fetchData();
+            const freshProducts = getLocalProducts();
+            if (freshProducts.length > 0) {
+                console.log('[DataContext] storage_products_updated: refreshing UI from localStorage —', freshProducts.length, 'products');
+                setProducts(freshProducts);
+            }
         };
         window.addEventListener('storage_products_updated', handleStorageUpdate);
 
@@ -531,13 +538,52 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, []); // Removed fetchData/loadTrackingData from deps to prevent infinite loops if they change
 
-    const updateStock = async (productId: string, quantity: number) => {
+    const updateStock = async (productId: string, quantity: number, saleMetadata?: { invoiceId: string; dealerName: string; unitPrice: number; productName: string }) => {
+        // Prefer rowIndex from React products state (loaded from Sheets API, always has rowIndex).
+        // localStorage cache may be missing rowIndex if it was written from a CSV/local path.
+        const productFromState = products.find(p => p.id === productId || p.productId === productId);
+        const rowIndexFromState = (productFromState as any)?.rowIndex as number | undefined;
+
+        // Use localStorage for sequential multi-item stock deductions (each call updates it in place)
         const currentProducts = getLocalProducts();
         let updatedProduct: (Product & { rowIndex?: number }) | null = null;
         const updatedProducts = currentProducts.map(p => {
             if (p.id === productId || p.productId === productId) {
+                const stockBefore = p.stock;
                 const newStock = p.stock - quantity;
-                updatedProduct = { ...p, stock: newStock };
+                // Merge rowIndex from React state so the sheet update targets the correct row
+                const currentAvgCost = p.avgCost || p.costPrice || 0;
+                const currentInventoryValue = p.inventoryValue || (currentAvgCost * stockBefore);
+
+                // Stock OUT: deduct qty × avgCost from inventoryValue. avgCost stays the same.
+                const newInventoryValue = Math.max(0, currentInventoryValue - (quantity * currentAvgCost));
+
+                updatedProduct = {
+                    ...p,
+                    rowIndex: rowIndexFromState || (p as any).rowIndex,
+                    stock: newStock,
+                    inventoryValue: newInventoryValue,
+                    // avgCost is intentionally NOT changed on sales
+                };
+
+                // Log to Sales sheet if sale metadata provided
+                if (saleMetadata && quantity > 0) {
+                    ensureSalesTabExists();
+                    logSaleItemToSheet({
+                        invoiceId: saleMetadata.invoiceId,
+                        dealerName: saleMetadata.dealerName,
+                        productId: p.productId,
+                        productName: saleMetadata.productName || p.name,
+                        qty: quantity,
+                        unitPrice: saleMetadata.unitPrice,
+                        avgCostAtSale: currentAvgCost,
+                        cogs: quantity * currentAvgCost,
+                        stockBefore,
+                        stockAfter: newStock,
+                        inventoryValueAfter: newInventoryValue,
+                    });
+                }
+
                 return updatedProduct;
             }
             return p;
@@ -548,9 +594,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Sync updated stock to Google Sheet in background
         if (updatedProduct) {
             const prod = updatedProduct as Product & { rowIndex?: number };
-            updateProductInSheet(prod.rowIndex || 0, prod).catch(e =>
-                console.warn('[DataContext] Stock sync to Google Sheet failed (non-critical):', e)
-            );
+            const effectiveRowIndex = (prod as any).rowIndex as number || 0;
+            if (effectiveRowIndex > 0) {
+                // Direct row update — fast and precise
+                updateProductInSheet(effectiveRowIndex, prod).catch(e =>
+                    console.warn('[DataContext] Stock sync to Google Sheet failed (non-critical):', e)
+                );
+            } else {
+                // rowIndex not available (e.g. product loaded from CSV/local cache):
+                // Search by productId in column A, then by name in column B
+                console.warn('[DataContext] No rowIndex for stock sync — falling back to search-by-ID:', prod.productId);
+                updateProductStockByProductId(prod.productId, prod.name, prod.stock).catch(e =>
+                    console.warn('[DataContext] Stock sync fallback failed (non-critical):', e)
+                );
+            }
         }
     };
 
@@ -566,15 +623,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProductCount(prev => prev + 1);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet, then re-read to get authoritative data (with rowIndex)
+        // Queue the sheet write, then defer the re-read so the queue has time to flush.
+        // Reads immediately after enqueue would return stale data (write gap = 2 s),
+        // overwriting the optimistic UI state with the old product list.
         try {
             await addProductToSheet(newProduct);
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                setProductCount(sheetProducts.length + 1);
-                saveLocalProducts(sheetProducts);
-            }
+            setTimeout(async () => {
+                try {
+                    const { products: sheetProducts } = await readProductsFromSheet(true); // force-refresh cache
+                    if (sheetProducts.length > 0) {
+                        setProducts(sheetProducts);
+                        setProductCount(sheetProducts.length + 1);
+                        saveLocalProducts(sheetProducts);
+                    }
+                } catch (e) {
+                    console.warn('[DataContext] Deferred sheet re-read after add failed:', e);
+                }
+            }, 5000); // 5 s — enough for the 2 s write gap + network round-trip
         } catch (e) {
             console.warn('[DataContext] Could not sync product add to Google Sheet:', e);
         }
@@ -591,18 +656,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet (strict row identification), then re-read
+        // Sync to Google Sheet, then defer re-read so the write has time to flush
         try {
             const rowIndex = (updatedProduct as any).rowIndex || 0;
             if (rowIndex <= 0) {
                 console.warn('[DataContext] Warning: Product update called without a valid rowIndex. Falling back to append to avoid overwriting headers.', updatedProduct.name);
             }
             await updateProductInSheet(rowIndex, updatedProduct);
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                saveLocalProducts(sheetProducts);
-            }
+            setTimeout(async () => {
+                try {
+                    const { products: sheetProducts } = await readProductsFromSheet(true);
+                    if (sheetProducts.length > 0) {
+                        setProducts(sheetProducts);
+                        saveLocalProducts(sheetProducts);
+                    }
+                } catch (e) {
+                    console.warn('[DataContext] Deferred sheet re-read after update failed:', e);
+                }
+            }, 5000);
         } catch (e) {
             console.warn('[DataContext] Could not sync product update to Google Sheet:', e);
         }
@@ -618,18 +689,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync deletion to Google Sheet (physically removes the row), then re-read
+        // Sync deletion to Google Sheet, then defer re-read so the write has time to flush
         try {
             const rowIndex = (product as any)?.rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
             if (rowIndex > 0 || product?.name) {
                 await deleteProductFromSheet(rowIndex, product?.name);
             }
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                setProductCount(sheetProducts.length + 1);
-                saveLocalProducts(sheetProducts);
-            }
+            setTimeout(async () => {
+                try {
+                    const { products: sheetProducts } = await readProductsFromSheet(true);
+                    if (sheetProducts.length > 0) {
+                        setProducts(sheetProducts);
+                        setProductCount(sheetProducts.length + 1);
+                        saveLocalProducts(sheetProducts);
+                    }
+                } catch (e) {
+                    console.warn('[DataContext] Deferred sheet re-read after delete failed:', e);
+                }
+            }, 5000);
         } catch (e) {
             console.warn('[DataContext] Could not sync product delete to Google Sheet:', e);
         }
@@ -1133,10 +1210,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ));
         }
 
-        // Update stock for each item
+        // Update stock for each item (Stock OUT — logs to Sales sheet)
         for (const item of items) {
             try {
-                await updateStock(item.productId, item.quantity);
+                await updateStock(item.productId, item.quantity, {
+                    invoiceId: txnData.id,
+                    dealerName: dealer?.businessName || 'Unknown',
+                    unitPrice: item.unitPrice,
+                    productName: item.productName,
+                });
             } catch (err) {
                 console.error(`[DataContext] Failed to update stock for ${item.productName}:`, err);
             }

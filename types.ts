@@ -25,7 +25,9 @@ export interface Product {
   name: string;
   category: string;
   price: number;
-  costPrice?: number;          // Cost price for COGS calculation
+  costPrice?: number;          // Last purchase price (updated on each purchase)
+  avgCost?: number;            // Weighted average cost — used for COGS on sales
+  inventoryValue?: number;     // Total inventory value = avgCost × stock (maintained as a running total)
   stock: number;
   gstRate: number;
   hsnCode?: string;

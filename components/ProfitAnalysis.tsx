@@ -37,6 +37,7 @@ export function ProfitAnalysis() {
     });
     const [selectedDealerInvoices, setSelectedDealerInvoices] = useState<{ name: string; invoices: any[] } | null>(null);
     const [isOpeningBill, setIsOpeningBill] = useState<string | null>(null);
+    const [dealerSearchTerm, setDealerSearchTerm] = useState('');
 
     const handleOpenInvoiceBill = async (inv: any) => {
         // If link exists, just open it
@@ -485,11 +486,21 @@ export function ProfitAnalysis() {
 
             {/* Dealer-wise Breakdown Table */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-8">
-                <div className="p-6 border-b border-slate-200">
+                <div className="p-6 border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
                         <Users size={18} className="text-emerald-500" />
                         Dealer-wise Profitability Breakdown
                     </h3>
+                    <div className="relative w-full md:w-64">
+                        <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                        <input
+                            type="text"
+                            placeholder="Search dealer..."
+                            className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                            value={dealerSearchTerm}
+                            onChange={(e) => setDealerSearchTerm(e.target.value)}
+                        />
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -532,7 +543,9 @@ export function ProfitAnalysis() {
                                     return acc;
                                 }, {});
 
-                                const sortedDealers = Object.values(dealerStats).sort((a: any, b: any) => b.revenue - a.revenue);
+                                const sortedDealers = Object.values(dealerStats)
+                                    .filter((d: any) => d.name.toLowerCase().includes(dealerSearchTerm.toLowerCase()))
+                                    .sort((a: any, b: any) => b.revenue - a.revenue);
 
                                 if (sortedDealers.length === 0) {
                                     return (

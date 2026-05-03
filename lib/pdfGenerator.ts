@@ -810,3 +810,181 @@ export const generateSalaryReportPDF = (
 
     doc.save(`Salary_Report_${periodText.replace(/\s+/g, '_')}.pdf`);
 };
+
+/**
+ * Generates a Supplier Statement PDF and returns it as a Base64 string.
+ * Used by the Purchases page for bulk/individual supplier statement export.
+ */
+export const generateSupplierStatementPDFBase64 = async (
+    supplier: { name: string; address?: string; city?: string; phone?: string; gstNumber?: string; balance?: number; openingBalance?: number },
+    statement: any[],
+    company: CompanySettings
+): Promise<string> => {
+    const { default: jsPDF } = await import('jspdf');
+    const { default: autoTable } = await import('jspdf-autotable');
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const fmt = (n: number) => `Rs. ${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+    // Border
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 277);
+
+    // Company header
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text(company.companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text((company.addressLine1 || '').toUpperCase(), 12, 24);
+    doc.text((company.city || '').toUpperCase(), 12, 28);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`GST: ${(company.gstNumber || 'N/A').toUpperCase()}`, 12, 32);
+
+    doc.line(100, 10, 100, 45);
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+    doc.text('SUPPLIER STATEMENT', 150, 22, { align: 'center' });
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}`, 150, 30, { align: 'center' });
+    doc.line(10, 45, 200, 45);
+
+    // Supplier info
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.text('Supplier:', 12, 52);
+    doc.setFontSize(11); doc.text(supplier.name, 12, 58);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    if (supplier.address) doc.text(supplier.address, 12, 63, { maxWidth: 85 });
+    if (supplier.city) doc.text(supplier.city, 12, 67);
+    if (supplier.phone) doc.text(`Ph: ${supplier.phone}`, 12, 71);
+    if (supplier.gstNumber) doc.text(`GST: ${supplier.gstNumber}`, 12, 75);
+
+    // Balance summary box
+    doc.setDrawColor(200); doc.setFillColor(245, 245, 245);
+    doc.rect(110, 50, 85, 32, 'F'); doc.rect(110, 50, 85, 32, 'S');
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.text('Account Summary:', 115, 56);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Opening Balance:', 115, 63); doc.text(fmt(supplier.openingBalance || 0), 192, 63, { align: 'right' });
+    const closing = statement.length > 0 ? statement[statement.length - 1].balance : (supplier.openingBalance || 0);
+    doc.line(115, 74, 190, 74);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(220, 38, 38);
+    doc.text('Closing Balance:', 115, 79); doc.text(fmt(closing), 192, 79, { align: 'right' });
+    doc.setTextColor(0);
+    doc.line(10, 88, 200, 88);
+
+    // Statement table
+    autoTable(doc, {
+        startY: 91,
+        head: [['Date', 'Type', 'Reference', 'Particulars', 'Debit', 'Credit', 'Balance']],
+        body: statement.map((entry: any) => [
+            new Date(entry.date).toLocaleDateString('en-GB'),
+            entry.type || entry.rowKind || '',
+            entry.reference || '-',
+            entry.notes || '-',
+            entry.debit ? fmt(entry.debit) : '-',
+            entry.credit ? fmt(entry.credit) : '-',
+            fmt(entry.balance || 0)
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.1, fontSize: 7 },
+        styles: { fontSize: 7, cellPadding: 1.5, lineColor: [0, 0, 0], lineWidth: 0.1 },
+        columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
+        margin: { left: 10, right: 10 }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(7); doc.setFont('helvetica', 'italic');
+    doc.text('This is a system-generated supplier statement. Contact us for any discrepancies.', 105, Math.min(finalY, 282), { align: 'center' });
+
+    return doc.output('datauristring').split(',')[1];
+};
+
+/**
+ * Generates a whole-company consolidated statement PDF (all dealers + suppliers)
+ * and returns it as a Base64 string. Used by the Dashboard "Export Statement" button.
+ */
+export const generateWholeCompanyStatementPDFBase64 = async (
+    company: CompanySettings | null,
+    allTransactions: Array<{ date: Date; businessName: string; type: string; credit: number; debit: number }>,
+    rangeLabel: string,
+    summary: { totalPayables: number; totalReceivables: number }
+): Promise<string> => {
+    const { default: jsPDF } = await import('jspdf');
+    const { default: autoTable } = await import('jspdf-autotable');
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const fmt = (n: number) => `Rs. ${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    const companyName = company?.companyName || 'Company';
+
+    // Border
+    doc.setDrawColor(0); doc.setLineWidth(0.5); doc.rect(10, 10, 190, 277);
+
+    // Header
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text(companyName.toUpperCase(), 12, 18);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text((company?.addressLine1 || '').toUpperCase(), 12, 24);
+    doc.text((company?.city || '').toUpperCase(), 12, 28);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`GST: ${(company?.gstNumber || 'N/A').toUpperCase()}`, 12, 32);
+
+    doc.line(100, 10, 100, 45);
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text('CONSOLIDATED STATEMENT', 150, 20, { align: 'center' });
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text(`Period: ${rangeLabel}`, 150, 27, { align: 'center' });
+    doc.text(`Exported: ${new Date().toLocaleDateString('en-GB')}`, 150, 32, { align: 'center' });
+    doc.line(10, 45, 200, 45);
+
+    // Summary boxes
+    doc.setFillColor(245, 255, 245); doc.setDrawColor(200);
+    doc.rect(12, 49, 85, 18, 'F'); doc.rect(12, 49, 85, 18, 'S');
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 120, 0);
+    doc.text('Total Receivables (Dealers)', 15, 55);
+    doc.setFontSize(10); doc.text(fmt(summary.totalReceivables), 94, 61, { align: 'right' });
+
+    doc.setFillColor(255, 245, 245);
+    doc.rect(105, 49, 88, 18, 'F'); doc.rect(105, 49, 88, 18, 'S');
+    doc.setTextColor(220, 38, 38);
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+    doc.text('Total Payables (Suppliers)', 108, 55);
+    doc.setFontSize(10); doc.text(fmt(summary.totalPayables), 190, 61, { align: 'right' });
+    doc.setTextColor(0);
+
+    doc.line(10, 72, 200, 72);
+
+    // Transactions table
+    const totalCredit = allTransactions.reduce((s, t) => s + t.credit, 0);
+    const totalDebit = allTransactions.reduce((s, t) => s + t.debit, 0);
+
+    autoTable(doc, {
+        startY: 75,
+        head: [['Date', 'Party Name', 'Type', 'Credit (Sales)', 'Debit (Purchase/Pay)']],
+        body: [
+            ...allTransactions.map(t => [
+                t.date.toLocaleDateString('en-GB'),
+                t.businessName,
+                t.type,
+                t.credit > 0 ? fmt(t.credit) : '-',
+                t.debit > 0 ? fmt(t.debit) : '-'
+            ]),
+            // Totals row
+            ['', 'TOTAL', '', fmt(totalCredit), fmt(totalDebit)]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [50, 50, 50], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold' },
+        styles: { fontSize: 7, cellPadding: 1.5, lineColor: [0, 0, 0], lineWidth: 0.1 },
+        columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' } },
+        bodyStyles: { textColor: [30, 30, 30] },
+        didParseCell: (data) => {
+            // Bold the totals row
+            if (data.row.index === allTransactions.length) {
+                data.cell.styles.fontStyle = 'bold';
+                data.cell.styles.fillColor = [240, 240, 240];
+            }
+        },
+        margin: { left: 10, right: 10 }
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(7); doc.setFont('helvetica', 'italic'); doc.setTextColor(120);
+    doc.text('This is a system-generated consolidated statement of Sri Vari Enterprises. Confidential.', 105, Math.min(finalY, 282), { align: 'center' });
+
+    return doc.output('datauristring').split(',')[1];
+};
+
