@@ -501,6 +501,14 @@ export default function PurchasesPage() {
                 notes: billForm.notes
             });
         }
+
+        // Show specific notifications as requested
+        if (finalItems.length > 0) {
+            showToast('Purchase added successfully. Purchase bill and stock counts have been updated in Stocks & Products.', 'success');
+        } else {
+            showToast('Purchase added without any product details. Please add at least one product.', 'warning');
+        }
+
         setIsBillModalOpen(false);
         resetBillForm();
         loadData();

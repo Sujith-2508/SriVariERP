@@ -111,7 +111,12 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         },
         title: 'Sri Vari Enterprises - Billing ERP',
-        icon: path.join(__dirname, 'public', process.platform === 'win32' ? 'icon.ico' : 'icon.png')
+        icon: (() => {
+            const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+            const devPath = path.join(__dirname, 'public', iconName);
+            const prodPath = path.join(__dirname, iconName); // in asar root often
+            return fs.existsSync(devPath) ? devPath : (fs.existsSync(prodPath) ? prodPath : undefined);
+        })()
     })
 
     logToFile('[Main] Initializing BrowserWindow...');
@@ -566,7 +571,7 @@ ipcMain.handle('printer:get-printers', async () => {
 });
 
 // Print the current invoice page to a selected printer (silent, no dialog)
-ipcMain.handle('printer:print', async (event, { printerName, silent }) => {
+ipcMain.handle('printer:print', async (event, { printerName, silent, numCopies }) => {
     try {
         if (!mainWindow) throw new Error('No main window');
         return await new Promise((resolve, reject) => {
@@ -577,7 +582,8 @@ ipcMain.handle('printer:print', async (event, { printerName, silent }) => {
                     deviceName: printerName || '', // '' = system default printer
                     pageSize: 'A4',
                     margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
-                    scaleFactor: 100
+                    scaleFactor: 100,
+                    copies: numCopies || 1
                 },
                 (success, failureReason) => {
                     if (success) resolve({ success: true });
@@ -587,6 +593,18 @@ ipcMain.handle('printer:print', async (event, { printerName, silent }) => {
         });
     } catch (err) {
         console.error('Print failed:', err);
+        throw err;
+    }
+});
+
+// ─── Clipboard IPC Handlers ──────────────────────────────────────────────────
+ipcMain.handle('clipboard:write', (event, text) => {
+    try {
+        const { clipboard } = require('electron');
+        clipboard.writeText(text);
+        return { success: true };
+    } catch (err) {
+        console.error('Clipboard write failed:', err);
         throw err;
     }
 });
@@ -743,7 +761,10 @@ ipcMain.handle('google:get-service-token', async (event, { credentials }) => {
         const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
         const claims = Buffer.from(JSON.stringify({
             iss: credentials.client_email,
-            scope: 'https://www.googleapis.com/auth/spreadsheets',
+            scope: [
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive.file'
+            ].join(' '),
             aud: 'https://oauth2.googleapis.com/token',
             exp: now + 3600,
             iat: now,
@@ -796,6 +817,8 @@ ipcMain.handle('drive:connect', async (event, { clientId }) => {
     const http = require('http');
     const net = require('net');
 
+    logToFile('[Drive OAuth] Initiating connection for Client ID:', clientId);
+
     // Find a free port
     const port = await new Promise((resolve, reject) => {
         const srv = net.createServer();
@@ -807,6 +830,7 @@ ipcMain.handle('drive:connect', async (event, { clientId }) => {
     });
 
     const redirectUri = `http://localhost:${port}`;
+    logToFile('[Drive OAuth] Using loopback redirect:', redirectUri);
 
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     authUrl.searchParams.set('client_id', clientId);
@@ -819,6 +843,7 @@ ipcMain.handle('drive:connect', async (event, { clientId }) => {
     return new Promise((resolve, reject) => {
         // Start a one-shot local HTTP server to catch the redirect
         const server = http.createServer((req, res) => {
+            logToFile('[Drive OAuth] Received redirect request:', req.url);
             const url = new URL(req.url, `http://localhost:${port}`);
             const code = url.searchParams.get('code');
             const error = url.searchParams.get('error');
@@ -841,8 +866,13 @@ ipcMain.handle('drive:connect', async (event, { clientId }) => {
             server.close();
 
             if (authWindow && !authWindow.isDestroyed()) authWindow.close();
-            if (error) reject(new Error('OAuth error: ' + error));
-            else resolve({ code, redirectUri });
+            if (error) {
+                logToFile('[Drive OAuth] Redirect contained error:', error);
+                reject(new Error('OAuth error: ' + error));
+            } else {
+                logToFile('[Drive OAuth] Redirect successful, code received.');
+                resolve({ code, redirectUri });
+            }
         });
 
         server.listen(port, '127.0.0.1');
@@ -853,11 +883,20 @@ ipcMain.handle('drive:connect', async (event, { clientId }) => {
             height: 650,
             show: true,
             title: 'Connect Google Drive',
-            webPreferences: { nodeIntegration: false, contextIsolation: true }
+            // CRITICAL: Set a real browser User-Agent to avoid Google's Electron block
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            webPreferences: { 
+                nodeIntegration: false, 
+                contextIsolation: true,
+                partition: 'persist:google_oauth' 
+            }
         });
 
+        logToFile('[Drive OAuth] Opening auth window:', authUrl.toString());
         authWindow.loadURL(authUrl.toString());
+
         authWindow.on('closed', () => {
+            logToFile('[Drive OAuth] Auth window closed by user.');
             server.close();
             resolve(null); // User closed window without signing in
         });

@@ -28,6 +28,7 @@ export default function SettingsPage() {
     const [driveConnecting, setDriveConnecting] = useState(false);
     const [driveMessage, setDriveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [isElectron, setIsElectron] = useState(false);
+    const [driveFolderId, setDriveFolderId] = useState('');
 
     useEffect(() => {
         setIsElectron(!!(window as any).electron);
@@ -94,6 +95,7 @@ export default function SettingsPage() {
             // (Recovery info removal)
         }
 
+
         // Check if Drive is already connected via Electron IPC
         const electron = (window as any).electron;
         if (electron?.drive?.isConnected) {
@@ -137,6 +139,12 @@ export default function SettingsPage() {
             }
         };
         loadCompany();
+
+        // Load Service Account Folder ID from localStorage
+        const savedFolderId = localStorage.getItem('googleDriveFolderId');
+        if (savedFolderId) {
+            setDriveFolderId(savedFolderId);
+        }
     }, []);
 
     // Real-time password matching
@@ -208,24 +216,28 @@ export default function SettingsPage() {
     };
 
     const handleDisconnectDrive = async () => {
-        const electron = (window as any).electron;
-        if (!electron?.drive?.disconnect) {
-            localStorage.removeItem('drive_token');
-            setDriveStatus('not_connected');
-            setDriveMessage({ type: 'success', text: `Disconnected from Google Drive ${!isElectron ? '(Web Mode)' : ''}.` });
-            return;
-        }
-
         try {
-            const success = await electron.drive.disconnect();
-            if (success) {
+            const electron = (window as any).electron;
+            if (electron?.drive?.disconnect) {
+                await electron.drive.disconnect();
                 setDriveStatus('not_connected');
-                setDriveMessage({ type: 'success', text: 'Disconnected from Google Drive successfully.' });
+                setDriveMessage({ type: 'success', text: 'Google Drive disconnected successfully.' });
+            } else {
+                localStorage.removeItem('drive_token');
+                setDriveStatus('not_connected');
+                setDriveMessage({ type: 'success', text: `Disconnected from Google Drive ${!isElectron ? '(Web Mode)' : ''}.` });
             }
         } catch (err: any) {
             setDriveMessage({ type: 'error', text: 'Failed to disconnect Drive: ' + err.message });
         }
     };
+
+    const handleSaveFolderId = () => {
+        localStorage.setItem('googleDriveFolderId', driveFolderId.trim());
+        showToast('Drive Folder ID saved successfully. This will be used as a reliable fallback.', 'success');
+        setDriveMessage({ type: 'success', text: 'Backup Folder ID saved. Every bill generated will now be synced here if OAuth fails.' });
+    };
+
 
     const handleConnectDrive = async () => {
         const electron = (window as any).electron;
@@ -747,6 +759,7 @@ export default function SettingsPage() {
                         </p>
                     )}
                 </div>
+
 
 
                 {/* Admin Header */}

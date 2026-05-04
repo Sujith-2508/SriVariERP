@@ -6,6 +6,9 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Wait, I will use a simple inline check to avoid any issues with helper being undefined before use if the file structure is complex. Wait, a helper is fine.
+const isRealError = (err: any) => err && (err.message || Object.keys(err).length > 0);
+
 /**
  * Agent Tracking Service
  * Handles all agent tracking operations: status, attendance, and location tracking
@@ -29,7 +32,7 @@ export async function processAutoCheckouts(): Promise<void> {
         .eq('is_active', true)
         .lt('last_active_at', twentyHoursAgo.toISOString());
 
-    if (staleError || !staleAgents || staleAgents.length === 0) return;
+    if (isRealError(staleError) || !staleAgents || staleAgents.length === 0) return;
 
     for (const status of staleAgents) {
         console.log(`[Auto-Checkout] Processing stale session for agent: ${status.agent_id}`);
@@ -80,8 +83,8 @@ export async function getAgentStatus(agentId: string): Promise<AgentStatus | nul
         .eq('agent_id', agentId)
         .single();
 
-    if (error) {
-        console.error('Error fetching agent status:', error);
+    if (isRealError(error)) {
+        console.error('Error fetching agent status:', error?.message || error);
         return null;
     }
 
@@ -97,8 +100,8 @@ export async function getAllAgentStatuses(): Promise<AgentStatus[]> {
         .select('*')
         .order('last_active_at', { ascending: false });
 
-    if (error) {
-        console.error('Error fetching agent statuses:', error);
+    if (isRealError(error)) {
+        console.error('Error fetching agent statuses:', error?.message || error);
         return [];
     }
 
@@ -122,8 +125,8 @@ export async function getAllAgentTrackingData(): Promise<AgentTrackingData[]> {
         .select('*')
         .order('name');
 
-    if (agentsError) {
-        console.error('Error fetching agents:', agentsError);
+    if (isRealError(agentsError)) {
+        console.error('Error fetching agents:', agentsError?.message || agentsError);
         return [];
     }
 
@@ -171,8 +174,8 @@ export async function getLatestLocations(): Promise<AgentLocation[]> {
         .gte('recorded_at', twentyFourHoursAgo)
         .order('recorded_at', { ascending: false });
 
-    if (error) {
-        console.error('Error fetching latest locations:', error);
+    if (isRealError(error)) {
+        console.error('Error fetching latest locations:', error?.message || error);
         return [];
     }
 
@@ -208,8 +211,8 @@ export async function getAgentRoute(
         .lte('recorded_at', endOfDay.toISOString())
         .order('recorded_at', { ascending: true });
 
-    if (error) {
-        console.error('Error fetching agent route:', error);
+    if (isRealError(error)) {
+        console.error('Error fetching agent route:', error?.message || error);
         return [];
     }
 
@@ -239,8 +242,8 @@ export async function getAttendance(
         .lte('date', endDate.toISOString().split('T')[0])
         .order('date', { ascending: true });
 
-    if (error) {
-        console.error('Error fetching attendance:', error);
+    if (isRealError(error)) {
+        console.error('Error fetching attendance:', error?.message || error);
         return [];
     }
 

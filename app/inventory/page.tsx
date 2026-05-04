@@ -100,6 +100,16 @@ export default function Inventory() {
             });
     }, [products, searchTerm]);
 
+    // Live inventory value calculations — auto-update when stock changes
+    const { totalCOGS, totalInventoryValue, totalItems, missingCostCount } = useMemo(() => ({
+        totalCOGS: products.reduce((sum, p) => sum + ((p.costPrice || 0) * (p.stock || 0)), 0),
+        totalInventoryValue: products.reduce((sum, p) => sum + ((p.price || 0) * (p.stock || 0)), 0),
+        totalItems: products.length,
+        missingCostCount: products.filter(p => !p.costPrice || p.costPrice === 0).length,
+    }), [products]);
+
+    const formatCurrency = (v: number) => `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
     const handleOpenAdd = () => {
         setEditingProduct(null);
         setFormData({
@@ -252,6 +262,39 @@ export default function Inventory() {
                         <Plus size={16} />
                         Add Product
                     </button>
+                </div>
+            </div>
+
+            {/* Inventory Value Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
+                        <Package size={22} className="text-slate-600" />
+                    </div>
+                    <div>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Products</p>
+                        <p className="text-2xl font-bold text-slate-800">{totalItems}</p>
+                    </div>
+                </div>
+                <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                        <Tag size={22} className="text-amber-600" />
+                    </div>
+                    <div>
+                        <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Total COGS Value</p>
+                        <p className="text-2xl font-bold text-amber-700">{formatCurrency(totalCOGS)}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Cost Price × Stock (all products)</p>
+                    </div>
+                </div>
+                <div className="bg-white rounded-xl border border-emerald-200 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
+                        <Tag size={22} className="text-emerald-600" />
+                    </div>
+                    <div>
+                        <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Total Inventory Value</p>
+                        <p className="text-2xl font-bold text-emerald-700">{formatCurrency(totalInventoryValue)}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Sell Price × Stock (all products)</p>
+                    </div>
                 </div>
             </div>
 

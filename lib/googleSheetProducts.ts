@@ -15,7 +15,7 @@ const CACHE_TAB_KEY = 'sve_products_tab';          // tracks which tab the cache
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 // The active sheet tab name — must match googleSheetWriter.ts SHEET_NAME
-const ACTIVE_TAB = 'CurrentProducts';
+const ACTIVE_TAB = process.env.NEXT_PUBLIC_GOOGLE_SHEET_TAB_NAME || 'CurrentProducts';
 
 // If the cache was built from a different tab, wipe it
 function clearStaleTabCache(): void {
@@ -43,6 +43,13 @@ export const saveLocalProducts = (products: Product[]) => {
     localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(products));
     localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
     localStorage.setItem(CACHE_TAB_KEY, ACTIVE_TAB);
+};
+
+// Force cache invalidation (used after sheet writes)
+export const invalidateLocalCache = () => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(PRODUCTS_CACHE_KEY);
+    localStorage.removeItem(CACHE_TIMESTAMP_KEY);
 };
 
 // Check if cache is still fresh
@@ -211,50 +218,76 @@ const parseTallyFormat = (rows: string[][]): Product[] => {
     return products;
 };
 
-// Parse structured sheet (with proper column headers)
+// Parse structured sheet (with proper column headers or fallback)
 // Expected column order: A=Product ID, B=Product Name, C=HSN Code, D=Unit,
 //                        E=Cost Price, F=Selling Price, G=GST%, H=Stock, I=Category
 const parseStructuredFormat = (rows: string[][], headerIndex: number): Product[] => {
-    const headers = rows[headerIndex].map(h => h.toLowerCase().trim());
-    const colMap = {
+    const hasHeader = headerIndex >= 0;
+    const headers = hasHeader ? rows[headerIndex].map(h => h.toLowerCase().trim()) : [];
+    
+    const colMap = hasHeader ? {
         productId: headers.findIndex(h => h.includes('product id')),
         productName: headers.findIndex(h => h.includes('product name') || h === 'name'),
         hsnCode: headers.findIndex(h => h.includes('hsn')),
-        unit: headers.findIndex(h => h === 'unit'),
-        costPrice: headers.findIndex(h => h.includes('cost')),
-        sellingPrice: headers.findIndex(h => h.includes('selling')), // must NOT match 'cost price'
+        unit: headers.findIndex(h => h === 'unit' || (h.includes('unit') && !h.includes('cost'))),
+        costPrice: headers.findIndex(h => h.includes('cost price') || (h.includes('cost') && !h.includes('avg'))),
+        sellingPrice: headers.findIndex(h => (h.includes('selling') || h.includes('sell')) || (h.includes('price') && !h.includes('cost'))),
         gstRate: headers.findIndex(h => h.includes('gst')),
-        stock: headers.findIndex(h => h === 'stock'),
-        category: headers.findIndex(h => h.includes('category')),
+        stock: headers.findIndex(h => h.includes('stock')),
+        category: headers.findIndex(h => h === 'category' || (h.includes('category') && !h.includes('unit'))),
+        avgCost: headers.findIndex(h => h.includes('avg cost') || h === 'avgcost'),
+        inventoryValue: headers.findIndex(h => h.includes('inventory value') || h === 'inventoryvalue'),
+    } : {
+        // FALLBACK MAPPING (matches googleSheetWriter.ts layout)
+        productId: 0, productName: 1, hsnCode: 2, unit: 3, costPrice: 4, sellingPrice: 5, gstRate: 6, stock: 7, category: 8, avgCost: 9, inventoryValue: 10
     };
 
     console.log('[GoogleSheet] Column mapping:', colMap);
 
+    const parseNum = (v: any) => {
+        if (v === undefined || v === null) return 0;
+        const s = String(v).replace(/[^0-9.-]/g, '');
+        return parseFloat(s) || 0;
+    };
+
     const products: Product[] = [];
-    for (let i = headerIndex + 1; i < rows.length; i++) {
-        const row = rows[i];
+    // Explicitly start from the 4th row (index 3) as requested
+    const startRow = 3;
+    for (let i = startRow; i < rows.length; i++) {
+        const row = rows[i] || [];
         const productName = colMap.productName >= 0 ? row[colMap.productName]?.trim() : '';
         if (!productName) continue;
 
-        const productId = colMap.productId >= 0 ? row[colMap.productId]?.trim() : `P${String(i - headerIndex).padStart(3, '0')}`;
-        const fallbackId = `P${String(i - headerIndex).padStart(3, '0')}`;
+        // Skip non-data rows
+        const idValue = colMap.productId >= 0 ? row[colMap.productId]?.trim() : '';
+        const unitValue = colMap.unit >= 0 ? row[colMap.unit]?.trim().toLowerCase() : '';
+        const isDataRow = (unitValue && unitValue.length <= 4) || 
+                          (idValue && (idValue.startsWith('P') || /\d/.test(idValue))) ||
+                          (colMap.sellingPrice >= 0 && parseNum(row[colMap.sellingPrice]) > 0);
+        
+        if (!isDataRow) continue;
+
+        const productId = idValue || `P${String(i).padStart(3, '0')}`;
+        const fallbackId = `P${String(i).padStart(3, '0')}`;
 
         products.push({
             id: productId || fallbackId,
             productId: productId || fallbackId,
             name: productName,
             category: colMap.category >= 0 ? row[colMap.category]?.trim() || 'General' : 'General',
-            price: colMap.sellingPrice >= 0 ? parseFloat(row[colMap.sellingPrice]) || 0 : 0,
-            costPrice: colMap.costPrice >= 0 ? parseFloat(row[colMap.costPrice]) || 0 : 0,
-            stock: colMap.stock >= 0 ? parseInt(row[colMap.stock]) || 0 : 0,
+            price: colMap.sellingPrice >= 0 ? parseNum(row[colMap.sellingPrice]) : 0,
+            costPrice: colMap.costPrice >= 0 ? parseNum(row[colMap.costPrice]) : 0,
+            avgCost: (colMap as any).avgCost >= 0 ? parseNum(row[(colMap as any).avgCost]) : undefined,
+            inventoryValue: (colMap as any).inventoryValue >= 0 ? parseNum(row[(colMap as any).inventoryValue]) : undefined,
+            stock: colMap.stock >= 0 ? parseFloat(String(row[colMap.stock]).replace(/[^0-9.-]/g,'')) || 0 : 0,
             gstRate: (() => {
-                const rawGst = colMap.gstRate >= 0 ? parseFloat(row[colMap.gstRate]) || 0 : 0;
+                const rawGst = colMap.gstRate >= 0 ? parseNum(row[colMap.gstRate]) : 0;
                 // Normalize: if value > 1 (like 18), it's a percentage; divide by 100
                 return rawGst > 1 ? rawGst / 100 : rawGst;
             })(),
             hsnCode: colMap.hsnCode >= 0 ? row[colMap.hsnCode]?.trim() || '' : '',
             unit: colMap.unit >= 0 ? row[colMap.unit]?.trim() || 'nos' : 'nos',
-            rowIndex: i + 1, // 1-indexed sheet row — used for accurate updates/deletes
+            rowIndex: i + 1,
         } as Product & { rowIndex: number });
     }
 

@@ -50,7 +50,7 @@ function saveLocalData<T>(key: string, data: T[]) {
 // ============================================
 
 import { fetchRefinedSuppliers, fetchHistoricalVouchers, HistoricalVoucher, SyncData, appendToSupplierSheetTab, SheetRowData, deleteSheetRowByRef } from './googleSheetSuppliers';
-import { logToApplicationSheet } from './googleSheetWriter';
+import { logToApplicationSheet, updateProductInSheet, updateProductStockByProductId, logPurchaseItemToSheet, ensurePurchasesTabExists } from './googleSheetWriter';
 import { syncAllStatements, syncLocalToDrive } from './folderSyncService';
 
 export async function forceSyncPurchases(): Promise<boolean> {
@@ -703,20 +703,56 @@ export async function createPurchaseBill(bill: {
     }
 
 
-    // 3. Update Product Stock
+    // 3. Update Product Stock with Avg Cost & Inventory Value (Stock IN transaction)
     if (bill.items && Array.isArray(bill.items)) {
         const products = getLocalData<Product>(KEYS.PRODUCTS);
         let productsModified = false;
 
+        // Ensure the Purchases log tab exists in Google Sheets
+        ensurePurchasesTabExists();
+
         for (const item of bill.items) {
             const productId = item.productId || item.product_id;
-            if (productId && item.quantity > 0) {
-                const productIndex = products.findIndex(p => p.id === productId || p.productId === productId);
-                if (productIndex !== -1) {
-                    products[productIndex].stock = (products[productIndex].stock || 0) + item.quantity;
-                    products[productIndex].costPrice = item.unitPrice || item.unit_price;
-                    productsModified = true;
-                }
+            const qty = item.quantity || item.qty || 0;
+            const unitCost = item.unitPrice || item.unit_price || item.cost || 0;
+            if (!productId || qty <= 0) continue;
+
+            const productIndex = products.findIndex(p => p.id === productId || p.productId === productId);
+            if (productIndex !== -1) {
+                const prod = products[productIndex];
+                const stockBefore = prod.stock || 0;
+                const oldInventoryValue = prod.inventoryValue || ((prod.avgCost || prod.costPrice || 0) * stockBefore);
+
+                // Weighted Average Cost formula:
+                // newInventoryValue = oldInventoryValue + (qty × unitCost)
+                // newStock = oldStock + qty
+                // newAvgCost = newInventoryValue / newStock
+                const newStock = stockBefore + qty;
+                const newInventoryValue = oldInventoryValue + (qty * unitCost);
+                const newAvgCost = newStock > 0 ? newInventoryValue / newStock : unitCost;
+
+                products[productIndex] = {
+                    ...prod,
+                    stock: newStock,
+                    costPrice: unitCost,          // Last purchase price
+                    avgCost: newAvgCost,           // Weighted average
+                    inventoryValue: newInventoryValue,
+                };
+                productsModified = true;
+
+                // Log item to Purchases sheet
+                logPurchaseItemToSheet({
+                    purchaseId: newBill.id,
+                    supplierName: supplier.name,
+                    productId: prod.productId,
+                    productName: prod.name,
+                    qty,
+                    unitCost,
+                    stockBefore,
+                    stockAfter: newStock,
+                    avgCostAfter: newAvgCost,
+                    inventoryValueAfter: newInventoryValue,
+                });
             }
         }
 
@@ -724,6 +760,26 @@ export async function createPurchaseBill(bill: {
             saveLocalData(KEYS.PRODUCTS, products);
             // Dispatch custom event to notify DataContext
             window.dispatchEvent(new Event('storage_products_updated'));
+
+            // Sync updated stock + avgCost + inventoryValue to Google Sheet in background
+            for (const item of bill.items) {
+                const productId = item.productId || item.product_id;
+                if (productId && (item.quantity || item.qty || 0) > 0) {
+                    const updatedProd = products.find(p => p.id === productId || p.productId === productId);
+                    if (updatedProd) {
+                        const effectiveRowIndex = (updatedProd as any).rowIndex as number || 0;
+                        if (effectiveRowIndex > 0) {
+                            updateProductInSheet(effectiveRowIndex, updatedProd).catch(e =>
+                                console.warn('[PurchaseService] Stock sync to Google Sheet failed:', e)
+                            );
+                        } else {
+                            updateProductStockByProductId(updatedProd.productId, updatedProd.name, updatedProd.stock).catch(e =>
+                                console.warn('[PurchaseService] Stock sync fallback failed:', e)
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -792,30 +848,72 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
     const filteredAllocations = allocations.filter(a => a.billId !== billId);
     saveLocalData(KEYS.ALLOCATIONS, filteredAllocations);
 
-    // 2. Reallocate & Recalculate Balance (This handles the supplier balance correctly)
+    // 2. Reallocate & Recalculate Balance
     await reallocateAllSupplierPayments(bill.supplierId);
 
-    // 2. Revert Product Stock
-    if (bill.items && Array.isArray(bill.items)) {
-        const products = getLocalData<Product>(KEYS.PRODUCTS);
-        let productsModified = false;
+    // 3. Revert Product Stock
+    try {
+        const { fetchPurchaseItemsByPurchaseId, deletePurchaseItemsByPurchaseId } = await import('./googleSheetWriter');
+        
+        console.log(`[PurchaseService] Attempting stock reversal for Bill ID: ${billId} (Bill Number: ${bill.billNumber})`);
+        
+        // Force refresh to get absolute latest rows from sheet
+        const trackedItems = await fetchPurchaseItemsByPurchaseId(billId);
+        
+        console.log(`[PurchaseService] Items found in sheet log:`, trackedItems.length);
 
-        for (const item of bill.items) {
-            const productId = item.productId || item.product_id;
-            const quantity = item.quantity || item.qty;
-            if (productId && quantity > 0) {
+        const itemsToReverse = trackedItems.length > 0 ? trackedItems : (bill.items || []);
+
+        if (itemsToReverse.length > 0) {
+            const products = getLocalData<Product>(KEYS.PRODUCTS);
+            let productsModified = false;
+
+            for (const item of itemsToReverse) {
+                const productId = item.productId || item.product_id;
+                const quantity = item.qty || item.quantity || 0;
+                
+                if (!productId || quantity <= 0) continue;
+                console.log(`[PurchaseService] Reversing ${productId}: Qty ${quantity}`);
+
                 const productIndex = products.findIndex(p => p.id === productId || p.productId === productId);
                 if (productIndex !== -1) {
-                    products[productIndex].stock = Math.max(0, (products[productIndex].stock || 0) - quantity);
+                    const prod = products[productIndex];
+                    const stockBefore = prod.stock || 0;
+                    
+                    const newStock = Math.max(0, stockBefore - quantity);
+                    
+                    const updatedProd = {
+                        ...prod,
+                        stock: newStock,
+                        updatedAt: new Date()
+                    };
+                    products[productIndex] = updatedProd;
                     productsModified = true;
+
+                    // Sync to CurrentProducts sheet
+                    const { updateProductStockByProductId } = await import('./googleSheetWriter');
+                    await updateProductStockByProductId(updatedProd.productId, updatedProd.name, updatedProd.stock);
+                    
+                    console.log(`[PurchaseService] ✅ Stock Updated for ${prod.name}: ${stockBefore} -> ${newStock}`);
+                } else {
+                    console.warn(`[PurchaseService] ❌ Could not find product in local state: ${productId}`);
                 }
             }
+
+            if (productsModified) {
+                saveLocalData(KEYS.PRODUCTS, products);
+                window.dispatchEvent(new Event('storage_products_updated'));
+            }
+        } else {
+            console.warn(`[PurchaseService] ⚠️ No items found to reverse for Bill ${billId}. Items in local bill: ${bill.items?.length || 0}`);
         }
 
-        if (productsModified) {
-            saveLocalData(KEYS.PRODUCTS, products);
-            window.dispatchEvent(new Event('storage_products_updated'));
-        }
+        // 4. Clean up log entries from Purchases tab
+        console.log(`[PurchaseService] Cleaning up sheet log for Bill ${billId}`);
+        await deletePurchaseItemsByPurchaseId(billId);
+        
+    } catch (err) {
+        console.error('[PurchaseService] Error in stock reversal flow:', err);
     }
 
     // 4. Track change to Drive & Sheet
@@ -873,34 +971,83 @@ export async function updatePurchaseBill(
         const products = getLocalData<Product>(KEYS.PRODUCTS);
         let modified = false;
 
-        // Revert old items
+        // Step 2a: Revert old items impact (reverse Qty x UnitCost)
         if (oldBill.items && Array.isArray(oldBill.items)) {
             for (const item of oldBill.items) {
                 const pid = item.productId || item.product_id;
-                if (pid && item.quantity > 0) {
+                const qty = item.quantity || item.qty || 0;
+                const cost = item.unitPrice || item.unit_price || item.cost || 0;
+                if (pid && qty > 0) {
                     const pi = products.findIndex(p => p.id === pid || p.productId === pid);
                     if (pi !== -1) {
-                        products[pi].stock = Math.max(0, (products[pi].stock || 0) - item.quantity);
+                        const prod = products[pi];
+                        const stockBefore = prod.stock || 0;
+                        const oldVal = prod.inventoryValue || ((prod.avgCost || prod.costPrice || 0) * stockBefore);
+                        
+                        const newStock = Math.max(0, stockBefore - qty);
+                        const newVal = Math.max(0, oldVal - (qty * cost));
+                        const newAvg = newStock > 0 ? newVal / newStock : (prod.avgCost || prod.costPrice || 0);
+
+                        products[pi] = { ...prod, stock: newStock, inventoryValue: newVal, avgCost: newAvg };
                         modified = true;
                     }
                 }
             }
         }
-        // Apply new items
+        // Step 2b: Apply new items impact (add Qty x UnitCost)
         for (const item of updates.items) {
             const pid = item.productId || item.product_id;
-            if (pid && item.quantity > 0) {
+            const qty = item.quantity || item.qty || 0;
+            const cost = item.unitPrice || item.unit_price || item.cost || 0;
+            if (pid && qty > 0) {
                 const pi = products.findIndex(p => p.id === pid || p.productId === pid);
                 if (pi !== -1) {
-                    products[pi].stock = (products[pi].stock || 0) + item.quantity;
-                    products[pi].costPrice = item.unitPrice || item.unit_price;
+                    const prod = products[pi];
+                    const stockBefore = prod.stock || 0;
+                    const oldVal = prod.inventoryValue || ((prod.avgCost || prod.costPrice || 0) * stockBefore);
+                    
+                    const newStock = stockBefore + qty;
+                    const newVal = oldVal + (qty * cost);
+                    const newAvg = newStock > 0 ? newVal / newStock : cost;
+
+                    products[pi] = { 
+                        ...prod, 
+                        stock: newStock, 
+                        inventoryValue: newVal, 
+                        avgCost: newAvg,
+                        costPrice: cost // Update last purchase price
+                    };
                     modified = true;
                 }
             }
         }
+
         if (modified) {
             saveLocalData(KEYS.PRODUCTS, products);
             window.dispatchEvent(new Event('storage_products_updated'));
+
+            // Sync updated stock to Google Sheet in background
+            const affectedIds = new Set([
+                ...(oldBill.items || []).map((i: any) => i.productId || i.product_id),
+                ...updates.items.map(i => i.productId || i.product_id)
+            ]);
+
+            for (const pid of Array.from(affectedIds)) {
+                if (!pid) continue;
+                const updatedProd = products.find(p => p.id === pid || p.productId === pid);
+                if (updatedProd) {
+                    const effectiveRowIndex = (updatedProd as any).rowIndex as number || 0;
+                    if (effectiveRowIndex > 0) {
+                        updateProductInSheet(effectiveRowIndex, updatedProd).catch(e =>
+                            console.warn('[PurchaseService] Bill-update stock sync to Sheet failed:', e)
+                        );
+                    } else {
+                        updateProductStockByProductId(updatedProd.productId, updatedProd.name, updatedProd.stock).catch(e =>
+                            console.warn('[PurchaseService] Bill-update stock sync fallback failed:', e)
+                        );
+                    }
+                }
+            }
         }
     }
 

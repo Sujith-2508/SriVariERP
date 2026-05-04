@@ -381,7 +381,7 @@ export default function Home() {
     // 3. OUTSTANDING ANALYSIS
     // ========================================================================
     const outstandingData = useMemo(() => {
-        const counts = { day0to30: 0, day31to60: 0, day61to90: 0, overdue: 0 };
+        const counts = { day0to30: 0, day31to60: 0, day61to90: 0 };
         const now = new Date();
 
         dealers.forEach(dealer => {
@@ -396,17 +396,15 @@ export default function Home() {
                     const ageDays = Math.ceil((now.getTime() - new Date(inv.date).getTime()) / (1000 * 60 * 60 * 24));
                     if (ageDays <= 30) counts.day0to30 += inv.balance;
                     else if (ageDays <= 60) counts.day31to60 += inv.balance;
-                    else if (ageDays <= 90) counts.day61to90 += inv.balance;
-                    else counts.overdue += inv.balance;
+                    else counts.day61to90 += inv.balance; // 61-90 AND 90+ both go here
                 });
         });
 
         return [
             { name: '0-30 Days', value: counts.day0to30, color: '#10b981' },
             { name: '31-60 Days', value: counts.day31to60, color: '#f59e0b' },
-            { name: '61-90 Days', value: counts.day61to90, color: '#f97316' },
-            { name: '90+ Days', value: counts.overdue, color: '#ef4444' },
-        ].filter(d => d.value > 0);
+            { name: '61-90+ Days', value: counts.day61to90, color: '#ef4444' },
+        ];
     }, [dealers, transactions]);
 
     // ========================================================================

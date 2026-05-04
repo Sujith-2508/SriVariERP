@@ -5,9 +5,23 @@ import { Dealer, Product, Transaction, TransactionType, InvoiceItem, Agent, Paym
 import { supabase } from '@/lib/supabase';
 import { getAllAgentTrackingData, subscribeToLocationUpdates, subscribeToStatusUpdates, subscribeToTransactionUpdates } from '@/lib/agentTrackingService';
 import { fetchProductsFromSheet, getLocalProducts, saveLocalProducts } from '@/lib/googleSheetProducts';
-import { addProductToSheet, updateProductInSheet, deleteProductFromSheet, readProductsFromSheet } from '@/lib/googleSheetWriter';
+import { 
+    addProductToSheet, 
+    updateProductInSheet, 
+    deleteProductFromSheet, 
+    updateProductStockByProductId,
+    readProductsFromSheet,
+    ensureSalesTabExists,
+    logSaleItemToSheet,
+    logSalesItemsToTracking,
+    fetchSalesItemsByInvoiceId,
+    deleteSalesItemsByInvoiceId
+} from '@/lib/googleSheetWriter';
 import { syncDealerToSheet, removeDealerFromSheet, bulkSyncDealersToSheet, fetchRefinedDealersRaw, parseTallyLedgers, deleteDealerSheet, syncTransactionToDealerSheet, clearDealerTransactionsForSync, findTransactionRow, bulkCreateDealerTabs, initializeDealerLedger, batchWriteTransactionsToDealerSheet } from '@/lib/googleSheetDealers';
 import { useToast } from './ToastContext';
+
+// Helper to ignore empty object errors returned by some Supabase contexts
+const isRealError = (err: any) => err && (err.message || Object.keys(err).length > 0);
 
 interface InvoiceData {
     vehicleName?: string;
@@ -307,8 +321,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .select('*')
                 .order('business_name');
 
-            if (dealersError) {
-                console.error('[DataContext] Error fetching dealers:', dealersError);
+            if (isRealError(dealersError)) {
+                console.error('[DataContext] Error fetching dealers:', dealersError?.message || dealersError);
                 throw dealersError;
             }
 
@@ -321,12 +335,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const { data: transactionsData, error: transactionsError } = transactionsResult;
             const { data: itemsData, error: itemsError } = itemsResult;
 
-            if (transactionsError) {
-                console.error('[DataContext] Error fetching transactions:', transactionsError);
+            if (isRealError(transactionsError)) {
+                console.error('[DataContext] Error fetching transactions:', transactionsError?.message || transactionsError);
                 throw transactionsError;
             }
-            if (itemsError) {
-                console.error('[DataContext] Error fetching invoice items:', itemsError);
+            if (isRealError(itemsError)) {
+                console.error('[DataContext] Error fetching invoice items:', itemsError?.message || itemsError);
                 // We can continue if only items fail, but let's log it
             }
 
@@ -338,8 +352,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .from('payment_allocations')
                 .select('*');
 
-            if (allocationsError) {
-                console.error('[DataContext] Error fetching allocations:', allocationsError);
+            if (isRealError(allocationsError)) {
+                console.error('[DataContext] Error fetching allocations:', allocationsError?.message || allocationsError);
                 throw allocationsError;
             }
 
@@ -357,8 +371,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 .select('*')
                 .order('name');
 
-            if (agentsError) {
-                console.error('[DataContext] Error fetching agents:', agentsError);
+            if (isRealError(agentsError)) {
+                console.error('[DataContext] Error fetching agents:', agentsError?.message || agentsError);
                 throw agentsError;
             }
 
@@ -432,9 +446,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fetchData();
         loadTrackingData();
 
-        // Listen for local storage product updates from purchase service
+        // Listen for local storage product updates from purchase service.
+        // IMPORTANT: Do NOT call fetchData() here — that re-fetches from Google Sheets
+        // which is still serving the OLD cached data (the queue write hasn't flushed yet).
+        // Instead, read directly from localStorage which has the fresh stock values.
         const handleStorageUpdate = () => {
-            fetchData();
+            const freshProducts = getLocalProducts();
+            if (freshProducts.length > 0) {
+                console.log('[DataContext] storage_products_updated: refreshing UI from localStorage —', freshProducts.length, 'products');
+                setProducts(freshProducts);
+            }
         };
         window.addEventListener('storage_products_updated', handleStorageUpdate);
 
@@ -528,26 +549,115 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, []); // Removed fetchData/loadTrackingData from deps to prevent infinite loops if they change
 
-    const updateStock = async (productId: string, quantity: number) => {
+    const updateStock = async (productId: string, quantity: number, saleMetadata?: { invoiceId: string; dealerName: string; unitPrice: number; productName: string }) => {
+        // Prefer rowIndex from React products state
+        const productFromState = products.find(p => p.id === productId || p.productId === productId);
+        const rowIndexFromState = (productFromState as any)?.rowIndex as number | undefined;
+
         const currentProducts = getLocalProducts();
         let updatedProduct: (Product & { rowIndex?: number }) | null = null;
         const updatedProducts = currentProducts.map(p => {
             if (p.id === productId || p.productId === productId) {
+                const stockBefore = p.stock;
                 const newStock = p.stock - quantity;
-                updatedProduct = { ...p, stock: newStock };
+                
+                const currentAvgCost = p.avgCost || p.costPrice || 0;
+                const currentInventoryValue = p.inventoryValue || (currentAvgCost * stockBefore);
+
+                // Stock OUT (quantity > 0): deduct qty × avgCost from inventoryValue.
+                // Stock IN (quantity < 0 - reversal): add qty × avgCost back to inventoryValue.
+                const newInventoryValue = Math.max(0, currentInventoryValue - (quantity * currentAvgCost));
+
+                updatedProduct = {
+                    ...p,
+                    rowIndex: rowIndexFromState || (p as any).rowIndex,
+                    stock: newStock,
+                    inventoryValue: newInventoryValue,
+                    // avgCost remains the same on sales/reversals
+                };
+
+                // Log to Sales log sheet (for audit trail) if metadata provided and it's a real sale
+                if (saleMetadata && quantity > 0) {
+                    ensureSalesTabExists();
+                    logSaleItemToSheet({
+                        invoiceId: saleMetadata.invoiceId,
+                        dealerName: saleMetadata.dealerName,
+                        productId: p.productId,
+                        productName: saleMetadata.productName || p.name,
+                        qty: quantity,
+                        unitPrice: saleMetadata.unitPrice,
+                        avgCostAtSale: currentAvgCost,
+                        cogs: quantity * currentAvgCost,
+                        stockBefore,
+                        stockAfter: newStock,
+                        inventoryValueAfter: newInventoryValue,
+                    });
+                    
+                    // Log delta to Sales_tracking (negative for sale)
+                    logSalesItemsToTracking(saleMetadata.invoiceId, saleMetadata.dealerName, [{
+                        productId: p.productId,
+                        productName: saleMetadata.productName || p.name,
+                        stock: -quantity
+                    }]);
+                }
+
                 return updatedProduct;
             }
             return p;
         });
+        
         saveLocalProducts(updatedProducts);
         setProducts(updatedProducts);
 
-        // Sync updated stock to Google Sheet in background
         if (updatedProduct) {
             const prod = updatedProduct as Product & { rowIndex?: number };
-            updateProductInSheet(prod.rowIndex || 0, prod).catch(e =>
-                console.warn('[DataContext] Stock sync to Google Sheet failed (non-critical):', e)
-            );
+            const effectiveRowIndex = (prod as any).rowIndex as number || 0;
+            if (effectiveRowIndex > 0) {
+                updateProductInSheet(effectiveRowIndex, prod).catch(e =>
+                    console.warn('[DataContext] Stock sync to Google Sheet failed:', e)
+                );
+            } else {
+                updateProductStockByProductId(prod.productId, prod.name, prod.stock).catch(e =>
+                    console.warn('[DataContext] Stock sync fallback failed:', e)
+                );
+            }
+        }
+    };
+
+    /** 
+     * Reconcile stock for a product based on the ledger audit trail.
+     * Formula: finalStock = SUM(Total Purchases) + SUM(all stock movements from Sales_Tracking)
+     */
+    const reconcileProductStock = async (productId: string) => {
+        try {
+            const { purchaseQty, salesMovement } = await fetchAllDeltasForProduct(productId);
+            const computedStock = purchaseQty + salesMovement;
+            
+            console.log(`[DataContext] Reconciling ${productId}: Purchases(${purchaseQty}) + SalesMovement(${salesMovement}) = ${computedStock}`);
+            
+            // Get current local product state
+            const currentProducts = getLocalProducts();
+            const product = currentProducts.find(p => p.id === productId || p.productId === productId);
+            
+            if (product && Math.abs(product.stock - computedStock) > 0.001) {
+                console.log(`[DataContext] Stock mismatch detected for ${productId}! Updating ${product.stock} -> ${computedStock}`);
+                // Use updateStock with the difference to sync back to Sheets
+                // If computedStock > product.stock, we pass negative quantity to add stock
+                await updateStock(productId, product.stock - computedStock);
+                return computedStock;
+            }
+            return product?.stock || 0;
+        } catch (err) {
+            console.error('[DataContext] reconcileProductStock failed:', err);
+            return 0;
+        }
+    };
+
+    /** Reconcile all products in background */
+    const forceReconcileAll = async () => {
+        const currentProducts = getLocalProducts();
+        for (const p of currentProducts) {
+            await reconcileProductStock(p.productId);
         }
     };
 
@@ -563,15 +673,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProductCount(prev => prev + 1);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet, then re-read to get authoritative data (with rowIndex)
+        // Queue the sheet write, then defer the re-read so the queue has time to flush.
+        // Reads immediately after enqueue would return stale data (write gap = 2 s),
+        // overwriting the optimistic UI state with the old product list.
         try {
             await addProductToSheet(newProduct);
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                setProductCount(sheetProducts.length + 1);
-                saveLocalProducts(sheetProducts);
-            }
+            setTimeout(async () => {
+                try {
+                    const { products: sheetProducts } = await readProductsFromSheet(true); // force-refresh cache
+                    if (sheetProducts.length > 0) {
+                        setProducts(sheetProducts);
+                        setProductCount(sheetProducts.length + 1);
+                        saveLocalProducts(sheetProducts);
+                    }
+                } catch (e) {
+                    console.warn('[DataContext] Deferred sheet re-read after add failed:', e);
+                }
+            }, 5000); // 5 s — enough for the 2 s write gap + network round-trip
         } catch (e) {
             console.warn('[DataContext] Could not sync product add to Google Sheet:', e);
         }
@@ -588,16 +706,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync to Google Sheet (search by name if rowIndex missing), then re-read
+        // Sync to Google Sheet, then defer re-read so the write has time to flush
         try {
-            const productIndex = products.findIndex(p => p.id === updatedProduct.id);
-            const rowIndex = (updatedProduct as any).rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
-            await updateProductInSheet(rowIndex, updatedProduct);
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                saveLocalProducts(sheetProducts);
+            const rowIndex = (updatedProduct as any).rowIndex || 0;
+            if (rowIndex <= 0) {
+                console.warn('[DataContext] Warning: Product update called without a valid rowIndex. Falling back to append to avoid overwriting headers.', updatedProduct.name);
             }
+            await updateProductInSheet(rowIndex, updatedProduct);
+            setTimeout(async () => {
+                try {
+                    const { products: sheetProducts } = await readProductsFromSheet(true);
+                    if (sheetProducts.length > 0) {
+                        setProducts(sheetProducts);
+                        saveLocalProducts(sheetProducts);
+                    }
+                } catch (e) {
+                    console.warn('[DataContext] Deferred sheet re-read after update failed:', e);
+                }
+            }, 5000);
         } catch (e) {
             console.warn('[DataContext] Could not sync product update to Google Sheet:', e);
         }
@@ -613,18 +739,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProducts(updatedProducts);
         saveLocalProducts(updatedProducts);
 
-        // Sync deletion to Google Sheet (physically removes the row), then re-read
+        // Sync deletion to Google Sheet, then defer re-read so the write has time to flush
         try {
             const rowIndex = (product as any)?.rowIndex || (productIndex >= 0 ? productIndex + 2 : 0);
             if (rowIndex > 0 || product?.name) {
                 await deleteProductFromSheet(rowIndex, product?.name);
             }
-            const { products: sheetProducts } = await readProductsFromSheet();
-            if (sheetProducts.length > 0) {
-                setProducts(sheetProducts);
-                setProductCount(sheetProducts.length + 1);
-                saveLocalProducts(sheetProducts);
-            }
+            setTimeout(async () => {
+                try {
+                    const { products: sheetProducts } = await readProductsFromSheet(true);
+                    if (sheetProducts.length > 0) {
+                        setProducts(sheetProducts);
+                        setProductCount(sheetProducts.length + 1);
+                        saveLocalProducts(sheetProducts);
+                    }
+                } catch (e) {
+                    console.warn('[DataContext] Deferred sheet re-read after delete failed:', e);
+                }
+            }, 5000);
         } catch (e) {
             console.warn('[DataContext] Could not sync product delete to Google Sheet:', e);
         }
@@ -868,17 +1000,58 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const dealer = dealers.find(d => d.id === dealerId);
         if (!dealer) throw new Error("Dealer not found");
 
-        // 2. If it's an INVOICE, restore stock
+        // 2. If it's an INVOICE, restore stock by logging REVERSE deltas
         if (txn.type === 'INVOICE') {
-            const items = txn.items || [];
-            for (const item of items) {
-                await updateStock(item.productId, -item.quantity);
+            const referenceId = txn.referenceId || '';
+            console.log('[DataContext] Fetching tracked items for reversal-audit:', referenceId);
+            const trackedItems = await fetchSalesItemsByInvoiceId(referenceId);
+            const itemsToRestore = trackedItems.length > 0 ? trackedItems : (txn.items || []);
+            
+            console.log('[DataContext] Logging reversal deltas for', itemsToRestore.length, 'items');
+            // Log positive movement to Sales_tracking (do NOT delete old rows)
+            logSalesItemsToTracking(referenceId, dealer.businessName || 'Unknown', itemsToRestore, true);
+
+            for (const item of itemsToRestore) {
+                // ─── SIGN LOGIC ───────────────────────────────────────────────────────
+                // Sales_Tracking stores qty as NEGATIVE for sales: e.g., -5 (5 units sold).
+                // updateStock rule: newStock = currentStock - quantity
+                //   → pass NEGATIVE quantity to ADD stock back (reverse of a sale)
+                //
+                // Tracked path: item.qty = -5  → pass -5  → newStock = 55 - (-5) = 60 ✅
+                // Fallback path: item.quantity = +5 → pass -5 → newStock = 55 - (-5) = 60 ✅
+                //
+                // OLD (WRONG): -(item.qty) = -(-5) = +5 → newStock = 55 - 5 = 50 ❌
+                const qtyToRestore = trackedItems.length > 0
+                    ? (item.qty || 0)                        // already negative from tracking sheet
+                    : -(Math.abs(item.qty || item.quantity || item.stock || 0)); // ensure negative
+
+                console.log(`[DataContext] Restoring stock for ${item.productId}: qtyToRestore=${qtyToRestore}`);
+                await updateStock(item.productId, qtyToRestore);
+
+                // ─── FORCE WRITE TO CurrentProducts SHEET ────────────────────────────
+                // updateStock updates local state + queues a sheet write.
+                // As a safety net, also directly write the restored stock value
+                // to CurrentProducts so it's never left in a stale state.
+                try {
+                    const restoredProduct = getLocalProducts().find(
+                        p => p.id === item.productId || p.productId === item.productId
+                    );
+                    if (restoredProduct) {
+                        const { updateProductStockByProductId } = await import('@/lib/googleSheetWriter');
+                        await updateProductStockByProductId(
+                            restoredProduct.productId,
+                            restoredProduct.name,
+                            restoredProduct.stock
+                        );
+                        console.log(`[DataContext] ✅ CurrentProducts sheet stock restored: ${restoredProduct.name} → ${restoredProduct.stock}`);
+                    }
+                } catch (sheetErr) {
+                    console.warn('[DataContext] Could not force-write restored stock to CurrentProducts sheet:', sheetErr);
+                }
             }
         }
 
         // 3. Delete from Supabase
-        // Note: payment_allocations should have CASCADE DELETE in DB, 
-        // but we'll be safe and assume the items in notes JSON/invoice_items table are handled.
         const { error } = await supabase
             .from('transactions')
             .delete()
@@ -890,8 +1063,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         // 4. Update Dealer Balance
-        // For INVOICE: newBalance = oldBalance - amount
-        // For PAYMENT: newBalance = oldBalance + amount
         const balanceAdj = txn.type === 'INVOICE' ? -txn.amount : txn.amount;
         const newBalance = dealer.balance + balanceAdj;
 
@@ -905,10 +1076,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDealers(prev => prev.map(d => d.id === dealerId ? { ...d, balance: newBalance } : d));
 
         // 6. Re-sync Dealer Ledger to Google Sheet
-        // We do a full re-sync to ensure the balance chain in the sheet is correct
         syncDealerLedgerToSheet(dealerId).catch(e =>
             console.warn('[DataContext] Failed to re-sync dealer ledger after transaction deletion:', e)
         );
+        
+        // 7. Refresh data and reconcile stock
+        setTimeout(() => {
+            fetchData();
+            forceReconcileAll();
+        }, 2000);
     };
 
     const getDealerTransactions = (dealerId: string, customTxns?: Transaction[]): Transaction[] => {
@@ -1093,7 +1269,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const discountAmount = (subtotal * (invoiceData?.discountPercent || 0)) / 100;
 
         // Get dealer info
-        const dealer = dealers.find(d => d.id === dealerId);
+        const activeDealer = dealers.find(d => d.id === dealerId);
 
         // Insert into bill_payments table for mobile app to display invoice metadata
         // Wrapped in try-catch as this is non-critical and may fail due to FK constraints
@@ -1111,8 +1287,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         // Update dealer balance
-        if (dealer) {
-            const newBalance = dealer.balance + totalAmount;
+        if (activeDealer) {
+            const newBalance = activeDealer.balance + totalAmount;
             const { error: dealerUpdateError } = await supabase
                 .from('dealers')
                 .update({
@@ -1128,14 +1304,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ));
         }
 
-        // Update stock for each item
+        // Update stock for each item (Stock OUT)
         for (const item of items) {
             try {
-                await updateStock(item.productId, item.quantity);
+                await updateStock(item.productId, item.quantity, {
+                    invoiceId: invoiceNumber, // Use reference ID for tracking
+                    dealerName: activeDealer?.businessName || 'Unknown',
+                    unitPrice: item.unitPrice,
+                    productName: item.productName,
+                });
             } catch (err) {
                 console.error(`[DataContext] Failed to update stock for ${item.productName}:`, err);
             }
         }
+
+        // Batch log to Sales_tracking for reliable reversal logic (delta ledger)
+        logSalesItemsToTracking(invoiceNumber, activeDealer?.businessName || 'Unknown', items);
+
+        // Trigger reconciliation in background to ensure perfect stock
+        setTimeout(() => forceReconcileAll(), 2000);
 
         // Update local state
         const newTxn = transformTransaction(txnData);
@@ -1145,7 +1332,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Sync to individual dealer sheet with CORRECT running balance
         // Compute: sum of all dealer transactions (sorted correctly) including the new one
-        if (dealer) {
+        if (activeDealer) {
             const allDealerTxns = [...transactions, newTxn]
                 .filter(t => t.customerId === dealerId)
                 .sort((a, b) => {
@@ -1157,7 +1344,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const createdB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                     return createdA - createdB;
                 });
-            syncTransactionToDealerSheet(dealer.businessName, newTxn).catch(e =>
+            syncTransactionToDealerSheet(activeDealer.businessName, newTxn).catch(e =>
                 console.warn('[DataContext] Failed to sync invoice to dealer sheet:', e)
             );
         }
@@ -1187,11 +1374,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         }
 
-        // 2. Restore Stock for OLD items
-        for (const item of oldItems) {
-            // updateStock subtracts, so passing negative quantity adds stock back
-            await updateStock(item.productId, -item.quantity);
+        // 2. Restore Stock for OLD items using tracking data if available
+        const oldReferenceId = existingTxn.referenceId || '';
+        console.log('[DataContext] Fetching tracked items for update-reversal:', oldReferenceId);
+        const trackedItems = await fetchSalesItemsByInvoiceId(oldReferenceId);
+        const itemsToRestore = trackedItems.length > 0 ? trackedItems : oldItems;
+
+        console.log('[DataContext] Restoring old stock for', itemsToRestore.length, 'items');
+        for (const item of itemsToRestore) {
+            // Restore stock (negative qty passed to updateStock adds it back)
+            await updateStock(item.productId, -(item.qty || item.quantity || 0));
         }
+        
+        // Step 2b: Delete old tracking entries before adding new ones
+        await deleteSalesItemsByInvoiceId(oldReferenceId);
 
         // 3. Update Transaction Details
         const creditDays = invoiceData?.creditDays || existingTxn.creditDays || 30;
@@ -1244,28 +1440,36 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw new Error(`Failed to update invoice: ${updateError.message}`);
         }
 
-        // Invoice items are now stored in the notes JSON field (no separate table operations needed)
-        console.log('[DataContext] Invoice items stored in notes JSON during update:', items.length, 'items');
-
         // 6. Deduct Stock for NEW items
+        const activeDealer = dealers.find(d => d.id === existingTxn.customerId);
         for (const item of items) {
-            await updateStock(item.productId, item.quantity);
+            await updateStock(item.productId, item.quantity, {
+                invoiceId: nextReferenceId, // Use the updated reference ID
+                dealerName: activeDealer?.businessName || 'Unknown',
+                unitPrice: item.unitPrice,
+                productName: item.productName
+            });
         }
 
+        // Batch log new items to Sales_tracking
+        logSalesItemsToTracking(nextReferenceId, activeDealer?.businessName || 'Unknown', items);
+
+        // Trigger reconciliation
+        setTimeout(() => forceReconcileAll(), 2000);
+
         // 7. Update Dealer Balance
-        const dealer = dealers.find(d => d.id === existingTxn.customerId);
-        if (dealer) {
+        if (activeDealer) {
             // Balance = OldBalance - OldInvoiceAmount + NewInvoiceAmount
             const balanceDiff = totalAmount - existingTxn.amount;
-            const newBalance = dealer.balance + balanceDiff;
+            const newBalance = activeDealer.balance + balanceDiff;
 
             await supabase
                 .from('dealers')
                 .update({ balance: newBalance })
-                .eq('id', dealer.id);
+                .eq('id', activeDealer.id);
 
             setDealers(prev => prev.map(d =>
-                d.id === dealer.id ? { ...d, balance: newBalance } : d
+                d.id === activeDealer.id ? { ...d, balance: newBalance } : d
             ));
         }
 

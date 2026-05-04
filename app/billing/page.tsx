@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Dealer, InvoiceItem, Product, CompanySettings, TransactionType } from '@/types';
-import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2, Edit, Copy } from 'lucide-react';
+import { Search, Plus, Trash2, FileText, CheckCircle, Users, ShoppingCart, X, Truck, CreditCard, Printer, MessageSquare, Check, Loader2, Edit, Copy, Download } from 'lucide-react';
 import { useEnterKeyNavigation } from '@/hooks/useEnterKeyNavigation';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmationContext';
@@ -51,6 +51,7 @@ export default function Billing() {
     const [selectedPrinter, setSelectedPrinter] = useState<string>('');
     const [printingStatus, setPrintingStatus] = useState<'idle' | 'loading' | 'printing' | 'done' | 'error'>('idle');
     const [printError, setPrintError] = useState<string | null>(null);
+    const [numCopies, setNumCopies] = useState<number>(1);
 
     // Dealer Search
     const [dealerSearch, setDealerSearch] = useState('');
@@ -939,6 +940,7 @@ export default function Billing() {
 
         // --- AUTOMATIC PDF BACKUP TO GOOGLE DRIVE ---
         if (companySettings && selectedDealer) {
+            setDriveUploadStatus('uploading');
             // Background process to avoid blocking UI success screen
             (async () => {
                 try {
@@ -974,19 +976,43 @@ export default function Billing() {
                     const driveFileName = buildInvoiceFileName(
                         invoiceDataToSave.referenceId,
                         selectedDealer.businessName,
-                        new Date(invoiceDate) // use invoice date → correct month folder
+                        new Date(invoiceDate)
                     );
 
                     console.log('[Billing] Starting automatic Drive upload:', driveFileName);
-                    // Upload to ERP Invoices / {Month YYYY} / filename.pdf
-                    await uploadInvoicePDFByMonth(
+                    const { webViewLink } = await uploadInvoicePDFByMonth(
                         invoiceBase64,
                         driveFileName,
                         new Date(invoiceDate)
                     );
-                    console.log('[Billing] Automatic Drive upload success (month-wise)!');
-                } catch (driveErr) {
+                    
+                    if (webViewLink && finalId) {
+                        const { error: updateErr } = await supabase
+                            .from('transactions')
+                            .update({ drive_link: webViewLink })
+                            .eq('id', finalId);
+                        
+                        if (updateErr) {
+                            // PostgrestError properties are non-enumerable — log them explicitly
+                            console.warn(
+                                '[Billing] Drive link save skipped (non-critical):',
+                                updateErr.message || '(no message)',
+                                '| code:', updateErr.code,
+                                '| details:', updateErr.details,
+                                '| hint:', updateErr.hint
+                            );
+                            // This is non-critical — PDF is already saved to Drive successfully
+                        } else {
+                            console.log('[Billing] Drive link saved to DB:', webViewLink);
+                        }
+                    }
+
+                    setDriveUploadStatus('success');
+                    console.log('[Billing] Automatic Drive upload success!');
+                } catch (driveErr: any) {
                     console.error('[Billing] Automatic Drive upload failed:', driveErr);
+                    setDriveUploadStatus('error');
+                    setDriveError(driveErr.message || 'Drive sync failed');
                 }
             })();
         }
@@ -1116,11 +1142,11 @@ export default function Billing() {
                     statementLink ? `View Statement: ${statementLink}` : ''
                 ].filter(Boolean);
 
-                if (!navigator.clipboard?.writeText) {
-                    throw new Error('Clipboard access is not available in this environment.');
+                if (window.electron?.clipboard?.writeText) {
+                    await window.electron.clipboard.writeText(copyLines.join('\n'));
+                } else {
+                    await navigator.clipboard.writeText(copyLines.join('\n'));
                 }
-
-                await navigator.clipboard.writeText(copyLines.join('\n'));
                 showToast('WhatsApp message copied. Paste and send manually.', 'success');
                 setShowWhatsAppPreview(false);
                 return;
@@ -2755,6 +2781,42 @@ export default function Billing() {
                             <p className="px-5 text-xs text-red-500 pb-2">{printError}</p>
                         )}
 
+                        {/* Number of Copies */}
+                        <div className="px-5 pb-3">
+                            <label className="flex items-center justify-between text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">
+                                Number of Copies
+                                <span className="text-[10px] font-normal lowercase bg-slate-100 px-1.5 py-0.5 rounded text-slate-400">Copies to print</span>
+                            </label>
+                            <div className="flex items-center gap-3">
+                                <button 
+                                    type="button"
+                                    onClick={() => setNumCopies(prev => Math.max(1, prev - 1))}
+                                    className="w-10 h-10 rounded-xl border-2 border-slate-200 flex items-center justify-center hover:bg-slate-50 hover:border-slate-300 transition-all text-slate-600 font-bold"
+                                >
+                                    -
+                                </button>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="99"
+                                    value={numCopies}
+                                    onChange={(e) => {
+                                        const val = parseInt(e.target.value);
+                                        if (!isNaN(val) && val >= 1) setNumCopies(Math.min(99, val));
+                                        else if (e.target.value === '') setNumCopies(1);
+                                    }}
+                                    className="flex-1 h-10 border-2 border-slate-200 rounded-xl text-center font-bold text-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none transition-all"
+                                />
+                                <button 
+                                    type="button"
+                                    onClick={() => setNumCopies(prev => Math.min(99, prev + 1))}
+                                    className="w-10 h-10 rounded-xl border-2 border-slate-200 flex items-center justify-center hover:bg-slate-50 hover:border-slate-300 transition-all text-slate-600 font-bold"
+                                >
+                                    +
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Actions */}
                         <div className="px-4 pb-4 space-y-2">
                             {/* Print Now — native silent print */}
@@ -2770,7 +2832,8 @@ export default function Billing() {
                                     setPrintingStatus('printing');
                                     setPrintError(null);
                                     try {
-                                        await window.electron.printer.print(selectedPrinter);
+                                        // Pass the actual number of copies from state to Electron
+                                        await window.electron.printer.print(selectedPrinter, numCopies);
                                         setPrintingStatus('done');
                                         setTimeout(() => {
                                             setShowPrinterDialog(false);
@@ -2793,6 +2856,64 @@ export default function Billing() {
                                 {printingStatus === 'done' && <Check size={18} />}
                                 {printingStatus !== 'printing' && printingStatus !== 'done' && <Printer size={18} />}
                                 {printingStatus === 'printing' ? 'Printing...' : printingStatus === 'done' ? 'Sent to Printer!' : 'Print Now'}
+                            </button>
+
+                            {/* Download PDF Shortcut */}
+                            <button
+                                onClick={async () => {
+                                    if (!selectedDealer || !companySettings) return;
+                                    setPrintingStatus('printing');
+                                    try {
+                                        const invoiceData = {
+                                            id: editInvoiceId || '',
+                                            customerId: selectedDealer.id,
+                                            type: TransactionType.INVOICE,
+                                            amount: invoiceTotal,
+                                            date: new Date(invoiceDate),
+                                            referenceId: generatedRef || `INV${manualInvoiceNo}`,
+                                            items: invoiceItems,
+                                            vehicleName,
+                                            vehicleNumber,
+                                            destination,
+                                            transportCharges: parseFloat(transportCharges) || 0,
+                                            paymentTerms,
+                                            discountPercent: parseFloat(globalDiscount) || 0,
+                                            creditDays: parseInt(creditDays) || 30,
+                                            notes: JSON.stringify({
+                                                buyerOrderNo, buyerOrderDate, dispatchDocNo, dispatchDate,
+                                                deliveryNote, supplierRef, otherRef, termsOfDelivery,
+                                                manualInvoiceNo, roundOff, globalCGST, globalSGST, globalIGST
+                                            })
+                                        };
+                                        const pdfBase64 = await generateInvoicePDFBase64(
+                                            invoiceData as any,
+                                            selectedDealer,
+                                            invoiceItems,
+                                            companySettings,
+                                            numCopies
+                                        );
+                                        
+                                        // Trigger download
+                                        const link = document.createElement('a');
+                                        link.href = `data:application/pdf;base64,${pdfBase64}`;
+                                        link.download = `Invoice_${invoiceData.referenceId}_${numCopies}copies.pdf`;
+                                        link.click();
+                                        
+                                        setPrintingStatus('done');
+                                        setTimeout(() => {
+                                            setShowPrinterDialog(false);
+                                            setShowPrintPreview(false);
+                                            setPrintingStatus('idle');
+                                        }, 800);
+                                    } catch (err: any) {
+                                        setPrintingStatus('error');
+                                        setPrintError(err.message || 'PDF Generation failed.');
+                                    }
+                                }}
+                                className="w-full py-2.5 rounded-xl border-2 border-emerald-100 text-emerald-700 font-bold hover:bg-emerald-50 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <Download size={18} />
+                                Download {numCopies} Copies (PDF)
                             </button>
 
                             {/* Fallback: system dialog */}

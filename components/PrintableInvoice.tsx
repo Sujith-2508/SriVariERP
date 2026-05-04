@@ -96,8 +96,9 @@ const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ invoice, dealer, it
                 @media print {
                     @page { margin: 0; size: A4; }
                     body { margin: 0; padding: 0; }
-                    .print-invoice { padding: 20mm; margin: 0; width: 210mm; }
+                    .print-invoice { padding: 20mm; margin: 0; width: 210mm; page-break-after: always; }
                 }
+                .print-invoice:last-child { page-break-after: auto; }
                 .print-invoice * { box-sizing: border-box; }
                 .print-invoice table { border-collapse: collapse; }
             `}</style>

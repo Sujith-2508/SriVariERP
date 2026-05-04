@@ -25,7 +25,9 @@ export interface Product {
   name: string;
   category: string;
   price: number;
-  costPrice?: number;          // Cost price for COGS calculation
+  costPrice?: number;          // Last purchase price (updated on each purchase)
+  avgCost?: number;            // Weighted average cost — used for COGS on sales
+  inventoryValue?: number;     // Total inventory value = avgCost × stock (maintained as a running total)
   stock: number;
   gstRate: number;
   hsnCode?: string;
@@ -75,6 +77,9 @@ export interface Transaction {
   profitAmount?: number;
   profitPercentage?: number;
   driveLink?: string;        // Link to the generated PDF on Google Drive
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
 }
 
 export interface InvoiceItem {
@@ -354,8 +359,12 @@ declare global {
       };
       printer?: {
         getPrinters: () => Promise<{ name: string; displayName: string; isDefault: boolean; status: number; description: string }[]>;
-        print: (printerName: string) => Promise<{ success: boolean }>;
+        print: (printerName: string, numCopies?: number) => Promise<{ success: boolean }>;
       };
+      drive?: any;
+      clipboard?: {
+        writeText: (text: string) => Promise<{ success: boolean }>;
+      }
     };
   }
 }
