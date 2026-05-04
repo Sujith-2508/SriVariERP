@@ -113,7 +113,11 @@ async function flushQueue(): Promise<void> {
       ? `https://sheets.googleapis.com/v4/spreadsheets/${LOG_SPREADSHEET_ID}`
       : `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
-    const res = await fetch(`${base}${op.path}`, {
+    // Strip internal dedup suffixes (e.g. ':batchUpdate?tab=Sales') before sending to API
+    // These suffixes are only used to make queue keys unique across tab-creation ops
+    const apiPath = op.path.startsWith(':batchUpdate?') ? ':batchUpdate' : op.path;
+
+    const res = await fetch(`${base}${apiPath}`, {
       method: op.method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -168,10 +172,10 @@ async function flushQueue(): Promise<void> {
 }
 
 // ────────── Read with cache ──────────
-export async function cachedRead(path: string, isLog = false): Promise<any> {
+export async function cachedRead(path: string, isLog = false, forceRefresh = false): Promise<any> {
   const cacheKey = `${isLog ? 'log' : 'main'}:${path}`;
   const cached = readCache[cacheKey];
-  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+  if (!forceRefresh && cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     console.log('[SheetsQueue] Cache hit:', path);
     return cached.data;
   }

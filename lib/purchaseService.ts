@@ -848,59 +848,72 @@ export async function deletePurchaseBill(billId: string): Promise<boolean> {
     const filteredAllocations = allocations.filter(a => a.billId !== billId);
     saveLocalData(KEYS.ALLOCATIONS, filteredAllocations);
 
-    // 2. Reallocate & Recalculate Balance (This handles the supplier balance correctly)
+    // 2. Reallocate & Recalculate Balance
     await reallocateAllSupplierPayments(bill.supplierId);
 
-    // 2. Revert Product Stock — reverse the exact qty × unitCost that was added
-    if (bill.items && Array.isArray(bill.items)) {
-        const products = getLocalData<Product>(KEYS.PRODUCTS);
-        let productsModified = false;
+    // 3. Revert Product Stock
+    try {
+        const { fetchPurchaseItemsByPurchaseId, deletePurchaseItemsByPurchaseId } = await import('./googleSheetWriter');
+        
+        console.log(`[PurchaseService] Attempting stock reversal for Bill ID: ${billId} (Bill Number: ${bill.billNumber})`);
+        
+        // Force refresh to get absolute latest rows from sheet
+        const trackedItems = await fetchPurchaseItemsByPurchaseId(billId);
+        
+        console.log(`[PurchaseService] Items found in sheet log:`, trackedItems.length);
 
-        for (const item of bill.items) {
-            const productId = item.productId || item.product_id;
-            const quantity = item.quantity || item.qty || 0;
-            const unitCost = item.unitPrice || item.unit_price || item.cost || 0;
-            if (!productId || quantity <= 0) continue;
+        const itemsToReverse = trackedItems.length > 0 ? trackedItems : (bill.items || []);
 
-            const productIndex = products.findIndex(p => p.id === productId || p.productId === productId);
-            if (productIndex !== -1) {
-                const prod = products[productIndex];
-                const stockBefore = prod.stock || 0;
-                const oldInventoryValue = prod.inventoryValue || ((prod.avgCost || prod.costPrice || 0) * stockBefore);
+        if (itemsToReverse.length > 0) {
+            const products = getLocalData<Product>(KEYS.PRODUCTS);
+            let productsModified = false;
 
-                // Reverse: subtract exactly what was added
-                const newStock = Math.max(0, stockBefore - quantity);
-                const removedValue = quantity * unitCost;
-                const newInventoryValue = Math.max(0, oldInventoryValue - removedValue);
-                const newAvgCost = newStock > 0 ? newInventoryValue / newStock : (prod.avgCost || prod.costPrice || 0);
+            for (const item of itemsToReverse) {
+                const productId = item.productId || item.product_id;
+                const quantity = item.qty || item.quantity || 0;
+                
+                if (!productId || quantity <= 0) continue;
+                console.log(`[PurchaseService] Reversing ${productId}: Qty ${quantity}`);
 
-                products[productIndex] = {
-                    ...prod,
-                    stock: newStock,
-                    avgCost: newAvgCost,
-                    inventoryValue: newInventoryValue,
-                };
-                productsModified = true;
+                const productIndex = products.findIndex(p => p.id === productId || p.productId === productId);
+                if (productIndex !== -1) {
+                    const prod = products[productIndex];
+                    const stockBefore = prod.stock || 0;
+                    
+                    const newStock = Math.max(0, stockBefore - quantity);
+                    
+                    const updatedProd = {
+                        ...prod,
+                        stock: newStock,
+                        updatedAt: new Date()
+                    };
+                    products[productIndex] = updatedProd;
+                    productsModified = true;
 
-                // Sync reversal to Google Sheets
-                const updatedProd = products[productIndex];
-                const effectiveRowIndex = (updatedProd as any).rowIndex as number || 0;
-                if (effectiveRowIndex > 0) {
-                    updateProductInSheet(effectiveRowIndex, updatedProd).catch(e =>
-                        console.warn('[PurchaseService] Stock reversal sync failed:', e)
-                    );
+                    // Sync to CurrentProducts sheet
+                    const { updateProductStockByProductId } = await import('./googleSheetWriter');
+                    await updateProductStockByProductId(updatedProd.productId, updatedProd.name, updatedProd.stock);
+                    
+                    console.log(`[PurchaseService] ✅ Stock Updated for ${prod.name}: ${stockBefore} -> ${newStock}`);
                 } else {
-                    updateProductStockByProductId(updatedProd.productId, updatedProd.name, updatedProd.stock).catch(e =>
-                        console.warn('[PurchaseService] Stock reversal sync fallback failed:', e)
-                    );
+                    console.warn(`[PurchaseService] ❌ Could not find product in local state: ${productId}`);
                 }
             }
+
+            if (productsModified) {
+                saveLocalData(KEYS.PRODUCTS, products);
+                window.dispatchEvent(new Event('storage_products_updated'));
+            }
+        } else {
+            console.warn(`[PurchaseService] ⚠️ No items found to reverse for Bill ${billId}. Items in local bill: ${bill.items?.length || 0}`);
         }
 
-        if (productsModified) {
-            saveLocalData(KEYS.PRODUCTS, products);
-            window.dispatchEvent(new Event('storage_products_updated'));
-        }
+        // 4. Clean up log entries from Purchases tab
+        console.log(`[PurchaseService] Cleaning up sheet log for Bill ${billId}`);
+        await deletePurchaseItemsByPurchaseId(billId);
+        
+    } catch (err) {
+        console.error('[PurchaseService] Error in stock reversal flow:', err);
     }
 
     // 4. Track change to Drive & Sheet
@@ -958,51 +971,80 @@ export async function updatePurchaseBill(
         const products = getLocalData<Product>(KEYS.PRODUCTS);
         let modified = false;
 
-        // Revert old items
+        // Step 2a: Revert old items impact (reverse Qty x UnitCost)
         if (oldBill.items && Array.isArray(oldBill.items)) {
             for (const item of oldBill.items) {
                 const pid = item.productId || item.product_id;
-                if (pid && item.quantity > 0) {
+                const qty = item.quantity || item.qty || 0;
+                const cost = item.unitPrice || item.unit_price || item.cost || 0;
+                if (pid && qty > 0) {
                     const pi = products.findIndex(p => p.id === pid || p.productId === pid);
                     if (pi !== -1) {
-                        products[pi].stock = Math.max(0, (products[pi].stock || 0) - item.quantity);
+                        const prod = products[pi];
+                        const stockBefore = prod.stock || 0;
+                        const oldVal = prod.inventoryValue || ((prod.avgCost || prod.costPrice || 0) * stockBefore);
+                        
+                        const newStock = Math.max(0, stockBefore - qty);
+                        const newVal = Math.max(0, oldVal - (qty * cost));
+                        const newAvg = newStock > 0 ? newVal / newStock : (prod.avgCost || prod.costPrice || 0);
+
+                        products[pi] = { ...prod, stock: newStock, inventoryValue: newVal, avgCost: newAvg };
                         modified = true;
                     }
                 }
             }
         }
-        // Apply new items
+        // Step 2b: Apply new items impact (add Qty x UnitCost)
         for (const item of updates.items) {
             const pid = item.productId || item.product_id;
-            if (pid && item.quantity > 0) {
+            const qty = item.quantity || item.qty || 0;
+            const cost = item.unitPrice || item.unit_price || item.cost || 0;
+            if (pid && qty > 0) {
                 const pi = products.findIndex(p => p.id === pid || p.productId === pid);
                 if (pi !== -1) {
-                    products[pi].stock = (products[pi].stock || 0) + item.quantity;
-                    products[pi].costPrice = item.unitPrice || item.unit_price;
+                    const prod = products[pi];
+                    const stockBefore = prod.stock || 0;
+                    const oldVal = prod.inventoryValue || ((prod.avgCost || prod.costPrice || 0) * stockBefore);
+                    
+                    const newStock = stockBefore + qty;
+                    const newVal = oldVal + (qty * cost);
+                    const newAvg = newStock > 0 ? newVal / newStock : cost;
+
+                    products[pi] = { 
+                        ...prod, 
+                        stock: newStock, 
+                        inventoryValue: newVal, 
+                        avgCost: newAvg,
+                        costPrice: cost // Update last purchase price
+                    };
                     modified = true;
                 }
             }
         }
+
         if (modified) {
             saveLocalData(KEYS.PRODUCTS, products);
             window.dispatchEvent(new Event('storage_products_updated'));
 
             // Sync updated stock to Google Sheet in background
-            for (const item of updates.items) {
-                const pid = item.productId || item.product_id;
-                if (pid && item.quantity > 0) {
-                    const updatedProd = products.find(p => p.id === pid || p.productId === pid);
-                    if (updatedProd) {
-                        const effectiveRowIndex = (updatedProd as any).rowIndex as number || 0;
-                        if (effectiveRowIndex > 0) {
-                            updateProductInSheet(effectiveRowIndex, updatedProd).catch(e =>
-                                console.warn('[PurchaseService] Bill-update stock sync to Sheet failed:', e)
-                            );
-                        } else {
-                            updateProductStockByProductId(updatedProd.productId, updatedProd.name, updatedProd.stock).catch(e =>
-                                console.warn('[PurchaseService] Bill-update stock sync fallback failed:', e)
-                            );
-                        }
+            const affectedIds = new Set([
+                ...(oldBill.items || []).map((i: any) => i.productId || i.product_id),
+                ...updates.items.map(i => i.productId || i.product_id)
+            ]);
+
+            for (const pid of Array.from(affectedIds)) {
+                if (!pid) continue;
+                const updatedProd = products.find(p => p.id === pid || p.productId === pid);
+                if (updatedProd) {
+                    const effectiveRowIndex = (updatedProd as any).rowIndex as number || 0;
+                    if (effectiveRowIndex > 0) {
+                        updateProductInSheet(effectiveRowIndex, updatedProd).catch(e =>
+                            console.warn('[PurchaseService] Bill-update stock sync to Sheet failed:', e)
+                        );
+                    } else {
+                        updateProductStockByProductId(updatedProd.productId, updatedProd.name, updatedProd.stock).catch(e =>
+                            console.warn('[PurchaseService] Bill-update stock sync fallback failed:', e)
+                        );
                     }
                 }
             }

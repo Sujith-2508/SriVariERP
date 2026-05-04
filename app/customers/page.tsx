@@ -15,6 +15,7 @@ import PrintableInvoice from '@/components/PrintableInvoice';
 import { generateStatementPDFBase64 } from '@/lib/pdfGenerator';
 import { deleteAllTabsExcept } from '@/lib/googleSheetDealers';
 import { uploadToWhatsAppFolder } from '@/lib/googleDriveService';
+import { fetchSalesItemsByInvoiceId } from '@/lib/googleSheetWriter';
 
 // ... existing imports
 
@@ -32,6 +33,8 @@ export default function DealerLedger() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDealerId, setSelectedDealerId] = useState<string | null>(null);
     const [selectedInvoice, setSelectedInvoice] = useState<Transaction | null>(null);
+    const [invoiceProducts, setInvoiceProducts] = useState<{ productId: string; productName: string; qty: number }[]>([]);
+    const [loadingInvoiceProducts, setLoadingInvoiceProducts] = useState(false);
     const [whatsappSending, setWhatsappSending] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
     const [whatsappError, setWhatsappError] = useState<string | null>(null);
     const [exportingPdf, setExportingPdf] = useState(false);
@@ -68,6 +71,47 @@ export default function DealerLedger() {
         pinCode: '', gstNumber: '33DIGPM0162N1Z6', panNumber: '', phone: '', email: '',
         bankName: '', bankBranch: '', accountNumber: '', ifscCode: '', accountHolderName: ''
     };
+
+    // Load Products Purchased when an invoice is selected
+    React.useEffect(() => {
+        if (!selectedInvoice) {
+            setInvoiceProducts([]);
+            return;
+        }
+        const referenceId = selectedInvoice.referenceId || '';
+        if (!referenceId) return;
+
+        setLoadingInvoiceProducts(true);
+        fetchSalesItemsByInvoiceId(referenceId)
+            .then(tracked => {
+                if (tracked && tracked.length > 0) {
+                    // From Sales_Tracking sheet: qty is stored as negative for sales
+                    setInvoiceProducts(tracked.map(t => ({
+                        productId: t.productId,
+                        productName: t.productName,
+                        qty: Math.abs(t.qty),
+                    })));
+                } else {
+                    // Fallback: use items embedded in the transaction
+                    const fallback = (selectedInvoice.items || []).map(item => ({
+                        productId: item.productId,
+                        productName: item.productName,
+                        qty: Math.abs(item.quantity),
+                    }));
+                    setInvoiceProducts(fallback);
+                }
+            })
+            .catch(() => {
+                // On error, fall back to embedded items
+                const fallback = (selectedInvoice.items || []).map(item => ({
+                    productId: item.productId,
+                    productName: item.productName,
+                    qty: Math.abs(item.quantity),
+                }));
+                setInvoiceProducts(fallback);
+            })
+            .finally(() => setLoadingInvoiceProducts(false));
+    }, [selectedInvoice]);
 
     // Load Company Settings
     React.useEffect(() => {
@@ -1001,6 +1045,75 @@ export default function DealerLedger() {
                             </div>
                         );
                     })()}
+
+                    {/* Products Purchased Card */}
+                    <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">
+                        <div className="p-4 text-white bg-emerald-700">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+                                    <h3 className="font-bold">Products Purchased</h3>
+                                </div>
+                                <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-bold">
+                                    {loadingInvoiceProducts ? '...' : `${invoiceProducts.length} item${invoiceProducts.length !== 1 ? 's' : ''}`}
+                                </span>
+                            </div>
+                            <p className="mt-1 text-sm text-emerald-100">Products the dealer purchased under this invoice</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                            {loadingInvoiceProducts ? (
+                                <div className="flex items-center justify-center gap-3 p-8 text-slate-400">
+                                    <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                                    <span className="text-sm">Loading products...</span>
+                                </div>
+                            ) : invoiceProducts.length === 0 ? (
+                                <div className="flex flex-col items-center gap-2 p-8 text-slate-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-30"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+                                    <p className="text-sm">No product data tracked for this invoice yet</p>
+                                    <p className="text-xs text-slate-300">New invoices will auto-track products in Sales_Tracking</p>
+                                </div>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <thead className="border-b bg-slate-50 border-slate-200">
+                                        <tr>
+                                            <th className="p-4 font-semibold text-left text-slate-500">#</th>
+                                            <th className="p-4 font-semibold text-left text-slate-500">Product ID</th>
+                                            <th className="p-4 font-semibold text-left text-slate-500">Product Name</th>
+                                            <th className="p-4 font-semibold text-right text-slate-500">Qty</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {invoiceProducts.map((p, idx) => (
+                                            <tr key={idx} className="transition-colors hover:bg-blue-50/40">
+                                                <td className="p-4 text-slate-400 font-medium">{idx + 1}</td>
+                                                <td className="p-4">
+                                                    <span className="px-2 py-1 font-mono text-xs font-bold rounded bg-slate-100 text-slate-600">
+                                                        {p.productId}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 font-medium text-slate-800">{p.productName}</td>
+                                                <td className="p-4 text-right">
+                                                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
+                                                        {p.qty} units
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    {invoiceProducts.length > 0 && (
+                                        <tfoot className="border-t-2 bg-slate-50 border-slate-200">
+                                            <tr>
+                                                <td colSpan={3} className="p-4 font-bold text-slate-700">Total Units Purchased</td>
+                                                <td className="p-4 text-right font-bold text-emerald-700">
+                                                    {invoiceProducts.reduce((acc, p) => acc + p.qty, 0)} units
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    )}
+                                </table>
+                            )}
+                        </div>
+                    </div>
 
                     {/* Payment History Table */}
                     <div className="mb-6 overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200">

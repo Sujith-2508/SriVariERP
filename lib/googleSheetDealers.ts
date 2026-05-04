@@ -146,22 +146,42 @@ async function dealerRead(path: string): Promise<any> {
     localStorage.setItem(LAST_REQ_KEY, String(Date.now()));
 
     const token = await getDealerToken();
-    const res = await fetch(`${DEAL_SHEETS_BASE}${path}`, {
-        headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.status === 429) {
-        console.warn('[SheetsDealers] 429 on read — serving stale cache or skipping:', path);
-        if (cached) return cached.data;
-        return null; // gracefully return null instead of throwing
+    // --- Retry Logic for Transient 5xx Errors ---
+    let retries = 0;
+    const MAX_RETRIES = 3;
+    
+    while (retries < MAX_RETRIES) {
+        try {
+            const token = await getDealerToken();
+            const res = await fetch(`${DEAL_SHEETS_BASE}${path}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (res.status === 429 || res.status >= 500) {
+                const isRateLimit = res.status === 429;
+                retries++;
+                const delay = isRateLimit ? 5000 : 2000 * retries;
+                console.warn(`[SheetsDealers] ${res.status} error. Retry ${retries}/${MAX_RETRIES} in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+
+            if (!res.ok) {
+                const txt = await res.text();
+                console.error('[SheetsDealers] Read error', res.status, txt.slice(0, 200));
+                return null;
+            }
+
+            const data = await res.json();
+            dealerReadCache[cacheKey] = { data, ts: Date.now() };
+            return data;
+        } catch (err) {
+            retries++;
+            if (retries >= MAX_RETRIES) throw err;
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
     }
-    if (!res.ok) {
-        const txt = await res.text();
-        console.error('[SheetsDealers] Read error', res.status, txt.slice(0, 200));
-        return null;
-    }
-    const data = await res.json();
-    dealerReadCache[cacheKey] = { data, ts: Date.now() };
-    return data;
+    return null;
 }
 
 /** Enqueue a write to the DEALERS spreadsheet.

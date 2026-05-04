@@ -49,17 +49,45 @@ function productToRow(product: Product | any): string[] {
 // Tab names for transaction logs
 const PURCHASES_LOG_TAB = 'Purchases';
 const SALES_LOG_TAB = 'Sales';
+const SALES_TRACKING_TAB = 'Sales_Tracking';
+
 const PURCHASES_HEADER = ['Timestamp', 'PurchaseId', 'Supplier', 'ProductId', 'ProductName', 'Qty', 'UnitCost', 'TotalCost', 'StockBefore', 'StockAfter', 'AvgCostAfter', 'InventoryValueAfter'];
 const SALES_HEADER = ['Timestamp', 'InvoiceId', 'Dealer', 'ProductId', 'ProductName', 'Qty', 'UnitPrice', 'AvgCostAtSale', 'COGS', 'StockBefore', 'StockAfter', 'InventoryValueAfter'];
+const SALES_TRACKING_HEADER = ['TimeStamp', 'Invoice No.', 'dealerName', 'Product ID', 'productName', 'Stock'];
+
+// ── Track which log tabs have been initialized this session (avoids queue dedup collision) ──
+const INITIALIZED_TABS_KEY = 'sve_initialized_log_tabs';
+
+function isTabInitialized(name: string): boolean {
+    try {
+        const list: string[] = JSON.parse(localStorage.getItem(INITIALIZED_TABS_KEY) || '[]');
+        return list.includes(name);
+    } catch { return false; }
+}
+
+function markTabInitialized(name: string): void {
+    try {
+        const list: string[] = JSON.parse(localStorage.getItem(INITIALIZED_TABS_KEY) || '[]');
+        if (!list.includes(name)) {
+            list.push(name);
+            localStorage.setItem(INITIALIZED_TABS_KEY, JSON.stringify(list));
+        }
+    } catch {}
+}
 
 /** Ensure the Purchases log tab exists with its header row (safe to call multiple times). */
 export function ensurePurchasesTabExists(): void {
-    ensureTabExistsWithName(PURCHASES_LOG_TAB, PURCHASES_HEADER);
+    ensureTabExistsWithName(PURCHASES_LOG_TAB, PURCHASES_HEADER, true);
 }
 
 /** Ensure the Sales log tab exists with its header row (safe to call multiple times). */
 export function ensureSalesTabExists(): void {
-    ensureTabExistsWithName(SALES_LOG_TAB, SALES_HEADER);
+    ensureTabExistsWithName(SALES_LOG_TAB, SALES_HEADER, true);
+}
+
+/** Ensure the Sales_Tracking tab exists with its header row (safe to call multiple times). */
+export function ensureSalesTrackingTabExists(): void {
+    ensureTabExistsWithName(SALES_TRACKING_TAB, SALES_TRACKING_HEADER);
 }
 
 /** Log a single purchase line-item to the Purchases tab. */
@@ -92,8 +120,46 @@ export function logPurchaseItemToSheet(params: {
     enqueueOp(
         `/values/${PURCHASES_LOG_TAB}!A:L:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
         'POST',
-        { values: [row] }
+        { values: [row] },
+        true // isLog
     );
+}
+
+/** Fetch all tracked items for a specific purchase from the Purchases tab. */
+export async function fetchPurchaseItemsByPurchaseId(purchaseId: string): Promise<any[]> {
+    try {
+        // Force refresh to ensure we see the latest rows for deletion
+        const data = await cachedRead(`/values/${PURCHASES_LOG_TAB}!A:L`, true, true); 
+        const rows: string[][] = data.values || [];
+        if (rows.length <= 1) return [];
+
+        return rows.slice(1)
+            .filter(r => r[1] === purchaseId)
+            .map(r => ({
+                purchaseId: r[1],
+                productId: r[3],
+                productName: r[4],
+                qty: parseFloat(r[5]) || 0,
+            }));
+    } catch (err) {
+        console.warn('[SheetsWriter] Failed to fetch purchase items for', purchaseId, err);
+        return [];
+    }
+}
+
+/** Delete all rows in Purchases tab matching a purchaseId. */
+export async function deletePurchaseItemsByPurchaseId(purchaseId: string): Promise<void> {
+    try {
+        const data = await cachedRead(`/values/${PURCHASES_LOG_TAB}!A:B`, true, true);
+        const rows: string[][] = data.values || [];
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][1] === purchaseId) {
+                clearRowInSheet(PURCHASES_LOG_TAB, i + 1, 12, true); 
+            }
+        }
+    } catch (err) {
+        console.warn('[SheetsWriter] Failed to delete purchase items for', purchaseId, err);
+    }
 }
 
 /** Log a single sale line-item to the Sales tab. */
@@ -127,8 +193,70 @@ export function logSaleItemToSheet(params: {
     enqueueOp(
         `/values/${SALES_LOG_TAB}!A:L:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
         'POST',
-        { values: [row] }
+        { values: [row] },
+        true // isLog
     );
+}
+
+/** Log multiple line-items to Sales_tracking specifically for reversal logic. 
+ * stock is negative for sales, positive for reversals.
+ */
+export function logSalesItemsToTracking(invoiceId: string, dealerName: string, items: any[], isReversal = false): void {
+    if (!items || items.length === 0) return;
+    ensureSalesTrackingTabExists();
+    const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const rows = items.map(item => {
+        const qty = Number(item.quantity || item.qty || item.stock || 0);
+        const movement = isReversal ? Math.abs(qty) : -Math.abs(qty);
+        return [
+            timestamp,
+            invoiceId,
+            dealerName,
+            item.productId || item.product_id,
+            item.productName || item.name,
+            String(movement)
+        ];
+    });
+    appendRowsToSheet(SALES_TRACKING_TAB, rows);
+}
+
+/** Fetch all tracked items for a specific invoice from Sales_tracking. */
+export async function fetchSalesItemsByInvoiceId(invoiceId: string): Promise<any[]> {
+    try {
+        const data = await cachedRead(`/values/${SALES_TRACKING_TAB}!A:F`);
+        const rows: string[][] = data.values || [];
+        if (rows.length <= 1) return []; // only header or empty
+
+        return rows.slice(1) // skip header
+            .filter(r => r[1] === invoiceId) // invoiceId is now index 1
+            .map(r => ({
+                timeStamp: r[0],
+                invoiceId: r[1],
+                dealerName: r[2],
+                productId: r[3],
+                productName: r[4],
+                qty: parseFloat(r[5]) || 0
+            }));
+    } catch (err) {
+        console.warn('[SheetsWriter] Failed to fetch sales tracking for', invoiceId, err);
+        return [];
+    }
+}
+
+/** Delete all rows in Sales_tracking matching an invoiceId. */
+export async function deleteSalesItemsByInvoiceId(invoiceId: string): Promise<void> {
+    try {
+        const data = await cachedRead(`/values/${SALES_TRACKING_TAB}!A:B`);
+        const rows: string[][] = data.values || [];
+        // We find matching rows and clear them
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][1] === invoiceId) { // Check column B (index 1) for Invoice ID
+                clearRowInSheet(SALES_TRACKING_TAB, i + 1, 6); // Clear 6 columns (A-F)
+            }
+        }
+    } catch (err) {
+        console.warn('[SheetsWriter] Failed to delete sales tracking for', invoiceId, err);
+    }
 }
 
 // ──────────── READ — served from cache, real API only when needed ────────────
@@ -180,7 +308,7 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
             name:      headers.findIndex(h => h.includes('product name') || h === 'name'),
             hsn:       headers.findIndex(h => h.includes('hsn')),
             unit:      headers.findIndex(h => h === 'unit' || (h.includes('unit') && !h.includes('cost'))),
-            cost:      headers.findIndex(h => h.includes('cost')),
+            cost:      headers.findIndex(h => h.includes('cost price') || (h.includes('cost') && !h.includes('avg'))),
             price:     headers.findIndex(h => (h.includes('selling') || h.includes('sell')) || (h.includes('price') && !h.includes('cost'))),
             gst:       headers.findIndex(h => h.includes('gst')),
             stock:     headers.findIndex(h => h.includes('stock')),
@@ -206,20 +334,12 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
         const startRow = 3;
         for (let i = startRow; i < rows.length; i++) {
             const row = rows[i] || [];
-            const name = col.name >= 0 ? (row[col.name] || '').trim() : '';
-            if (!name) continue;
-
-            // Skip title rows/category-only rows (detect by missing unit/price/id or starting with "RAJA" etc.)
+            
+            // User requested: Extract only rows where productId is NOT empty
             const idValue = col.productId >= 0 ? (row[col.productId] || '').trim() : '';
-            const unitValue = col.unit >= 0 ? (row[col.unit] || '').trim().toLowerCase() : '';
-            
-            // Heuristic for data-row: must have a unit OR a numeric ID OR a price
-            const isDataRow = (unitValue && unitValue.length <= 4) || 
-                              (idValue && (idValue.startsWith('P') || /\d/.test(idValue))) ||
-                              (col.price >= 0 && parseNum(row[col.price]) > 0);
-            
-            if (!isDataRow) continue;
+            if (!idValue) continue;
 
+            const name = col.name >= 0 ? (row[col.name] || '').trim() : '';
             const productId = idValue || `P${String(num).padStart(3,'0')}`;
             const rawGst = col.gst >= 0 ? parseNum(row[col.gst]) : 0;
             const gstRate = rawGst > 0 && rawGst < 1 ? rawGst * 100 : rawGst;
@@ -246,7 +366,7 @@ export async function readProductsFromSheet(forceRefresh = false): Promise<{ pro
         localStorage.setItem('sve_products_cache_ts', String(Date.now()));
         localStorage.setItem('sve_products_tab', SHEET_NAME);
 
-        console.log('[SheetsWriter] Loaded', products.length, 'products from API');
+        console.log('[SheetsWriter] Loaded', products.length, 'products from API (strictly by ProductId)');
         return { products, format: 'structured' };
 
     } catch (err: any) {
@@ -370,8 +490,11 @@ export async function findRowByValue(sheetName: string, columnIndex: number, val
         const colLetter = String.fromCharCode(65 + columnIndex);
         const data = await cachedRead(`/values/${sheetName}!${colLetter}:${colLetter}`);
         const rows: string[][] = data.values || [];
+        const searchVal = String(value).trim().toLowerCase();
+        
         for (let i = 0; i < rows.length; i++) {
-            if (rows[i][0]?.trim() === value?.trim()) return i + 1;
+            const cellVal = String(rows[i][0] || '').trim().toLowerCase();
+            if (cellVal === searchVal) return i + 1;
         }
         return -1;
     } catch (e) {
@@ -402,12 +525,16 @@ export async function clearRowInSheet(sheetName: string, rowIndex: number, colum
 
 // ──────────── Tab management (direct calls — one-off operations) ────────────
 export async function ensureTabExistsWithName(name: string, headerRow?: string[], isLog = false): Promise<void> {
-    // Queued as a batchUpdate — if it fails it will be retried
-    // We skip the "check if tab exists" read to save quota; the API will do nothing if tab already exists
-    // Actually we enqueue a read-check + create as a no-op guard via a separate queue entry
-    // Simplest: just try to create, ignore "already exists" error in queue processor
+    // Guard: only enqueue tab creation ONCE per session per tab name.
+    // This prevents the queue deduplication bug where multiple calls to this function
+    // with the same path (':batchUpdate' POST) collapse into one, losing the header write.
+    if (isTabInitialized(name)) return;
+    markTabInitialized(name);
+
+    // Use a unique path suffix per tab name so the queue dedup key is unique
+    // (prevents Sales batchUpdate from being deduped against Purchases batchUpdate)
     enqueueOp(
-        ':batchUpdate',
+        `:batchUpdate?tab=${encodeURIComponent(name)}`,
         'POST',
         { requests: [{ addSheet: { properties: { title: name } } }] },
         isLog
@@ -453,22 +580,27 @@ export async function updateProductStockByProductId(
     newStock: number
 ): Promise<boolean> {
     try {
+        const cleanId = String(productId).trim();
+        const cleanName = String(productName).trim();
+
         // 1. Search by productId in column A
-        let row = await findRowByValue(SHEET_NAME, 0, productId);
+        let row = await findRowByValue(SHEET_NAME, 0, cleanId);
+        
         // 2. Fallback: search by name in column B
-        if (row < 0 && productName) {
-            row = await findRowByValue(SHEET_NAME, 1, productName);
+        if (row < 0 && cleanName) {
+            row = await findRowByValue(SHEET_NAME, 1, cleanName);
         }
+
         if (row > 0) {
             enqueueOp(
                 `/values/${SHEET_NAME}!H${row}?valueInputOption=USER_ENTERED`,
                 'PUT',
                 { values: [[String(newStock)]] }
             );
-            console.log('[SheetsWriter] Stock-only update queued for', productId, '→ row', row, '=', newStock);
+            console.log('[SheetsWriter] Dynamic stock update queued for:', cleanId, '/', cleanName, '→ row', row, '=', newStock);
             return true;
         }
-        console.warn('[SheetsWriter] updateProductStockByProductId: product not found in sheet:', productId, productName);
+        console.warn('[SheetsWriter] Could not find product to update stock. Tried:', cleanId, 'and', cleanName);
         return false;
     } catch (err: any) {
         console.error('[SheetsWriter] updateProductStockByProductId failed:', err.message);
